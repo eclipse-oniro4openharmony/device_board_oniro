@@ -3,8 +3,7 @@
     "parts": {
         "oniro_products": {
             "module_list": [
-                "//device/board/${product_company}/${device_name}:qemu_group",
-                "//vendor/oniro/${product_name}/bluetooth:libbt_vendor"
+                "//device/board/${product_company}/${device_name}:qemu_group"
             ]
         }
     }
