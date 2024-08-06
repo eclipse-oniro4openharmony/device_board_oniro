@@ -19,13 +19,6 @@ ohos_prebuilt_etc("init.without_two_stages.cfg") {
   install_enable = true
 }
 
-ohos_prebuilt_etc("init.qemu.cfg") {
-  source = "init.qemu.cfg"
-  part_name = "oniro_products"
-  install_images = [ vendor_base_dir ]
-  install_enable = true
-}
-
 ohos_prebuilt_etc("init.qemu.usb.cfg") {
   source = "init.qemu.usb.cfg"
   part_name = "oniro_products"
@@ -47,21 +40,11 @@ ohos_prebuilt_etc("fstab.required") {
   install_enable = true
 }
 
-ohos_prebuilt_executable("init.modprobe.sh") {
-  install_enable = true
-  source = "init.modprobe.sh"
-  module_install_dir = "etc/init"
-  install_images = [ vendor_base_dir ]
-  part_name = "oniro_products"
-}
-
 group("init_configs") {
   deps = [
     ":fstab.required",
     ":fstab.qemu",
     ":init.without_two_stages.cfg",
-    ":init.qemu.cfg",
-    ":init.qemu.usb.cfg",
-    ":init.modprobe.sh",
+    ":init.qemu.usb.cfg"
   ]
 }
