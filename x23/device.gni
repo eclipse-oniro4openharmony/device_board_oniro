@@ -12,7 +12,7 @@
 # limitations under the License.
 
 soc_company = "oniro"
-soc_name = "qemu"
+soc_name = "mt6789"
 
 import("//device/soc/${soc_company}/${soc_name}/soc.gni")
 
