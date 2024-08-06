@@ -18,8 +18,6 @@ group("qemu_group") {
   deps = [
     "cfg:init_configs",
     "distributedhardware:distributedhardware",
-    "//device/soc/oniro/qemu/hardware:hardware_group",
-    "//vendor/oniro/qemu/bluetooth:libbt_vendor",
-    "//vendor/${product_company}/qemu/sample:sample_group"
+    "//device/soc/oniro/qemu/hardware:hardware_group"
   ]
 }
