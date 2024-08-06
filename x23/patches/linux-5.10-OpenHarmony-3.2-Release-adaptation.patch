@@ -1,0 +1,6255 @@
+From 85c3a7c5bf59856de8deb65b8dff8ffead776b88 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham@huawei.com>
+Date: Fri, 28 Jun 2024 15:20:06 +0200
+Subject: [PATCH] OpenHarmony 3.2 Release adaptation
+
+apply OpenHarmony adaptation code for  accesstokenid, blackbox,
+hievent, hilog, hisysevent, hungtask, zerohung
+---
+ drivers/Kconfig                               |    3 +
+ drivers/Makefile                              |    2 +
+ drivers/accesstokenid/Kconfig                 |    5 +
+ drivers/accesstokenid/Makefile                |    2 +
+ drivers/accesstokenid/access_tokenid.c        |  180 +++
+ drivers/accesstokenid/access_tokenid.h        |   34 +
+ drivers/android/Kconfig                       |    7 +
+ drivers/android/binder.c                      |  255 +++-
+ drivers/android/binder_internal.h             |   12 +
+ drivers/staging/Kconfig                       |   12 +
+ drivers/staging/Makefile                      |    6 +
+ drivers/staging/blackbox/Kconfig              |  108 ++
+ drivers/staging/blackbox/Makefile             |    5 +
+ drivers/staging/blackbox/blackbox_common.c    |  270 +++++
+ drivers/staging/blackbox/blackbox_core.c      |  596 ++++++++++
+ drivers/staging/blackbox/blackbox_storage.c   |  203 ++++
+ drivers/staging/hievent/Kconfig               |   12 +
+ drivers/staging/hievent/Makefile              |    2 +
+ drivers/staging/hievent/hievent_driver.c      |  416 +++++++
+ drivers/staging/hievent/hievent_driver.h      |   22 +
+ drivers/staging/hievent/hiview_hievent.c      |  488 ++++++++
+ drivers/staging/hievent/hiview_hievent.h      |   34 +
+ drivers/staging/hilog/Kconfig                 |   22 +
+ drivers/staging/hilog/Makefile                |    5 +
+ drivers/staging/hilog/hilog.c                 |  402 +++++++
+ drivers/staging/hisysevent/Kconfig            |    6 +
+ drivers/staging/hisysevent/Makefile           |    2 +
+ .../staging/hisysevent/hiview_hisysevent.c    |  519 +++++++++
+ drivers/staging/hungtask/Kconfig              |   14 +
+ drivers/staging/hungtask/Makefile             |    3 +
+ drivers/staging/hungtask/hungtask_base.c      | 1031 +++++++++++++++++
+ drivers/staging/hungtask/hungtask_user.c      |  260 +++++
+ drivers/staging/hungtask/hungtask_user.h      |   37 +
+ drivers/staging/zerohung/Kconfig              |    7 +
+ drivers/staging/zerohung/Makefile             |    2 +
+ drivers/staging/zerohung/watchpoint/Makefile  |    2 +
+ .../zerohung/watchpoint/hung_wp_screen.c      |  299 +++++
+ drivers/staging/zerohung/zrhung_event.c       |   34 +
+ include/dfx/hiview_hisysevent.h               |   67 ++
+ include/dfx/hung_wp_screen.h                  |   24 +
+ include/dfx/hungtask_base.h                   |  111 ++
+ include/dfx/zrhung.h                          |   11 +
+ include/linux/blackbox.h                      |   84 ++
+ include/linux/blackbox_common.h               |   44 +
+ include/linux/blackbox_storage.h              |   22 +
+ include/linux/sched.h                         |    6 +
+ include/linux/uidgid.h                        |    4 +
+ include/uapi/linux/android/binder.h           |   14 +
+ kernel/fork.c                                 |    4 +
+ 49 files changed, 5708 insertions(+), 2 deletions(-)
+ create mode 100644 drivers/accesstokenid/Kconfig
+ create mode 100644 drivers/accesstokenid/Makefile
+ create mode 100644 drivers/accesstokenid/access_tokenid.c
+ create mode 100644 drivers/accesstokenid/access_tokenid.h
+ create mode 100644 drivers/staging/blackbox/Kconfig
+ create mode 100644 drivers/staging/blackbox/Makefile
+ create mode 100644 drivers/staging/blackbox/blackbox_common.c
+ create mode 100644 drivers/staging/blackbox/blackbox_core.c
+ create mode 100644 drivers/staging/blackbox/blackbox_storage.c
+ create mode 100644 drivers/staging/hievent/Kconfig
+ create mode 100644 drivers/staging/hievent/Makefile
+ create mode 100644 drivers/staging/hievent/hievent_driver.c
+ create mode 100644 drivers/staging/hievent/hievent_driver.h
+ create mode 100644 drivers/staging/hievent/hiview_hievent.c
+ create mode 100644 drivers/staging/hievent/hiview_hievent.h
+ create mode 100644 drivers/staging/hilog/Kconfig
+ create mode 100644 drivers/staging/hilog/Makefile
+ create mode 100644 drivers/staging/hilog/hilog.c
+ create mode 100644 drivers/staging/hisysevent/Kconfig
+ create mode 100644 drivers/staging/hisysevent/Makefile
+ create mode 100644 drivers/staging/hisysevent/hiview_hisysevent.c
+ create mode 100644 drivers/staging/hungtask/Kconfig
+ create mode 100644 drivers/staging/hungtask/Makefile
+ create mode 100644 drivers/staging/hungtask/hungtask_base.c
+ create mode 100644 drivers/staging/hungtask/hungtask_user.c
+ create mode 100644 drivers/staging/hungtask/hungtask_user.h
+ create mode 100644 drivers/staging/zerohung/Kconfig
+ create mode 100644 drivers/staging/zerohung/Makefile
+ create mode 100644 drivers/staging/zerohung/watchpoint/Makefile
+ create mode 100644 drivers/staging/zerohung/watchpoint/hung_wp_screen.c
+ create mode 100644 drivers/staging/zerohung/zrhung_event.c
+ create mode 100644 include/dfx/hiview_hisysevent.h
+ create mode 100644 include/dfx/hung_wp_screen.h
+ create mode 100644 include/dfx/hungtask_base.h
+ create mode 100644 include/dfx/zrhung.h
+ create mode 100644 include/linux/blackbox.h
+ create mode 100644 include/linux/blackbox_common.h
+ create mode 100644 include/linux/blackbox_storage.h
+
+diff --git a/drivers/Kconfig b/drivers/Kconfig
+index dcecc9f6e..bdf64d453 100644
+--- a/drivers/Kconfig
++++ b/drivers/Kconfig
+@@ -235,4 +235,7 @@ source "drivers/interconnect/Kconfig"
+ source "drivers/counter/Kconfig"
+ 
+ source "drivers/most/Kconfig"
++
++source "drivers/accesstokenid/Kconfig"
++
+ endmenu
+diff --git a/drivers/Makefile b/drivers/Makefile
+index 576228037..cf12049f0 100644
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -189,3 +189,5 @@ obj-$(CONFIG_GNSS)		+= gnss/
+ obj-$(CONFIG_INTERCONNECT)	+= interconnect/
+ obj-$(CONFIG_COUNTER)		+= counter/
+ obj-$(CONFIG_MOST)		+= most/
++
++obj-$(CONFIG_ACCESS_TOKENID)	+= accesstokenid/
+diff --git a/drivers/accesstokenid/Kconfig b/drivers/accesstokenid/Kconfig
+new file mode 100644
+index 000000000..30d2957a1
+--- /dev/null
++++ b/drivers/accesstokenid/Kconfig
+@@ -0,0 +1,5 @@
++# SPDX-License-Identifier: GPL-2.0
++config ACCESS_TOKENID
++	bool "Access task's token"
++	default n
++
+diff --git a/drivers/accesstokenid/Makefile b/drivers/accesstokenid/Makefile
+new file mode 100644
+index 000000000..738a550f8
+--- /dev/null
++++ b/drivers/accesstokenid/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0-only
++obj-$(CONFIG_ACCESS_TOKENID)		+= access_tokenid.o
+diff --git a/drivers/accesstokenid/access_tokenid.c b/drivers/accesstokenid/access_tokenid.c
+new file mode 100644
+index 000000000..e7bae802c
+--- /dev/null
++++ b/drivers/accesstokenid/access_tokenid.c
+@@ -0,0 +1,180 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * access_tokenid.c
++ *
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ *
++ */
++
++#define pr_fmt(fmt) "access_token_id: " fmt
++
++#include <linux/errno.h>
++#include <linux/fs.h>
++#include <linux/miscdevice.h>
++#include <linux/module.h>
++#include <linux/sched.h>
++#include "access_tokenid.h"
++
++int access_tokenid_get_tokenid(struct file *file, void __user *uarg)
++{
++	return copy_to_user(uarg, &current->token,
++			    sizeof(current->token)) ? -EFAULT : 0;
++}
++
++static bool check_permission_for_set_tokenid(struct file *file)
++{
++	kuid_t uid = current_uid();
++	struct inode *inode = file->f_inode;
++
++	if (inode == NULL) {
++		pr_err("%s: file inode is null\n", __func__);
++		return false;
++	}
++
++	if (uid_eq(uid, GLOBAL_ROOT_UID) ||
++	    uid_eq(uid, inode->i_uid)) {
++		return true;
++	}
++
++	return false;
++}
++
++int access_tokenid_set_tokenid(struct file *file, void __user *uarg)
++{
++	unsigned long long tmp = 0;
++
++	if (!check_permission_for_set_tokenid(file))
++		return -EPERM;
++
++	if (copy_from_user(&tmp, uarg, sizeof(tmp)))
++		return -EFAULT;
++
++	current->token = tmp;
++	return 0;
++}
++
++static bool check_permission_for_ftokenid(struct file *file)
++{
++	int i;
++	struct group_info *group_info;
++	kuid_t uid = current_uid();
++	struct inode *inode = file->f_inode;
++
++	if (inode == NULL) {
++		pr_err("%s: file inode is null\n", __func__);
++		return false;
++	}
++
++	if (uid_eq(uid, GLOBAL_ROOT_UID))
++		return true;
++
++	group_info = get_current_groups();
++	for (i = 0; i < group_info->ngroups; i++) {
++		kgid_t gid = group_info->gid[i];
++
++		if (gid_eq(gid, inode->i_gid)) {
++			put_group_info(group_info);
++			return true;
++		}
++	}
++
++	put_group_info(group_info);
++	return false;
++}
++
++int access_tokenid_get_ftokenid(struct file *file, void __user *uarg)
++{
++	if (!check_permission_for_ftokenid(file))
++		return -EPERM;
++
++	return copy_to_user(uarg, &current->ftoken,
++			    sizeof(current->ftoken)) ? -EFAULT : 0;
++}
++
++int access_tokenid_set_ftokenid(struct file *file, void __user *uarg)
++{
++	unsigned long long tmp = 0;
++
++	if (!check_permission_for_ftokenid(file))
++		return -EPERM;
++
++	if (copy_from_user(&tmp, uarg, sizeof(tmp)))
++		return -EFAULT;
++
++	current->ftoken = tmp;
++	return 0;
++}
++
++typedef int (*access_token_id_func)(struct file *file, void __user *arg);
++
++static access_token_id_func g_func_array[ACCESS_TOKENID_MAX_NR] = {
++	NULL, /* reserved */
++	access_tokenid_get_tokenid,
++	access_tokenid_set_tokenid,
++	access_tokenid_get_ftokenid,
++	access_tokenid_set_ftokenid,
++};
++
++static long access_tokenid_ioctl(struct file *file, unsigned int cmd,
++				 unsigned long arg)
++{
++	void __user *uarg = (void __user *)arg;
++	unsigned int func_cmd = _IOC_NR(cmd);
++
++	if (uarg == NULL) {
++		pr_err("%s: invalid user uarg\n", __func__);
++		return -EINVAL;
++	}
++
++	if (_IOC_TYPE(cmd) != ACCESS_TOKEN_ID_IOCTL_BASE) {
++		pr_err("%s: access tokenid magic fail, TYPE=%d\n",
++		       __func__, _IOC_TYPE(cmd));
++		return -EINVAL;
++	}
++
++	if (func_cmd >= ACCESS_TOKENID_MAX_NR) {
++		pr_err("%s: access tokenid cmd error, cmd:%d\n",
++			__func__, func_cmd);
++		return -EINVAL;
++	}
++
++	if (g_func_array[func_cmd])
++		return (*g_func_array[func_cmd])(file, uarg);
++
++	return -EINVAL;
++}
++
++static const struct file_operations access_tokenid_fops = {
++	.owner		= THIS_MODULE,
++	.unlocked_ioctl	= access_tokenid_ioctl,
++	.compat_ioctl	= access_tokenid_ioctl,
++};
++
++static struct miscdevice access_tokenid_device = {
++	.minor	= MISC_DYNAMIC_MINOR,
++	.name	= "access_token_id",
++	.fops	= &access_tokenid_fops,
++};
++
++static int access_tokenid_init_module(void)
++{
++	int err;
++
++	err = misc_register(&access_tokenid_device);
++	if (err < 0) {
++		pr_err("access_tokenid register failed\n");
++		return err;
++	}
++
++	pr_info("access_tokenid init success\n");
++	return 0;
++}
++
++static void access_tokenid_exit_module(void)
++{
++	misc_deregister(&access_tokenid_device);
++}
++
++/* module entry points */
++module_init(access_tokenid_init_module);
++module_exit(access_tokenid_exit_module);
+diff --git a/drivers/accesstokenid/access_tokenid.h b/drivers/accesstokenid/access_tokenid.h
+new file mode 100644
+index 000000000..318b54831
+--- /dev/null
++++ b/drivers/accesstokenid/access_tokenid.h
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * access_tokenid.h
++ *
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ *
++ */
++
++#ifndef _ACCESS_TOKEN_ID_H
++#define _ACCESS_TOKEN_ID_H
++
++#include <linux/ioctl.h>
++#include <linux/types.h>
++
++#define	ACCESS_TOKEN_ID_IOCTL_BASE	'A'
++
++enum {
++	GET_TOKEN_ID = 1,
++	SET_TOKEN_ID,
++	GET_FTOKEN_ID,
++	SET_FTOKEN_ID,
++	ACCESS_TOKENID_MAX_NR
++};
++
++#define	ACCESS_TOKENID_GET_TOKENID \
++	_IOR(ACCESS_TOKEN_ID_IOCTL_BASE, GET_TOKEN_ID, unsigned long long)
++#define	ACCESS_TOKENID_SET_TOKENID \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, SET_TOKEN_ID, unsigned long long)
++#define	ACCESS_TOKENID_GET_FTOKENID \
++	_IOR(ACCESS_TOKEN_ID_IOCTL_BASE, GET_FTOKEN_ID, unsigned long long)
++#define	ACCESS_TOKENID_SET_FTOKENID \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, SET_FTOKEN_ID, unsigned long long)
++
++#endif /* _ACCESS_TOKEN_ID_H */
+diff --git a/drivers/android/Kconfig b/drivers/android/Kconfig
+index 811f70d7a..5427e6bbd 100644
+--- a/drivers/android/Kconfig
++++ b/drivers/android/Kconfig
+@@ -120,6 +120,13 @@ config ANDROID_VENDOR_OEM_DATA
+ 
+ 	  If even slightly unsure, say Y.
+ 
++config BINDER_TRANSACTION_PROC_BRIEF
++	  bool "Brief debug info for binder transaction and proc"
++	  depends on ANDROID_BINDER_IPC
++	  default n
++	  help
++  
++		Enable binder optimization
+ endif # if ANDROID
+ 
+ endmenu
+diff --git a/drivers/android/binder.c b/drivers/android/binder.c
+index 907647594..fe9e5a532 100644
+--- a/drivers/android/binder.c
++++ b/drivers/android/binder.c
+@@ -66,6 +66,10 @@
+ #include <linux/syscalls.h>
+ #include <linux/task_work.h>
+ #include <linux/sizes.h>
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++#include <linux/trace_clock.h>
++#include <linux/proc_fs.h>
++#endif
+ #include <linux/android_vendor.h>
+ 
+ #include <uapi/linux/sched/types.h>
+@@ -94,8 +98,22 @@ static atomic_t binder_last_id;
+ static int proc_show(struct seq_file *m, void *unused);
+ DEFINE_SHOW_ATTRIBUTE(proc);
+ 
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++static int binder_transaction_proc_show(struct seq_file *m, void *unused);
++DEFINE_PROC_SHOW_ATTRIBUTE(binder_transaction_proc);
++#endif
++
+ #define FORBIDDEN_MMAP_FLAGS                (VM_WRITE)
+ 
++#ifdef CONFIG_ACCESS_TOKENID
++#define ENABLE_ACCESS_TOKENID 1
++#else
++#define ENABLE_ACCESS_TOKENID 0
++#endif /* CONFIG_ACCESS_TOKENID */
++
++#define ACCESS_TOKENID_FEATURE_VALUE (ENABLE_ACCESS_TOKENID << 0)
++#define BINDER_CURRENT_FEATURE_SET ACCESS_TOKENID_FEATURE_VALUE
++
+ enum {
+ 	BINDER_DEBUG_USER_ERROR             = 1U << 0,
+ 	BINDER_DEBUG_FAILED_TRANSACTION     = 1U << 1,
+@@ -512,6 +530,16 @@ static void binder_free_thread(struct binder_thread *thread);
+ static void binder_free_proc(struct binder_proc *proc);
+ static void binder_inc_node_tmpref_ilocked(struct binder_node *node);
+ 
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++static inline u64 binder_clock(void)
++{
++#ifdef CONFIG_TRACE_CLOCK
++	return trace_clock_local();
++#endif
++	return 0;
++}
++#endif
++
+ static bool binder_has_work_ilocked(struct binder_thread *thread,
+ 				    bool do_proc_work)
+ {
+@@ -3233,11 +3261,24 @@ static void binder_transaction(struct binder_proc *proc,
+ 			     (u64)tr->data_size, (u64)tr->offsets_size,
+ 			     (u64)extra_buffers_size);
+ 
+-	if (!reply && !(tr->flags & TF_ONE_WAY))
++	if (!reply && !(tr->flags & TF_ONE_WAY)) {
+ 		t->from = thread;
+-	else
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->async_from_pid = -1;
++		t->async_from_tid = -1;
++#endif
++	} else {
+ 		t->from = NULL;
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->async_from_pid = thread->proc->pid;
++		t->async_from_tid = thread->pid;
++#endif
++}
+ 	t->sender_euid = task_euid(proc->tsk);
++#ifdef CONFIG_ACCESS_TOKENID
++	t->sender_tokenid = current->token;
++	t->first_tokenid = current->ftoken;
++#endif /* CONFIG_ACCESS_TOKENID */
+ 	t->to_proc = target_proc;
+ 	t->to_thread = target_thread;
+ 	t->code = tr->code;
+@@ -3655,6 +3696,9 @@ static void binder_transaction(struct binder_proc *proc,
+ 			goto err_dead_proc_or_thread;
+ 		}
+ 		BUG_ON(t->buffer->async_transaction != 0);
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->timestamp = in_reply_to->timestamp;
++#endif
+ 		binder_pop_transaction_ilocked(target_thread, in_reply_to);
+ 		binder_enqueue_thread_work_ilocked(target_thread, &t->work);
+ 		target_proc->outstanding_txns++;
+@@ -3677,6 +3721,9 @@ static void binder_transaction(struct binder_proc *proc,
+ 		t->need_reply = 1;
+ 		t->from_parent = thread->transaction_stack;
+ 		thread->transaction_stack = t;
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->timestamp = binder_clock();
++#endif
+ 		binder_inner_proc_unlock(proc);
+ 		return_error = binder_proc_transaction(t,
+ 				target_proc, target_thread);
+@@ -3690,6 +3737,9 @@ static void binder_transaction(struct binder_proc *proc,
+ 		BUG_ON(target_node == NULL);
+ 		BUG_ON(t->buffer->async_transaction != 1);
+ 		binder_enqueue_thread_work(thread, tcomplete);
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->timestamp = binder_clock();
++#endif
+ 		return_error = binder_proc_transaction(t, target_proc, NULL);
+ 		if (return_error)
+ 			goto err_dead_proc_or_thread;
+@@ -4785,6 +4835,12 @@ static int binder_thread_read(struct binder_proc *proc,
+ 		if (t_from)
+ 			binder_thread_dec_tmpref(t_from);
+ 		t->buffer->allow_user_free = 1;
++#ifdef CONFIG_ACCESS_TOKENID
++		binder_inner_proc_lock(thread->proc);
++		thread->tokens.sender_tokenid = t->sender_tokenid;
++		thread->tokens.first_tokenid = t->first_tokenid;
++		binder_inner_proc_unlock(thread->proc);
++#endif /* CONFIG_ACCESS_TOKENID */
+ 		if (cmd != BR_REPLY && !(t->flags & TF_ONE_WAY)) {
+ 			binder_inner_proc_lock(thread->proc);
+ 			t->to_parent = thread->transaction_stack;
+@@ -5025,6 +5081,10 @@ static int binder_thread_release(struct binder_proc *proc,
+ 			t = t->to_parent;
+ 		} else if (t->from == thread) {
+ 			t->from = NULL;
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++			t->async_from_pid = -1;
++			t->async_from_tid = -1;
++#endif
+ 			t = t->from_parent;
+ 		} else
+ 			BUG();
+@@ -5567,6 +5627,43 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ 		binder_inner_proc_unlock(proc);
+ 		break;
+ 	}
++	case BINDER_FEATURE_SET: {
++		struct binder_feature_set __user *features = ubuf;
++
++		if (size != sizeof(struct binder_feature_set)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		if (put_user(BINDER_CURRENT_FEATURE_SET, &features->feature_set)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		break;
++	}
++#ifdef CONFIG_ACCESS_TOKENID
++	case BINDER_GET_ACCESS_TOKEN: {
++		struct access_token __user *tokens = ubuf;
++		u64 token, ftoken;
++
++		if (size != sizeof(struct access_token)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		binder_inner_proc_lock(proc);
++		token = thread->tokens.sender_tokenid;
++		ftoken = thread->tokens.first_tokenid;
++		binder_inner_proc_unlock(proc);
++		if (put_user(token, &tokens->sender_tokenid)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		if (put_user(ftoken, &tokens->first_tokenid)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		break;
++	}
++#endif /* CONFIG_ACCESS_TOKENID */
+ 	default:
+ 		ret = -EINVAL;
+ 		goto err;
+@@ -6567,6 +6664,152 @@ const struct binder_debugfs_entry binder_debugfs_entries[] = {
+ 	{} /* terminator */
+ };
+ 
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++static void print_binder_transaction_brief_ilocked(
++				struct seq_file *m,
++				const char *prefix, struct binder_transaction *t,
++				u64 timestamp)
++{
++	struct binder_proc *to_proc = NULL;
++	int from_pid = 0;
++	int from_tid = 0;
++	int to_pid = 0;
++	u64 sec;
++	u32 nsec;
++
++	spin_lock(&t->lock);
++	to_proc = t->to_proc;
++	from_pid = t->from ? (t->from->proc ? t->from->proc->pid : 0) : t->async_from_pid;
++	from_tid = t->from ? t->from->pid : t->async_from_tid;
++	to_pid = to_proc ? to_proc->pid : 0;
++	sec = div_u64_rem((timestamp - t->timestamp), 1000000000, &nsec);
++
++	seq_printf(m,
++		   "%s%d:%d to %d:%d code %x wait:%llu.%u s\n",
++		   prefix,
++		   from_pid, from_tid,
++		   to_pid, t->to_thread ? t->to_thread->pid : 0,
++		   t->code,
++		   timestamp > t->timestamp ? sec : 0,
++		   timestamp > t->timestamp ? nsec : 0);
++	spin_unlock(&t->lock);
++}
++
++static void print_binder_work_transaction_nilocked(struct seq_file *m,
++				const char *prefix, struct binder_work *w,
++				u64 timestamp)
++{
++	struct binder_transaction *t = NULL;
++
++	switch (w->type) {
++	case BINDER_WORK_TRANSACTION:
++		t = container_of(w, struct binder_transaction, work);
++		print_binder_transaction_brief_ilocked(m, prefix, t, timestamp);
++		break;
++
++	default:
++		break;
++	}
++}
++
++static void print_binder_transaction_brief(struct seq_file *m,
++				struct binder_proc *proc,
++				u64 timestamp)
++{
++	struct binder_work *w = NULL;
++	struct rb_node *n = NULL;
++	struct binder_node *last_node = NULL;
++	size_t start_pos = m->count;
++	size_t header_pos = m->count;
++
++	/* sync binder / not one way */
++	binder_inner_proc_lock(proc);
++	for (n = rb_first(&proc->threads); n != NULL; n = rb_next(n)) {
++		struct binder_thread *thread = rb_entry(n, struct binder_thread, rb_node);
++		struct binder_transaction *t = thread->transaction_stack;
++		while (t) {
++			if (t->from == thread) {
++				print_binder_transaction_brief_ilocked(m, "\t", t, timestamp);
++				t = t->from_parent;
++			} else if (t->to_thread == thread) {
++				t = t->to_parent;
++			} else {
++				t = NULL;
++			}
++		}
++	}
++
++	/* async binder / one way */
++	for (n = rb_first(&proc->nodes); n != NULL; n = rb_next(n)) {
++		struct binder_node *node = rb_entry(n, struct binder_node, rb_node);
++		/*
++		 * take a temporary reference on the node so it
++		 * survives and isn't removed from the tree
++		 * while we print it.
++		 */
++		binder_inc_node_tmpref_ilocked(node);
++		/* Need to drop inner lock to take node lock */
++		binder_inner_proc_unlock(proc);
++		if (last_node)
++			binder_put_node(last_node);
++		binder_node_inner_lock(node);
++		list_for_each_entry(w, &node->async_todo, entry)
++			print_binder_work_transaction_nilocked(m, "async\t", w, timestamp);
++		binder_node_inner_unlock(node);
++		last_node = node;
++		binder_inner_proc_lock(proc);
++	}
++	binder_inner_proc_unlock(proc);
++
++	if (last_node)
++		binder_put_node(last_node);
++
++	if (m->count == header_pos)
++		m->count = start_pos;
++}
++
++static void print_binder_proc_brief(struct seq_file *m,
++				struct binder_proc *proc)
++{
++	struct binder_thread *thread = NULL;
++	int ready_threads = 0;
++	size_t free_async_space = binder_alloc_get_free_async_space(&proc->alloc);
++
++	seq_printf(m, "%d\t", proc->pid);
++	seq_printf(m, "%s\t", proc->context->name);
++
++	binder_inner_proc_lock(proc);
++	list_for_each_entry(thread, &proc->waiting_threads, waiting_thread_node)
++		ready_threads++;
++
++	seq_printf(m, "%d\t%d\t%d\t%d"
++			"\t%zd\n", proc->requested_threads,
++			proc->requested_threads_started, proc->max_threads,
++			ready_threads,
++			free_async_space);
++	binder_inner_proc_unlock(proc);
++}
++
++static int binder_transaction_proc_show(struct seq_file *m, void *unused)
++{
++	struct binder_proc *proc = NULL;
++	u64 now = 0;
++
++	mutex_lock(&binder_procs_lock);
++	now = binder_clock();
++	hlist_for_each_entry(proc, &binder_procs, proc_node)
++		print_binder_transaction_brief(m, proc, now);
++
++	seq_printf(m, "\npid\tcontext\t\trequest\tstarted\tmax\tready\tfree_async_space\n");
++	hlist_for_each_entry(proc, &binder_procs, proc_node)
++		print_binder_proc_brief(m, proc);
++	mutex_unlock(&binder_procs_lock);
++
++	return 0;
++}
++
++#endif
++
+ static int __init init_binder_device(const char *name)
+ {
+ 	int ret;
+@@ -6624,6 +6867,14 @@ static int __init binder_init(void)
+ 
+ 		binder_debugfs_dir_entry_proc = debugfs_create_dir("proc",
+ 						 binder_debugfs_dir_entry_root);
++
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		proc_create_data("transaction_proc",
++				 S_IRUGO,
++				 NULL,
++				 &binder_transaction_proc_proc_ops,
++				 NULL);
++#endif
+ 	}
+ 
+ 	if (!IS_ENABLED(CONFIG_ANDROID_BINDERFS) &&
+diff --git a/drivers/android/binder_internal.h b/drivers/android/binder_internal.h
+index 00010c2e3..65f45c8d6 100644
+--- a/drivers/android/binder_internal.h
++++ b/drivers/android/binder_internal.h
+@@ -528,6 +528,9 @@ struct binder_thread {
+ 	atomic_t tmp_ref;
+ 	bool is_dead;
+ 	struct task_struct *task;
++#ifdef CONFIG_ACCESS_TOKENID
++	struct access_token tokens;
++#endif /* CONFIG_ACCESS_TOKENID */
+ };
+ 
+ /**
+@@ -551,6 +554,11 @@ struct binder_transaction {
+ 	int debug_id;
+ 	struct binder_work work;
+ 	struct binder_thread *from;
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++	int async_from_pid;
++	int async_from_tid;
++	u64 timestamp;
++#endif
+ 	struct binder_transaction *from_parent;
+ 	struct binder_proc *to_proc;
+ 	struct binder_thread *to_thread;
+@@ -574,6 +582,10 @@ struct binder_transaction {
+ 	 * during thread teardown
+ 	 */
+ 	spinlock_t lock;
++#ifdef CONFIG_ACCESS_TOKENID
++	u64 sender_tokenid;
++	u64 first_tokenid;
++#endif /* CONFIG_ACCESS_TOKENID */
+ 	ANDROID_VENDOR_DATA(1);
+ 	ANDROID_OEM_DATA_ARRAY(1, 2);
+ };
+diff --git a/drivers/staging/Kconfig b/drivers/staging/Kconfig
+index 2d0310448..6efe436ab 100644
+--- a/drivers/staging/Kconfig
++++ b/drivers/staging/Kconfig
+@@ -118,4 +118,16 @@ source "drivers/staging/wfx/Kconfig"
+ 
+ source "drivers/staging/hikey9xx/Kconfig"
+ 
++source "drivers/staging/hilog/Kconfig"
++
++source "drivers/staging/hievent/Kconfig"
++
++source "drivers/staging/hisysevent/Kconfig"
++
++source "drivers/staging/zerohung/Kconfig"
++
++source "drivers/staging/hungtask/Kconfig"
++
++source "drivers/staging/blackbox/Kconfig"
++
+ endif # STAGING
+diff --git a/drivers/staging/Makefile b/drivers/staging/Makefile
+index 757a892ab..9dacda71f 100644
+--- a/drivers/staging/Makefile
++++ b/drivers/staging/Makefile
+@@ -49,3 +49,9 @@ obj-$(CONFIG_KPC2000)		+= kpc2000/
+ obj-$(CONFIG_QLGE)		+= qlge/
+ obj-$(CONFIG_WFX)		+= wfx/
+ obj-y				+= hikey9xx/
++obj-$(CONFIG_HILOG) 		+= hilog/
++obj-$(CONFIG_HIEVENT) 		+= hievent/
++obj-$(CONFIG_HISYSEVENT) 	+= hisysevent/
++obj-$(CONFIG_DFX_ZEROHUNG)	+= zerohung/
++obj-$(CONFIG_DFX_HUNGTASK)      += hungtask/
++obj-$(CONFIG_BLACKBOX)		+= blackbox/
+diff --git a/drivers/staging/blackbox/Kconfig b/drivers/staging/blackbox/Kconfig
+new file mode 100644
+index 000000000..0e985823c
+--- /dev/null
++++ b/drivers/staging/blackbox/Kconfig
+@@ -0,0 +1,108 @@
++# SPDX-License-Identifier: GPL-2.0
++menu "Blackbox Options"
++
++config BLACKBOX
++	bool "Support for blackbox"
++	select STORAGE if BLACKBOX_STORAGE_MATERIAL
++	default y
++	help
++		The blackbox is a fault log collecting framework for registered modules
++		of chips. When a fault occurs, blackbox will invoke the registered
++		function to save the log and reset the module.
++
++config BLACKBOX_LOG_ROOT_PATH
++	string "root path of the blackbox log"
++	depends on BLACKBOX
++	help
++		define the root path of the blackbox log
++
++config BLACKBOX_LOG_PART_REPRESENTATIVE
++	string "representative of the blackbox log part"
++	depends on BLACKBOX
++	help
++		define the representative of the blackbox log part
++
++config BLACKBOX_STORAGE_BY_MEMORY
++	tristate "blackbox fault log storage by memory directly"
++	depends on BLACKBOX
++	select STORAGE_BY_MEMORY
++	help
++		This option enables saving fault logs with memory by blackbox when a
++		panic occurs. It depends on supporting warm reset and disabling erase
++		ddr when warm reset.
++
++config BLACKBOX_USE_PSTORE_BLK_DEBUG
++	bool "blackbox use pstore blk for debug"
++	depends on BLACKBOX
++	default n
++	help
++		If Y, this enables pstore blk for blackbox.
++
++config BLACKBOX_STORAGE_BY_PSTORE_BLK
++	tristate "blackbox fault log storage by pstore blk"
++	depends on BLACKBOX
++	depends on PSTORE_BLK
++	depends on PSTORE_BLACKBOX
++	select STORAGE_BY_PSTORE_BLK
++	help
++		This option enables saving fault logs with pstore blk by blackbox when a
++		panic occurs. It depends on supporting pstore blk. Especially, flash
++		driver's panic_write implementation is needed. Othersize, if a panic
++		happen, then fault log can not be saved.
++
++config BLACKBOX_STORAGE_BY_PSTORE_RAM
++	tristate "blackbox fault log storage by pstore ram"
++	depends on BLACKBOX
++	depends on PSTORE_RAM
++	depends on PSTORE_BLACKBOX
++	select STORAGE_BY_PSTORE_RAM
++	help
++		This option enables saving fault logs with pstore ram by blackbox when a
++		panic occurs. It depends on supporting pstore ram.
++
++config BLACKBOX_STORAGE_BY_RAW_PARTITION
++	tristate "blackbox fault log storage by RAW partition"
++	depends on BLACKBOX
++	select STORAGE_BY_RAW_PARTITION
++	help
++		This option enables saving fault logs with RAW partition by blackbox when a
++		panic occurs. It depends on reserving partition for blackbox.
++
++config BLACKBOX_STORAGE_MATERIAL
++	def_bool y
++	depends on BLACKBOX
++	depends on BLACKBOX_STORAGE_BY_MEMORY || BLACKBOX_STORAGE_BY_PSTORE_BLK || \
++		BLACKBOX_STORAGE_BY_PSTORE_RAM || BLACKBOX_STORAGE_BY_RAW_PARTITION
++
++choice
++	prompt "Default storage material for fault log when a panic occurs."
++	depends on BLACKBOX_STORAGE_MATERIAL
++	help
++		This option choose the default fault log material for blackbox when a
++		panic occurs.
++
++		The default materail is ram directly. It's easy, but not work offen.
++
++	config DEF_BLACKBOX_STORAGE_BY_MEMORY
++		bool "memory" if BLACKBOX_STORAGE_BY_MEMORY
++
++	config DEF_BLACKBOX_STORAGE_BY_PSTORE_BLK
++		bool "pstore_blk" if BLACKBOX_STORAGE_BY_PSTORE_BLK
++
++	config DEF_BLACKBOX_STORAGE_BY_PSTORE_RAM
++		bool "pstore_ram" if BLACKBOX_STORAGE_BY_PSTORE_RAM
++
++	config DEF_BLACKBOX_STORAGE_BY_RAW_PARTITION
++		bool "raw_partition" if BLACKBOX_STORAGE_BY_RAW_PARTITION
++
++endchoice
++
++config DEF_BLACKBOX_STORAGE
++	string
++	depends on BLACKBOX_STORAGE_MATERIAL
++	default "memory" if DEF_BLACKBOX_STORAGE_BY_MEMORY
++	default "pstore_blk" if DEF_BLACKBOX_STORAGE_BY_PSTORE_BLK
++	default "pstore_ram" if DEF_BLACKBOX_STORAGE_BY_PSTORE_RAM
++	default "raw_partition" if DEF_BLACKBOX_STORAGE_BY_RAW_PARTITION
++
++endmenu
+diff --git a/drivers/staging/blackbox/Makefile b/drivers/staging/blackbox/Makefile
+new file mode 100644
+index 000000000..9befa81a1
+--- /dev/null
++++ b/drivers/staging/blackbox/Makefile
+@@ -0,0 +1,5 @@
++# SPDX-License-Identifier: GPL-2.0
++
++obj-$(CONFIG_BLACKBOX)		+= blackbox_core.o \
++	blackbox_storage.o			   \
++	blackbox_common.o
+diff --git a/drivers/staging/blackbox/blackbox_common.c b/drivers/staging/blackbox/blackbox_common.c
+new file mode 100644
+index 000000000..44bc2aa18
+--- /dev/null
++++ b/drivers/staging/blackbox/blackbox_common.c
+@@ -0,0 +1,270 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#include <linux/blackbox.h>
++#include <linux/kernel.h>
++#include <linux/delay.h>
++#include <linux/reboot.h>
++#include <linux/syscalls.h>
++#include <linux/rtc.h>
++#include <linux/time.h>
++#include <linux/fs.h>
++#include <linux/namei.h>
++#include <linux/blackbox_common.h>
++
++void sys_reset(void)
++{
++	bbox_print_info("reset the system now!\n");
++	emergency_restart();
++	bbox_print_info("reset the system failed!\n");
++}
++
++void change_own(char *path, int uid, int gid)
++{
++	mm_segment_t old_fs;
++	int ret = -1;
++
++	if (unlikely(!path || uid == -1 || gid == -1)) {
++		bbox_print_err("path or uid or gid error.\n");
++		return;
++	}
++
++	old_fs = get_fs();
++	set_fs(KERNEL_DS);
++	ret = ksys_chown(path, uid, gid);
++	if (ret != 0)
++		bbox_print_err("ksys_chown [%s] failed, ret: %d\n", path, ret);
++
++	set_fs(old_fs);
++}
++
++int full_write_file(const char *pfile_path, char *buf,
++		size_t buf_size, bool is_append)
++{
++	struct file *filp = NULL;
++	char *pathname = NULL;
++	mm_segment_t old_fs;
++	loff_t pos = 0;
++	int ret = -1;
++
++	if (unlikely(!pfile_path || !buf)) {
++		bbox_print_err("pfile_path or buf is NULL!\n");
++		return -EINVAL;
++	}
++
++	filp = file_open(pfile_path, O_CREAT | O_RDWR |
++			(is_append ? O_APPEND : O_TRUNC), BBOX_FILE_LIMIT);
++	if (IS_ERR(filp)) {
++		bbox_print_err("open %s failed! [%ld]\n", pfile_path, PTR_ERR(filp));
++		return -EBADF;
++	}
++
++	old_fs = get_fs();
++	set_fs(KERNEL_DS);
++
++	ret = vfs_write(filp, buf, buf_size, &pos);
++
++	set_fs(old_fs);
++
++	file_close(filp);
++
++	if (ret < 0) {
++		pathname = getfullpath(filp);
++		bbox_print_err("write [%s] failed! [%d]\n", pathname ? pathname : "", ret);
++		return ret;
++	}
++
++	return 0;
++}
++
++int file_exists(const char *name)
++{
++	struct path path;
++	int ret;
++
++	ret = kern_path(name, LOOKUP_FOLLOW, &path);
++	if (ret)
++		return ret;
++
++	ret = inode_permission(d_inode(path.dentry), MAY_ACCESS);
++	path_put(&path);
++	return ret;
++}
++
++static int create_new_dir(char *name)
++{
++	struct dentry *dentry;
++	struct path path;
++	int ret;
++
++	if (unlikely(!name)) {
++		bbox_print_err("name is NULL!\n");
++		return -EINVAL;
++	}
++
++	ret = file_exists(name);
++	if (ret) {
++		dentry = kern_path_create(AT_FDCWD, name, &path, LOOKUP_DIRECTORY);
++		if (IS_ERR(dentry))
++			return PTR_ERR(dentry);
++
++		ret = vfs_mkdir(d_inode(path.dentry), dentry, BBOX_DIR_LIMIT);
++		if (ret && ret != -EEXIST)
++			bbox_print_err("Create dir [%s] failed! ret: %d\n", name, ret);
++
++		done_path_create(&path, dentry);
++	}
++
++	return 0;
++}
++
++int create_log_dir(const char *path)
++{
++	char *cur_path = NULL;
++	int index = 0;
++
++	if (unlikely(!path)) {
++		bbox_print_err("path is NULL!\n");
++		return -EINVAL;
++	}
++
++	if (*path != '/')
++		return -EINVAL;
++	cur_path = kmalloc(PATH_MAX_LEN + 1, GFP_KERNEL);
++	if (unlikely(!cur_path)) {
++		bbox_print_err("kmalloc failed!\n");
++		return -ENOMEM;
++	}
++	memset(cur_path, 0, PATH_MAX_LEN + 1);
++	cur_path[index++] = *path++;
++	while (*path != '\0') {
++		if (*path == '/')
++			create_new_dir(cur_path);
++		cur_path[index] = *path;
++		path++;
++		index++;
++	}
++	create_new_dir(cur_path);
++	kfree(cur_path);
++
++	return 0;
++}
++
++void get_timestamp(char *buf, size_t buf_size)
++{
++	struct rtc_time tm;
++	struct timespec64 tv;
++
++	if (unlikely(!buf || buf_size == 0)) {
++		bbox_print_err("buf: %p, buf_size: %u\n", buf, (unsigned int)buf_size);
++		return;
++	}
++
++	memset(buf, 0, buf_size);
++	memset(&tm, 0, sizeof(tm));
++
++	memset(&tv, 0, sizeof(tv));
++	ktime_get_real_ts64(&tv);
++	tv.tv_sec -= (long)sys_tz.tz_minuteswest * SECONDS_PER_MINUTE;
++	rtc_time64_to_tm(tv.tv_sec, &tm);
++
++	(void)scnprintf(buf, buf_size, TIMESTAMP_FORMAT,
++			tm.tm_year + YEAR_BASE, tm.tm_mon + 1, tm.tm_mday,
++			tm.tm_hour, tm.tm_min, tm.tm_sec, get_ticks());
++	buf[buf_size - 1] = '\0';
++}
++EXPORT_SYMBOL_GPL(get_timestamp);
++
++unsigned long long get_ticks(void)
++{
++	/* use only one int value to save time: */
++
++	struct timespec64 uptime;
++
++	ktime_get_ts64(&uptime);
++
++	ktime_get_boottime_ts64(&uptime);
++
++	return (u64)uptime.tv_sec;
++}
++
++static inline struct dentry *lock_parent(struct dentry *dentry)
++{
++	struct dentry *dir = dget_parent(dentry);
++
++	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
++	return dir;
++}
++
++static inline void unlock_dir(struct dentry *dentry)
++{
++	inode_unlock(d_inode(dentry));
++	dput(dentry);
++}
++
++struct file *file_open(const char *filename, int open_mode, int mode)
++{
++	struct file *filp = NULL;
++	mm_segment_t old_fs;
++
++	old_fs = get_fs();
++	set_fs(KERNEL_DS);
++
++	filp = filp_open(filename, open_mode, mode);
++	set_fs(old_fs);
++
++	return filp;
++}
++
++void file_close(struct file *filp)
++{
++	if (likely(filp))
++		filp_close(filp, NULL);
++}
++
++int file_delete(struct file *filp)
++{
++	struct dentry *dentry = NULL;
++	struct dentry *parent = NULL;
++	int ret = 0;
++
++	if (unlikely(!filp)) {
++		bbox_print_err("file is NULL!\n");
++		return -EINVAL;
++	}
++
++	dentry = file_dentry(filp);
++	parent = lock_parent(dentry);
++
++	if (dentry->d_parent == parent) {
++		dget(dentry);
++		ret = vfs_unlink(d_inode(parent), dentry, NULL);
++		dput(dentry);
++	}
++
++	unlock_dir(parent);
++
++	return ret;
++}
++
++char *getfullpath(struct file *filp)
++{
++	char *buf = NULL, *path = NULL;
++
++	if (unlikely(!filp))
++		return NULL;
++
++	buf = kmalloc(PATH_MAX, GFP_KERNEL);
++	if (unlikely(!buf))
++		return NULL;
++	memset(buf, 0, PATH_MAX);
++
++	// get the path
++	path = d_path(&filp->f_path, buf, PATH_MAX);
++
++	kfree(buf);
++
++	return path;
++}
+diff --git a/drivers/staging/blackbox/blackbox_core.c b/drivers/staging/blackbox/blackbox_core.c
+new file mode 100644
+index 000000000..ff23b0593
+--- /dev/null
++++ b/drivers/staging/blackbox/blackbox_core.c
+@@ -0,0 +1,596 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#include <linux/blackbox.h>
++#include <linux/kernel.h>
++#include <linux/delay.h>
++#include <linux/kthread.h>
++#include <linux/list.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/syscalls.h>
++#include <linux/time.h>
++#include <linux/version.h>
++#include <linux/sched/debug.h>
++#ifdef CONFIG_DFX_ZEROHUNG
++#include <dfx/zrhung.h>
++#endif
++#include <linux/blackbox_common.h>
++#include <linux/blackbox_storage.h>
++
++/* ---- local macroes ---- */
++/* bbox/BBOX - blackbox */
++#define HISTORY_LOG_NAME		"history.log"
++#define LOG_PART_WAIT_TIME		1000 /* unit: ms */
++#define HISTORY_LOG_MAX_LEN		1024
++#define TOP_CATEGORY_SYSTEM_RESET	"System Reset"
++#define TOP_CATEGORY_FREEZE		"System Freeze"
++#define TOP_CATEGORY_SYSTEM_POWEROFF	"POWEROFF"
++#define TOP_CATEGORY_SUBSYSTEM_CRASH	"Subsystem Crash"
++
++#ifndef CONFIG_BLACKBOX_LOG_ROOT_PATH
++#error no blackbox log root path
++#endif
++#ifndef CONFIG_BLACKBOX_LOG_PART_REPRESENTATIVE
++#error no representative of the blackbox log part
++#endif
++
++/* ---- local prototypes ---- */
++struct bbox_ops {
++	struct list_head list;
++	struct module_ops ops;
++};
++
++struct error_info_to_category {
++	const char *module;
++	struct {
++		const char *event;
++		const char *category;
++		const char *top_category;
++	} map;
++};
++
++/* ---- local variables ---- */
++static LIST_HEAD(ops_list);
++static DEFINE_SPINLOCK(ops_list_lock);
++static DEFINE_SEMAPHORE(temp_error_info_sem);
++static struct error_info_to_category error_info_categories[] = {
++	{
++		MODULE_SYSTEM,
++		{EVENT_SYSREBOOT, CATEGORY_SYSTEM_REBOOT, TOP_CATEGORY_SYSTEM_RESET}
++	},
++	{
++		MODULE_SYSTEM,
++		{EVENT_LONGPRESS, CATEGORY_SYSTEM_REBOOT, TOP_CATEGORY_SYSTEM_RESET}
++	},
++	{
++		MODULE_SYSTEM,
++		{EVENT_COMBINATIONKEY, CATEGORY_SYSTEM_REBOOT, TOP_CATEGORY_SYSTEM_RESET}
++	},
++	{
++		MODULE_SYSTEM,
++		{EVENT_SUBSYSREBOOT, CATEGORY_SYSTEM_REBOOT, TOP_CATEGORY_SYSTEM_RESET}
++	},
++	{
++		MODULE_SYSTEM,
++		{EVENT_POWEROFF, CATEGORY_SYSTEM_POWEROFF, TOP_CATEGORY_SYSTEM_POWEROFF}
++	},
++	{
++		MODULE_SYSTEM,
++		{EVENT_PANIC, CATEGORY_SYSTEM_PANIC, TOP_CATEGORY_SYSTEM_RESET}
++	},
++	{
++		MODULE_SYSTEM,
++		{EVENT_OOPS, CATEGORY_SYSTEM_OOPS, TOP_CATEGORY_SYSTEM_RESET}
++	},
++	{
++		MODULE_SYSTEM,
++		{EVENT_SYS_WATCHDOG, CATEGORY_SYSTEM_WATCHDOG, TOP_CATEGORY_FREEZE}
++	},
++	{
++		MODULE_SYSTEM,
++		{EVENT_HUNGTASK, CATEGORY_SYSTEM_HUNGTASK, TOP_CATEGORY_FREEZE}
++	},
++#ifdef CONFIG_BLACKBOX_EXPAND_EVENT
++	#include <linux/blackbox_expand_event.h>
++#endif
++};
++
++struct error_info *temp_error_info;
++
++/* ---- local function prototypes ---- */
++static const char *get_top_category(const char *module, const char *event);
++static const char *get_category(const char *module, const char *event);
++static void format_log_dir(char *buf, size_t buf_size, const char *log_root_dir,
++			   const char *timestamp);
++static void save_history_log(const char *log_root_dir, struct error_info *info,
++			     const char *timestamp, int need_sys_reset);
++#ifdef CONFIG_BLACKBOX_DEBUG
++static void save_invalid_log(const struct bbox_ops *ops, const struct error_info *info);
++#endif
++static void wait_for_log_part(void);
++static void format_error_info(struct error_info *info, const char event[EVENT_MAX_LEN],
++			      const char module[MODULE_MAX_LEN],
++			      const char error_desc[ERROR_DESC_MAX_LEN]);
++static void save_last_log(void);
++static int save_error_log(void *pparam);
++
++/* ---- global function prototypes ---- */
++
++/* ---- function definitions ---- */
++static const char *get_top_category(const char *module, const char *event)
++{
++	int i;
++	int count = (int)ARRAY_SIZE(error_info_categories);
++
++	if (unlikely(!module || !event)) {
++		bbox_print_err("module: %p, event: %p\n", module, event);
++		return TOP_CATEGORY_SUBSYSTEM_CRASH;
++	}
++
++	for (i = 0; i < count; i++) {
++		if (!strcmp(error_info_categories[i].module, module) &&
++		    !strcmp(error_info_categories[i].map.event, event))
++			return error_info_categories[i].map.top_category;
++	}
++	if (!strcmp(module, MODULE_SYSTEM))
++		return TOP_CATEGORY_SYSTEM_RESET;
++
++	return TOP_CATEGORY_SUBSYSTEM_CRASH;
++}
++
++static const char *get_category(const char *module, const char *event)
++{
++	int i;
++	int count = (int)ARRAY_SIZE(error_info_categories);
++
++	if (unlikely(!module || !event)) {
++		bbox_print_err("module: %p, event: %p\n", module, event);
++		return CATEGORY_SUBSYSTEM_CUSTOM;
++	}
++
++	for (i = 0; i < count; i++) {
++		if (!strcmp(error_info_categories[i].module, module) &&
++		    !strcmp(error_info_categories[i].map.event, event))
++			return error_info_categories[i].map.category;
++	}
++	if (!strcmp(module, MODULE_SYSTEM))
++		return CATEGORY_SYSTEM_CUSTOM;
++
++	return CATEGORY_SUBSYSTEM_CUSTOM;
++}
++
++static void format_log_dir(char *buf, size_t buf_size, const char *log_root_dir,
++			   const char *timestamp)
++{
++	if (unlikely(!buf || buf_size == 0 || !log_root_dir ||
++				 !timestamp)) {
++		bbox_print_err("buf: %p, buf_size: %u, log_root_dir: %p, timestamp: %p\n",
++			       buf, (unsigned int)buf_size, log_root_dir, timestamp);
++		return;
++	}
++
++	memset(buf, 0, buf_size);
++	scnprintf(buf, buf_size - 1, "%s/%s", log_root_dir, timestamp);
++}
++
++static void format_error_info(struct error_info *info, const char event[EVENT_MAX_LEN],
++			      const char module[MODULE_MAX_LEN],
++			      const char error_desc[ERROR_DESC_MAX_LEN])
++{
++	if (unlikely(!info || !event || !module || !error_desc)) {
++		bbox_print_err("info: %p, event: %p, module: %p, error_desc: %p\n",
++				info, event, module, error_desc);
++		return;
++	}
++
++	memset(info, 0, sizeof(*info));
++	strncpy(info->event, event, min(strlen(event),
++				sizeof(info->event) - 1));
++	strncpy(info->module, module, min(strlen(module),
++				sizeof(info->module) - 1));
++	strncpy(info->category, get_category(module, event),
++				min(strlen(get_category(module, event)), sizeof(info->category) - 1));
++	get_timestamp(info->error_time, TIMESTAMP_MAX_LEN);
++	strncpy(info->error_desc, error_desc, min(strlen(error_desc),
++				sizeof(info->error_desc) - 1));
++}
++
++static void save_history_log(const char *log_root_dir, struct error_info *info,
++			     const char *timestamp, int need_sys_reset)
++{
++	char history_log_path[PATH_MAX_LEN];
++	char *buf;
++
++	if (unlikely(!log_root_dir || !info || !timestamp)) {
++		bbox_print_err("log_root_dir: %p, info: %p, timestamp: %p\n",
++				log_root_dir, info, timestamp);
++		return;
++	}
++
++	buf = kmalloc(HISTORY_LOG_MAX_LEN + 1, GFP_KERNEL);
++	if (!buf)
++		return;
++	memset(buf, 0, HISTORY_LOG_MAX_LEN + 1);
++
++	scnprintf(buf, HISTORY_LOG_MAX_LEN, HISTORY_LOG_FORMAT,
++			get_top_category(info->module, info->event), info->module,
++			info->category, info->event, timestamp,
++			need_sys_reset ? "true" : "false", info->error_desc, log_root_dir);
++#ifdef CONFIG_DFX_ZEROHUNG
++	zrhung_send_event("KERNEL_VENDOR", info->category, info->error_desc);
++#endif
++	memset(history_log_path, 0, sizeof(history_log_path));
++	scnprintf(history_log_path, sizeof(history_log_path) - 1,
++			"%s/%s", log_root_dir, HISTORY_LOG_NAME);
++	full_write_file(history_log_path, buf, strlen(buf), 1);
++	ksys_sync();
++	kfree(buf);
++}
++
++#ifdef CONFIG_BLACKBOX_DEBUG
++static void save_invalid_log(const struct bbox_ops *ops, const struct error_info *info)
++{
++	char invalid_log_path[PATH_MAX_LEN];
++	char timestamp[TIMESTAMP_MAX_LEN];
++
++	if (unlikely(!ops || !info)) {
++		bbox_print_err("ops: %p, info: %p\n", ops, info);
++		return;
++	}
++
++	get_timestamp(timestamp, sizeof(timestamp));
++	format_log_dir(invalid_log_path, PATH_MAX_LEN, CONFIG_BLACKBOX_LOG_PART_REPRESENTATIVE,
++		       timestamp);
++	create_log_dir(invalid_log_path);
++	if (ops->ops.save_last_log(invalid_log_path, (struct error_info *)info) != 0)
++		bbox_print_err("[%s] failed to save invalid log!\n", ops->ops.module);
++}
++#endif
++
++static bool is_log_part_mounted(void)
++{
++	return file_exists(CONFIG_BLACKBOX_LOG_PART_REPRESENTATIVE) == 0;
++}
++
++static void wait_for_log_part(void)
++{
++	bbox_print_info("wait for log part [%s] begin!\n",
++			CONFIG_BLACKBOX_LOG_PART_REPRESENTATIVE);
++	while (!is_log_part_mounted())
++		msleep(LOG_PART_WAIT_TIME);
++
++	bbox_print_info("wait for log part [%s] end!\n",
++			CONFIG_BLACKBOX_LOG_PART_REPRESENTATIVE);
++}
++
++static bool find_module_ops(struct error_info *info, struct bbox_ops **ops)
++{
++	struct bbox_ops *cur = NULL;
++	bool find_module = false;
++
++	if (unlikely(!info || !ops)) {
++		bbox_print_err("info: %p, ops: %p!\n", info, ops);
++		return find_module;
++	}
++
++	list_for_each_entry(cur, &ops_list, list) {
++		if (!strcmp(cur->ops.module, info->module)) {
++			*ops = cur;
++			find_module = true;
++			break;
++		}
++	}
++	if (!find_module)
++		bbox_print_err("[%s] hasn't been registered!\n", info->module);
++
++	return find_module;
++}
++
++static void invoke_module_ops(const char *log_dir, struct error_info *info,
++					struct bbox_ops *ops)
++{
++	if (unlikely(!info || !ops)) {
++		bbox_print_err("info: %p, ops: %p!\n", info, ops);
++		return;
++	}
++
++	if (ops->ops.dump && log_dir) {
++		bbox_print_info("[%s] starts dumping data!\n", ops->ops.module);
++		ops->ops.dump(log_dir, info);
++		bbox_print_info("[%s] ends dumping data!\n", ops->ops.module);
++	}
++	if (ops->ops.reset) {
++		bbox_print_info("[%s] starts resetting!\n", ops->ops.module);
++		ops->ops.reset(info);
++		bbox_print_info("[%s] ends resetting!\n", ops->ops.module);
++	}
++}
++
++static void save_log_without_reset(struct error_info *info)
++{
++	unsigned long flags;
++	struct bbox_ops *ops = NULL;
++	char *log_dir = NULL;
++	char timestamp[TIMESTAMP_MAX_LEN];
++
++	if (unlikely(!info)) {
++		bbox_print_err("info: %p!\n", info);
++		return;
++	}
++
++	/* get timestamp */
++	get_timestamp(timestamp, sizeof(timestamp));
++
++	/* get bbox ops */
++	spin_lock_irqsave(&ops_list_lock, flags);
++	if (!find_module_ops(info, &ops)) {
++		spin_unlock_irqrestore(&ops_list_lock, flags);
++		return;
++	}
++	spin_unlock_irqrestore(&ops_list_lock, flags);
++	create_log_dir(CONFIG_BLACKBOX_LOG_ROOT_PATH);
++	if (ops->ops.dump) {
++		/* create log root path */
++		log_dir = kmalloc(PATH_MAX_LEN, GFP_KERNEL);
++		if (log_dir) {
++			format_log_dir(log_dir, PATH_MAX_LEN,
++						CONFIG_BLACKBOX_LOG_ROOT_PATH, timestamp);
++			create_log_dir(log_dir);
++		} else
++			bbox_print_err("kmalloc failed!\n");
++	}
++	invoke_module_ops(log_dir, info, ops);
++	save_history_log(CONFIG_BLACKBOX_LOG_ROOT_PATH, info, timestamp, 0);
++	kfree(log_dir);
++}
++
++static void save_log_with_reset(struct error_info *info)
++{
++	struct bbox_ops *ops = NULL;
++
++	if (unlikely(!info)) {
++		bbox_print_err("info: %p!\n", info);
++		return;
++	}
++
++	if (!find_module_ops(info, &ops))
++		return;
++
++	invoke_module_ops("", info, ops);
++	if (strcmp(info->category, CATEGORY_SYSTEM_REBOOT) &&
++		strcmp(info->category, CATEGORY_SYSTEM_PANIC))
++		sys_reset();
++}
++
++static void save_temp_error_info(const char event[EVENT_MAX_LEN],
++				const char module[MODULE_MAX_LEN],
++				const char error_desc[ERROR_DESC_MAX_LEN])
++{
++	if (unlikely(!event || !module || !error_desc)) {
++		bbox_print_err("event: %p, module: %p, error_desc: %p\n",
++					event, module, error_desc);
++		return;
++	}
++
++	down(&temp_error_info_sem);
++	format_error_info(temp_error_info, event, module, error_desc);
++	up(&temp_error_info_sem);
++}
++
++static void do_save_last_log(const struct bbox_ops *ops, struct error_info *info)
++{
++	char *log_dir = NULL;
++	int ret;
++
++	if (unlikely(!ops || !info)) {
++		bbox_print_err("ops: %p, info: %p\n",
++					ops, info);
++		return;
++	}
++
++	memset((void *)info, 0, sizeof(*info));
++	ret = ops->ops.get_last_log_info((struct error_info *)info);
++	if (ret) {
++		bbox_print_err("[%s] failed to get log info!\n", ops->ops.module);
++#ifdef CONFIG_BLACKBOX_DEBUG
++		if (ret == -ENOMSG)
++			save_invalid_log(ops, info);
++#endif
++		return;
++	}
++
++	strncpy(info->category, get_category(info->module, info->event),
++	       min(strlen(get_category(info->module, info->event)), sizeof(info->category) - 1));
++
++	bbox_print_info("[%s] starts saving log!\n", ops->ops.module);
++	bbox_print_info("event: [%s] module: [%s], time is [%s]!\n",
++			info->event, info->module, info->error_time);
++
++	log_dir = kmalloc(PATH_MAX_LEN, GFP_KERNEL);
++	if (!log_dir)
++		return;
++
++	if (!strlen(info->error_time))
++		get_timestamp((char *)info->error_time, TIMESTAMP_MAX_LEN);
++
++	format_log_dir(log_dir, PATH_MAX_LEN, CONFIG_BLACKBOX_LOG_ROOT_PATH,
++				   info->error_time);
++	create_log_dir(log_dir);
++	if (ops->ops.save_last_log(log_dir, (struct error_info *)info) == 0)
++		save_history_log(CONFIG_BLACKBOX_LOG_ROOT_PATH,
++					(struct error_info *)info, info->error_time, 1);
++	else
++		bbox_print_err("[%s] failed to save log!\n", ops->ops.module);
++	kfree(log_dir);
++}
++
++static void save_last_log(void)
++{
++	unsigned long flags;
++	struct error_info *info = NULL;
++	struct bbox_ops *ops = NULL;
++
++	info = kmalloc(sizeof(*info), GFP_KERNEL);
++	if (!info)
++		return;
++
++	spin_lock_irqsave(&ops_list_lock, flags);
++	list_for_each_entry(ops, &ops_list, list) {
++		if (ops->ops.get_last_log_info &&
++			ops->ops.save_last_log) {
++			spin_unlock_irqrestore(&ops_list_lock, flags);
++			do_save_last_log(ops, info);
++			spin_lock_irqsave(&ops_list_lock, flags);
++		} else {
++			bbox_print_err("[%s] get_last_log_info: %p, %s: %p\n",
++						ops->ops.module, ops->ops.get_last_log_info,
++						__func__, ops->ops.save_last_log);
++		}
++	}
++	spin_unlock_irqrestore(&ops_list_lock, flags);
++	kfree(info);
++}
++
++static void save_temp_error_log(void)
++{
++	down(&temp_error_info_sem);
++	if (!temp_error_info) {
++		bbox_print_err("temp_error_info: %p\n", temp_error_info);
++		up(&temp_error_info_sem);
++		return;
++	}
++
++	if (strlen(temp_error_info->event) != 0)
++		save_log_without_reset(temp_error_info);
++
++	kfree(temp_error_info);
++	temp_error_info = NULL;
++	up(&temp_error_info_sem);
++}
++
++static int save_error_log(void *pparam)
++{
++	wait_for_log_part();
++	save_last_log();
++	save_temp_error_log();
++
++	return 0;
++}
++
++int bbox_register_module_ops(struct module_ops *ops)
++{
++	struct bbox_ops *new_ops = NULL;
++	struct bbox_ops *temp = NULL;
++	unsigned long flags;
++
++	if (unlikely(!ops)) {
++		bbox_print_err("ops: %p\n", ops);
++		return -EINVAL;
++	}
++
++	new_ops = kmalloc(sizeof(*new_ops), GFP_KERNEL);
++	if (!new_ops)
++		return -ENOMEM;
++	memset(new_ops, 0, sizeof(*new_ops));
++	memcpy(&new_ops->ops, ops, sizeof(*ops));
++	spin_lock_irqsave(&ops_list_lock, flags);
++	if (list_empty(&ops_list))
++		goto __out;
++
++	list_for_each_entry(temp, &ops_list, list) {
++		if (!strcmp(temp->ops.module, ops->module)) {
++			spin_unlock_irqrestore(&ops_list_lock, flags);
++			kfree(new_ops);
++			bbox_print_info("[%s] has been registered!\n", temp->ops.module);
++			return -ENODATA;
++		}
++	}
++
++__out:
++	bbox_print_info("[%s] is registered successfully!\n", ops->module);
++	list_add_tail(&new_ops->list, &ops_list);
++	spin_unlock_irqrestore(&ops_list_lock, flags);
++
++	return 0;
++}
++
++int bbox_notify_error(const char event[EVENT_MAX_LEN], const char module[MODULE_MAX_LEN],
++				const char error_desc[ERROR_DESC_MAX_LEN], int need_sys_reset)
++{
++	struct error_info *info = NULL;
++
++	if (unlikely(!event || !module || !error_desc)) {
++		bbox_print_err("event: %p, module: %p, error_desc: %p\n", event,
++				module, error_desc);
++		return -EINVAL;
++	}
++
++	info = kmalloc(sizeof(*info), GFP_ATOMIC);
++	if (!info)
++		return -ENOMEM;
++
++	format_error_info(info, event, module, error_desc);
++	show_stack(current, NULL, KERN_DEFAULT);
++	if (!need_sys_reset) {
++		/* handle the error which do not need reset */
++		if (!is_log_part_mounted())
++			save_temp_error_info(event, module, error_desc);
++		else
++			save_log_without_reset(info);
++	} else {
++		/* handle the error which need reset */
++		save_log_with_reset(info);
++	}
++
++	kfree(info);
++
++	return 0;
++}
++
++static void __init select_storage_material(void)
++{
++	const struct reboot_crashlog_storage *tmp = NULL;
++
++	if (!storage_material)
++		return;
++
++	for (tmp = storage_lastwords; tmp->material; tmp++) {
++		if (!strcmp(storage_material, tmp->material)) {
++			storage_lastword = tmp;
++			return;
++		}
++	}
++}
++
++static int __init blackbox_core_init(void)
++{
++	struct task_struct *tsk = NULL;
++
++	select_storage_material();
++
++	temp_error_info = kmalloc(sizeof(*temp_error_info), GFP_KERNEL);
++	if (!temp_error_info)
++		return -ENOMEM;
++
++	memset(temp_error_info, 0, sizeof(*temp_error_info));
++
++	/* Create a kernel thread to save log */
++	tsk = kthread_run(save_error_log, NULL, "save_error_log");
++	if (IS_ERR(tsk)) {
++		kfree(temp_error_info);
++		temp_error_info = NULL;
++		bbox_print_err("kthread_run failed!\n");
++		return -ESRCH;
++	}
++
++	return 0;
++}
++
++core_initcall(blackbox_core_init);
++MODULE_LICENSE("GPL v2");
++MODULE_DESCRIPTION("Blackbox core framework");
++MODULE_AUTHOR("OHOS");
+diff --git a/drivers/staging/blackbox/blackbox_storage.c b/drivers/staging/blackbox/blackbox_storage.c
+new file mode 100644
+index 000000000..635e3aa03
+--- /dev/null
++++ b/drivers/staging/blackbox/blackbox_storage.c
+@@ -0,0 +1,203 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#include <linux/blackbox.h>
++#include <linux/delay.h>
++#include <linux/vmalloc.h>
++#include <linux/syscalls.h>
++#include <linux/dirent.h>
++#include <linux/pstore.h>
++#include <linux/blackbox_storage.h>
++#include <linux/blackbox_common.h>
++
++char *storage_material =
++#ifdef CONFIG_DEF_BLACKBOX_STORAGE
++		CONFIG_DEF_BLACKBOX_STORAGE;
++#else
++		NULL;
++#endif
++const struct reboot_crashlog_storage *storage_lastword __ro_after_init;
++
++#if IS_ENABLED(CONFIG_DEF_BLACKBOX_STORAGE_BY_MEMORY)
++static DEFINE_SEMAPHORE(kmsg_sem);
++static char *lastlog;
++unsigned int lastlog_len;
++static int get_log_by_memory(void *in, unsigned int inlen)
++{
++	return 0;
++}
++
++static int storage_log_by_memory(void *out, unsigned int outlen)
++{
++	if (unlikely(!out))
++		return -EINVAL;
++
++	/* Initialized from caller. */
++	lastlog = out;
++	lastlog_len = outlen;
++	return 0;
++}
++
++/* Called after storage_log_by_memory successfully. */
++static void do_kmsg_dump(struct kmsg_dumper *dumper,
++				enum kmsg_dump_reason reason)
++{
++	struct fault_log_info *pinfo;
++
++	if (unlikely(!lastlog))
++		return;
++
++	/* get kernel log from kmsg dump module */
++	if (down_trylock(&kmsg_sem) != 0) {
++		bbox_print_err("down_trylock failed!\n");
++		return;
++	}
++	pinfo = (struct fault_log_info *)lastlog;
++	(void)kmsg_dump_get_buffer(dumper, true, lastlog + sizeof(*pinfo),
++			lastlog_len - sizeof(*pinfo), (size_t *)&pinfo->len);
++	up(&kmsg_sem);
++}
++#endif
++
++#if defined(CONFIG_DEF_BLACKBOX_STORAGE_BY_PSTORE_BLK) ||  \
++	defined(CONFIG_DEF_BLACKBOX_STORAGE_BY_PSTORE_RAM)
++#define LOG_FILE_WAIT_TIME               1000 /* unit: ms */
++#define RETRY_MAX_COUNT                  10
++#define PSTORE_MOUNT_POINT               "/sys/fs/pstore/"
++#define FILE_LIMIT                       (0660)
++
++static bool is_pstore_part_ready(char *pstore_file)
++{
++	const char *cur_name = NULL;
++	struct dentry *root_dentry;
++	struct dentry *cur_dentry;
++	struct file *filp = NULL;
++	char *full_path = NULL;
++	bool is_ready = false;
++
++	if (unlikely(!pstore_file))
++		return -EINVAL;
++	memset(pstore_file, 0, sizeof(*pstore_file));
++
++	filp = file_open(PSTORE_MOUNT_POINT, O_RDONLY, 0);
++	if (IS_ERR(filp)) {
++		bbox_print_err("open %s failed! err is [%ld]\n", PSTORE_MOUNT_POINT, PTR_ERR(filp));
++		return -EBADF;
++	}
++
++	full_path = vmalloc(PATH_MAX_LEN);
++	if (!full_path)
++		goto __out;
++
++	root_dentry = filp->f_path.dentry;
++	list_for_each_entry(cur_dentry, &root_dentry->d_subdirs, d_child) {
++		cur_name = cur_dentry->d_name.name;
++
++		memset(full_path, 0, PATH_MAX_LEN);
++		snprintf(full_path, PATH_MAX_LEN - 1, "%s%s", PSTORE_MOUNT_POINT, cur_name);
++
++		if (S_ISREG(d_inode(cur_dentry)->i_mode) && !strncmp(cur_name, "blackbox",
++								     strlen("blackbox"))) {
++			is_ready = true;
++			if (strcmp(full_path, pstore_file) > 0)
++				strncpy(pstore_file, full_path, strlen(full_path));
++		}
++	}
++
++	if (is_ready && strlen(pstore_file))
++		bbox_print_info("get pstore file name %s successfully!\n", pstore_file);
++
++__out:
++	file_close(filp);
++	vfree(full_path);
++
++	return is_ready;
++}
++
++static int get_log_by_pstore(void *in, unsigned int inlen)
++{
++	char pstore_file[PATH_MAX_LEN];
++	struct file *filp = NULL;
++	char *pathname = NULL;
++	mm_segment_t old_fs;
++	void *pbuf = NULL;
++	loff_t pos = 0;
++	static int retry;
++	int ret = -1;
++
++	memset(pstore_file, 0, PATH_MAX_LEN);
++	while (!is_pstore_part_ready((char *)&pstore_file)) {
++		msleep(LOG_FILE_WAIT_TIME);
++		retry++;
++		if (retry >= RETRY_MAX_COUNT)
++			return -ENOENT;
++	}
++
++	if (likely(in)) {
++		filp = file_open(pstore_file, O_RDONLY, FILE_LIMIT);
++		if (IS_ERR(filp)) {
++			bbox_print_err("open %s failed! err is [%ld]\n", pstore_file,
++				       PTR_ERR(filp));
++			return -EBADF;
++		}
++		memset(in, 0, inlen);
++		pbuf = in;
++
++		old_fs = get_fs();
++		set_fs(KERNEL_DS);
++
++		ret = vfs_read(filp, pbuf, inlen, &pos);
++		if (ret < 0) {
++			pathname = getfullpath(filp);
++			bbox_print_err("read %s failed! err is [%d]\n", pathname ? pathname : "",
++				       ret);
++			goto __error;
++		}
++
++		set_fs(old_fs);
++		file_close(filp);
++		file_delete(filp);
++		return 0;
++	}
++
++	return -EBADF;
++__error:
++	set_fs(old_fs);
++	file_close(filp);
++	return -EIO;
++}
++#endif
++
++const struct reboot_crashlog_storage storage_lastwords[] = {
++#if IS_ENABLED(CONFIG_DEF_BLACKBOX_STORAGE_BY_MEMORY)
++	{
++		.get_log = get_log_by_memory,
++		.storage_log = storage_log_by_memory,
++		.blackbox_dump = do_kmsg_dump,
++		.material = "memory",
++	},
++#endif
++#if IS_ENABLED(CONFIG_DEF_BLACKBOX_STORAGE_BY_PSTORE_BLK)
++	{
++		.get_log = get_log_by_pstore,
++		.blackbox_dump = pstore_blackbox_dump,
++		.material = "pstore_blk",
++	},
++#endif
++#if IS_ENABLED(CONFIG_DEF_BLACKBOX_STORAGE_BY_PSTORE_RAM)
++	{
++		.get_log = get_log_by_pstore,
++		.blackbox_dump = pstore_blackbox_dump,
++		.material = "pstore_ram",
++	},
++#endif
++#if IS_ENABLED(CONFIG_DEF_BLACKBOX_STORAGE_BY_RAW_PARTITION)
++	{
++		.material = "raw_partition",
++	},
++#endif
++	{ }
++};
++
+diff --git a/drivers/staging/hievent/Kconfig b/drivers/staging/hievent/Kconfig
+new file mode 100644
+index 000000000..b445a2b90
+--- /dev/null
++++ b/drivers/staging/hievent/Kconfig
+@@ -0,0 +1,12 @@
++# SPDX-License-Identifier: GPL-2.0
++config HIEVENT
++	tristate "Enable hievent"
++	help
++	  hievent buffer manager
++
++config BBOX_BUFFER_SIZE
++	int "bbox buffer size"
++	depends on HIEVENT
++	default 2048
++	help
++	  Define the default ring buffer size of BBOX
+\ No newline at end of file
+diff --git a/drivers/staging/hievent/Makefile b/drivers/staging/hievent/Makefile
+new file mode 100644
+index 000000000..5b2adc23a
+--- /dev/null
++++ b/drivers/staging/hievent/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_HIEVENT)		+= hievent_driver.o
+\ No newline at end of file
+diff --git a/drivers/staging/hievent/hievent_driver.c b/drivers/staging/hievent/hievent_driver.c
+new file mode 100644
+index 000000000..86363d11d
+--- /dev/null
++++ b/drivers/staging/hievent/hievent_driver.c
+@@ -0,0 +1,416 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#define pr_fmt(fmt) "hievent_driver " fmt
++
++#include "hievent_driver.h"
++
++#include <linux/device.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/uaccess.h>
++#include <linux/fs.h>
++#include <linux/slab.h>
++#include <linux/cdev.h>
++#include <linux/sched.h>
++#include <linux/time.h>
++#include <linux/timex.h>
++#include <linux/rtc.h>
++#include <linux/version.h>
++#include <linux/uio.h>
++#include <linux/list.h>
++#include <linux/wait.h>
++
++static struct class *hievent_class;
++static dev_t hievent_devno;
++
++#define HIEVENT_BUFFER ((size_t)CONFIG_BBOX_BUFFER_SIZE)
++#define HIEVENT_DRIVER "/dev/bbox"
++#define HIEVENT_DEV_NAME "bbox"
++#define HIEVENT_DEV_NR 1
++
++struct hievent_entry {
++	unsigned short len;
++	unsigned short header_size;
++	char msg[0];
++};
++
++struct hievent_char_device {
++	struct cdev devm;
++	int flag;
++	struct mutex mtx; /* lock to protect read/write buffer */
++	unsigned char *buffer;
++	wait_queue_head_t wq;
++	size_t write_offset;
++	size_t head_offset;
++	size_t size;
++	size_t count;
++} hievent_dev;
++
++static inline unsigned char *hievent_buffer_head(void)
++{
++	if (hievent_dev.head_offset > HIEVENT_BUFFER)
++		hievent_dev.head_offset =
++			hievent_dev.head_offset % HIEVENT_BUFFER;
++
++	return hievent_dev.buffer + hievent_dev.head_offset;
++}
++
++static void hievent_buffer_inc(size_t sz)
++{
++	if (hievent_dev.size + sz <= HIEVENT_BUFFER) {
++		hievent_dev.size += sz;
++		hievent_dev.write_offset += sz;
++		hievent_dev.write_offset %= HIEVENT_BUFFER;
++		hievent_dev.count++;
++	}
++}
++
++static void hievent_buffer_dec(size_t sz)
++{
++	if (hievent_dev.size >= sz) {
++		hievent_dev.size -= sz;
++		hievent_dev.head_offset += sz;
++		hievent_dev.head_offset %= HIEVENT_BUFFER;
++		hievent_dev.count--;
++	}
++}
++
++static int hievent_read_ring_buffer(unsigned char __user *buffer,
++				    size_t buf_len)
++{
++	size_t retval;
++	size_t buf_left = HIEVENT_BUFFER - hievent_dev.head_offset;
++
++	if (buf_left > buf_len) {
++		retval = copy_to_user(buffer, hievent_buffer_head(), buf_len);
++	} else {
++		size_t mem_len = (buf_len > buf_left) ? buf_left : buf_len;
++
++		retval = copy_to_user(buffer, hievent_buffer_head(), mem_len);
++		if (retval < 0)
++			return retval;
++
++		retval = copy_to_user(buffer + buf_left, hievent_dev.buffer,
++				      buf_len - buf_left);
++	}
++	return retval;
++}
++
++static int hievent_read_ring_head_buffer(unsigned char * const buffer,
++					 size_t buf_len)
++{
++	size_t buf_left = HIEVENT_BUFFER - hievent_dev.head_offset;
++
++	if (buf_left > buf_len) {
++		memcpy(buffer, hievent_buffer_head(), buf_len);
++	} else {
++		size_t mem_len = (buf_len > buf_left) ? buf_left : buf_len;
++
++		memcpy(buffer, hievent_buffer_head(), mem_len);
++		memcpy(buffer + buf_left, hievent_dev.buffer,
++		       buf_len - buf_left);
++	}
++	return 0;
++}
++
++static ssize_t hievent_read(struct file *file, char __user *user_buf,
++			    size_t count, loff_t *ppos)
++{
++	size_t retval;
++	struct hievent_entry header;
++
++	(void)file;
++
++	wait_event_interruptible(hievent_dev.wq, (hievent_dev.size > 0));
++
++	(void)mutex_lock(&hievent_dev.mtx);
++
++	retval = hievent_read_ring_head_buffer((unsigned char *)&header,
++					       sizeof(header));
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	if (count < header.len + sizeof(header)) {
++		retval = -ENOMEM;
++		goto out;
++	}
++
++	hievent_buffer_dec(sizeof(header));
++
++	retval = hievent_read_ring_buffer((unsigned char __user *)(user_buf), header.len);
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++	hievent_buffer_dec(header.len);
++
++	retval = header.len + sizeof(header);
++out:
++	if (retval == -ENOMEM) {
++		// clean ring buffer
++		hievent_dev.write_offset = 0;
++		hievent_dev.head_offset = 0;
++		hievent_dev.size = 0;
++		hievent_dev.count = 0;
++	}
++	(void)mutex_unlock(&hievent_dev.mtx);
++
++	return retval;
++}
++
++static int hievent_write_ring_head_buffer(const unsigned char *buffer,
++					  size_t buf_len)
++{
++	size_t buf_left = HIEVENT_BUFFER - hievent_dev.write_offset;
++
++	if (buf_len > buf_left) {
++		memcpy(hievent_dev.buffer + hievent_dev.write_offset,
++		       buffer, buf_left);
++		memcpy(hievent_dev.buffer, buffer + buf_left,
++		       min(HIEVENT_BUFFER, buf_len - buf_left));
++	} else {
++		memcpy(hievent_dev.buffer + hievent_dev.write_offset,
++		       buffer, min(buf_left, buf_len));
++	}
++
++	return 0;
++}
++
++static void hievent_head_init(struct hievent_entry * const header, size_t len)
++{
++	header->len = (unsigned short)len;
++	header->header_size = sizeof(struct hievent_entry);
++}
++
++static void hievent_cover_old_log(size_t buf_len)
++{
++	int retval;
++	struct hievent_entry header;
++	size_t total_size = buf_len + sizeof(struct hievent_entry);
++
++	while (total_size + hievent_dev.size > HIEVENT_BUFFER) {
++		retval = hievent_read_ring_head_buffer((unsigned char *)&header,
++						       sizeof(header));
++		if (retval < 0)
++			break;
++
++		/* let count decrease twice */
++		hievent_buffer_dec(sizeof(header));
++		hievent_buffer_dec(header.len);
++	}
++}
++
++int hievent_write_internal(const char *buffer, size_t buf_len)
++{
++	struct hievent_entry header;
++	int retval;
++
++	if (buf_len < sizeof(int) ||
++	    buf_len > HIEVENT_BUFFER - sizeof(struct hievent_entry))
++		return -EINVAL;
++
++	(void)mutex_lock(&hievent_dev.mtx);
++
++	hievent_cover_old_log(buf_len);
++
++	hievent_head_init(&header, buf_len);
++	retval = hievent_write_ring_head_buffer((unsigned char *)&header,
++						sizeof(header));
++	if (retval) {
++		retval = -EINVAL;
++		goto out;
++	}
++	hievent_buffer_inc(sizeof(header));
++
++	retval = hievent_write_ring_head_buffer((unsigned char *)(buffer),
++						header.len);
++	if (retval) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	hievent_buffer_inc(header.len);
++
++	retval = header.len;
++
++out:
++	(void)mutex_unlock(&hievent_dev.mtx);
++	if (retval > 0)
++		wake_up_interruptible(&hievent_dev.wq);
++
++	return retval;
++}
++
++static unsigned int hievent_poll(struct file *filep, poll_table *wait)
++{
++	unsigned int mask = 0;
++
++	poll_wait(filep, &hievent_dev.wq, wait);
++	if (hievent_dev.size > 0) {
++		mask |= POLLIN | POLLRDNORM;
++		return mask;
++	}
++
++	return 0;
++}
++
++static ssize_t hievent_write_iter(struct kiocb *iocb, struct iov_iter *from)
++{
++	int check_code = 0;
++	unsigned char *temp_buffer = NULL;
++	const struct iovec *iov = from->iov;
++	int retval;
++	size_t buf_len;
++	(void)iocb;
++
++	if (from->nr_segs != 2) { /* must contain 2 segments */
++		pr_err("invalid nr_segs: %ld", from->nr_segs);
++		retval = -EINVAL;
++		goto out;
++	}
++
++	/* seg 0 info is checkcode*/
++	retval = copy_from_user(&check_code, iov[0].iov_base,
++				sizeof(check_code));
++	if (retval || check_code != CHECK_CODE) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	/* seg 1 info */
++	buf_len = iov[1].iov_len;
++	if (buf_len > HIEVENT_BUFFER - sizeof(struct hievent_entry)) {
++		retval = -ENOMEM;
++		goto out;
++	}
++
++	temp_buffer = kmalloc(buf_len, GFP_KERNEL);
++	if (!temp_buffer) {
++		retval = -ENOMEM;
++		goto out;
++	}
++
++	retval = copy_from_user(temp_buffer, iov[1].iov_base, iov[1].iov_len);
++	if (retval) {
++		retval = -EIO;
++		goto free_mem;
++	}
++
++	retval = hievent_write_internal(temp_buffer, buf_len);
++	if (retval < 0) {
++		retval = -EIO;
++		goto free_mem;
++	}
++	retval = buf_len + iov[0].iov_len;
++
++free_mem:
++	kfree(temp_buffer);
++
++out:
++	return retval;
++}
++
++static const struct file_operations hievent_fops = {
++	.read = hievent_read,   /* read */
++	.poll = hievent_poll,   /* poll */
++	.write_iter = hievent_write_iter, /* write_iter */
++};
++
++static int hievent_device_init(void)
++{
++	hievent_dev.buffer = kmalloc(HIEVENT_BUFFER, GFP_KERNEL);
++	if (!hievent_dev.buffer)
++		return -ENOMEM;
++
++	init_waitqueue_head(&hievent_dev.wq);
++	mutex_init(&hievent_dev.mtx);
++	hievent_dev.write_offset = 0;
++	hievent_dev.head_offset = 0;
++	hievent_dev.size = 0;
++	hievent_dev.count = 0;
++
++	return 0;
++}
++
++static int __init hieventdev_init(void)
++{
++	int result;
++	struct device *dev_ret = NULL;
++
++	result = alloc_chrdev_region(&hievent_devno, 0, HIEVENT_DEV_NR, HIEVENT_DEV_NAME);
++	if (result < 0) {
++		pr_err("register %s failed", HIEVENT_DRIVER);
++		return -ENODEV;
++	}
++
++	cdev_init(&hievent_dev.devm, &hievent_fops);
++	hievent_dev.devm.owner = THIS_MODULE;
++
++	result = cdev_add(&hievent_dev.devm, hievent_devno, HIEVENT_DEV_NR);
++	if (result < 0) {
++		pr_err("cdev_add failed");
++		goto unreg_dev;
++	}
++
++	result = hievent_device_init();
++	if (result < 0) {
++		pr_err("hievent_device_init failed");
++		goto del_dev;
++	}
++
++	hievent_class = class_create(THIS_MODULE, HIEVENT_DEV_NAME);
++	if (IS_ERR(hievent_class)) {
++		pr_err("class_create failed");
++		goto del_buffer;
++	}
++
++	dev_ret = device_create(hievent_class, 0, hievent_devno, 0, HIEVENT_DEV_NAME);
++	if (IS_ERR(dev_ret)) {
++		pr_err("device_create failed");
++		goto del_class;
++	}
++
++	return 0;
++
++del_class:
++	class_destroy(hievent_class);
++del_buffer:
++	kfree(hievent_dev.buffer);
++del_dev:
++	cdev_del(&hievent_dev.devm);
++unreg_dev:
++	unregister_chrdev_region(hievent_devno, HIEVENT_DEV_NR);
++
++	return -ENODEV;
++}
++
++static void __exit hievent_exit_module(void)
++{
++	device_destroy(hievent_class, hievent_devno);
++	class_destroy(hievent_class);
++	kfree(hievent_dev.buffer);
++	cdev_del(&hievent_dev.devm);
++	unregister_chrdev_region(hievent_devno, HIEVENT_DEV_NR);
++}
++
++static int __init hievent_init_module(void)
++{
++	int state;
++
++	state = hieventdev_init();
++	return 0;
++}
++
++module_init(hievent_init_module);
++module_exit(hievent_exit_module);
++
++MODULE_AUTHOR("OHOS");
++MODULE_DESCRIPTION("User mode hievent device interface");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("hievent");
+diff --git a/drivers/staging/hievent/hievent_driver.h b/drivers/staging/hievent/hievent_driver.h
+new file mode 100644
+index 000000000..83c67d9d2
+--- /dev/null
++++ b/drivers/staging/hievent/hievent_driver.h
+@@ -0,0 +1,22 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef HIEVENT_DRIVER_H
++#define HIEVENT_DRIVER_H
++
++#include <linux/types.h>
++
++#define CHECK_CODE 0x7BCDABCD
++
++struct idap_header {
++	char level;
++	char category;
++	char log_type;
++	char sn;
++};
++
++int hievent_write_internal(const char *buffer, size_t buf_len);
++
++#endif /* HIEVENT_DRIVER_H */
+diff --git a/drivers/staging/hievent/hiview_hievent.c b/drivers/staging/hievent/hiview_hievent.c
+new file mode 100644
+index 000000000..4533b6fbb
+--- /dev/null
++++ b/drivers/staging/hievent/hiview_hievent.c
+@@ -0,0 +1,488 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#include "hiview_hievent.h"
++#include "hievent_driver.h"
++
++#include <linux/slab.h>
++#include <linux/string.h>
++
++#define INT_TYPE_MAX_LEN    21
++
++#define MAX_PATH_LEN        256
++#define MAX_STR_LEN         (10 * 1024)
++
++/* CONFIG_BBOX_BUFFER_SIZE is max length of /dev/bbox */
++#define EVENT_INFO_BUF_LEN         ((size_t)CONFIG_BBOX_BUFFER_SIZE)
++#define EVENT_INFO_PACK_BUF_LEN    min((size_t)CONFIG_BBOX_BUFFER_SIZE, 2048)
++
++#define BUF_POINTER_FORWARD             \
++do {                                    \
++	if (tmplen < len) {             \
++		tmp += tmplen;          \
++		len -= tmplen;          \
++	} else {                        \
++		tmp += len;             \
++		len = 0;                \
++	}                               \
++} while (0)
++
++struct hievent_payload {
++	char *key;
++	char *value;
++	struct hievent_payload *next;
++};
++
++static int hievent_convert_string(struct hiview_hievent *event, char **pbuf);
++
++static struct hievent_payload *hievent_payload_create(void);
++
++static void hievent_payload_destroy(struct hievent_payload *p);
++
++static struct hievent_payload *hievent_get_payload(struct hievent_payload *head,
++						   const char *key);
++
++static void hievent_add_payload(struct hiview_hievent *obj,
++				struct hievent_payload *payload);
++
++static struct hievent_payload *hievent_payload_create(void)
++{
++	struct hievent_payload *payload = NULL;
++
++	payload = kmalloc(sizeof(*payload), GFP_KERNEL);
++	if (!payload)
++		return NULL;
++
++	payload->key = NULL;
++	payload->value = NULL;
++	payload->next = NULL;
++
++	return payload;
++}
++
++static void hievent_payload_destroy(struct hievent_payload *p)
++{
++	if (!p)
++		return;
++
++	kfree(p->value);
++	kfree(p->key);
++	kfree(p);
++}
++
++static struct hievent_payload *hievent_get_payload(struct hievent_payload *head,
++						   const char *key)
++{
++	struct hievent_payload *p = head;
++
++	while (p) {
++		if (key && p->key) {
++			if (strcmp(p->key, key) == 0)
++				return p;
++		}
++		p = p->next;
++	}
++
++	return NULL;
++}
++
++static void hievent_add_payload(struct hiview_hievent *obj,
++				struct hievent_payload *payload)
++{
++	if (!obj->head) {
++		obj->head = payload;
++	} else {
++		struct hievent_payload *p = obj->head;
++
++		while (p->next)
++			p = p->next;
++		p->next = payload;
++	}
++}
++
++struct hiview_hievent *hievent_create(unsigned int eventid)
++{
++	struct hiview_hievent *event = NULL;
++
++	/* combined event obj struct */
++	event = kmalloc(sizeof(*event), GFP_KERNEL);
++	if (!event)
++		return NULL;
++
++	memset(event, 0, sizeof(*event));
++	event->eventid = eventid;
++	pr_debug("%s : %u\n", __func__, eventid);
++
++	return (void *)event;
++}
++
++int hievent_put_integer(struct hiview_hievent *event,
++			const char *key, long value)
++{
++	int ret;
++	struct hievent_payload *payload = NULL;
++
++	if ((!event) || (!key)) {
++		pr_err("Bad input event or key for %s", __func__);
++		return -EINVAL;
++	}
++
++	payload = hievent_get_payload(event->head, key);
++	if (!payload) {
++		payload = hievent_payload_create();
++		if (!payload)
++			return -ENOMEM;
++		payload->key = kstrdup(key, GFP_KERNEL);
++		hievent_add_payload(event, payload);
++	}
++
++	kfree(payload->value);
++
++	payload->value = kmalloc(INT_TYPE_MAX_LEN, GFP_KERNEL);
++	if (!payload->value)
++		return -ENOMEM;
++
++	(void)memset(payload->value, 0, INT_TYPE_MAX_LEN);
++	ret = snprintf(payload->value, INT_TYPE_MAX_LEN, "%d", (int)value);
++	if (ret < 0)
++		return -ENOMEM;
++
++	return 0;
++}
++
++int hievent_put_string(struct hiview_hievent *event,
++		       const char *key, const char *value)
++{
++	struct hievent_payload *payload = NULL;
++	int len;
++
++	if ((!event) || (!key) || (!value)) {
++		pr_err("Bad key for %s", __func__);
++		return -EINVAL;
++	}
++
++	payload = hievent_get_payload(event->head, key);
++	if (!payload) {
++		payload = hievent_payload_create();
++		if (!payload)
++			return -ENOMEM;
++
++		payload->key = kstrdup(key, GFP_KERNEL);
++		hievent_add_payload(event, payload);
++	}
++
++	kfree(payload->value);
++
++	len = strlen(value);
++	/* prevent length larger than MAX_STR_LEN */
++	if (len > MAX_STR_LEN)
++		len = MAX_STR_LEN;
++
++	payload->value = kmalloc(len + 1, GFP_KERNEL);
++	if (!payload->value)
++		return -ENOMEM;
++
++	(void)memset(payload->value, 0, len + 1);
++	if (strncpy(payload->value, value, len) > 0)
++		payload->value[len] = '\0';
++
++	return 0;
++}
++
++int hievent_set_time(struct hiview_hievent *event, long long seconds)
++{
++	if ((!event) || (seconds == 0)) {
++		pr_err("Bad input for %s", __func__);
++		return -EINVAL;
++	}
++	event->time = seconds;
++	return 0;
++}
++
++static int append_array_item(char **pool, int pool_len, const char *path)
++{
++	int i;
++
++	if ((!path) || (path[0] == 0)) {
++		pr_err("Bad path %s", __func__);
++		return -EINVAL;
++	}
++
++	if (strlen(path) > MAX_PATH_LEN) {
++		pr_err("file path over max: %d", MAX_PATH_LEN);
++		return -EINVAL;
++	}
++
++	for (i = 0; i < pool_len; i++) {
++		if (pool[i] != 0)
++			continue;
++
++		pool[i] = kstrdup(path, GFP_KERNEL);
++		if (!pool[i])
++			return -ENOMEM;
++
++		break;
++	}
++
++	if (i == MAX_PATH_NUMBER) {
++		pr_err("Too many paths");
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++int hievent_add_filepath(struct hiview_hievent *event, const char *path)
++{
++	if (!event) {
++		pr_err("Bad path %s", __func__);
++		return -EINVAL;
++	}
++	return append_array_item(event->file_path, MAX_PATH_NUMBER, path);
++}
++
++/* make string ":" to "::", ";" to ";;", and remove newline character
++ * for example: "abc:def;ghi" transfer to "abc::def;;ghi"
++ */
++static char *hievent_make_regular(char *value)
++{
++	int count = 0;
++	int len = 0;
++	char *temp = value;
++	char *regular = NULL;
++	char *regular_tmp = NULL;
++	size_t regular_len;
++
++	while (*temp != '\0') {
++		if (*temp == ':')
++			count++;
++		else if (*temp == ';')
++			count++;
++		else if ((*temp == '\n') || (*temp == '\r'))
++			*temp = ' ';
++
++		temp++;
++		len++;
++	}
++
++	/* no need to transfer, just return old value */
++	if (count == 0)
++		return value;
++
++	regular_len = len + count * 2 + 1; // 2 char in a byte
++	regular = kmalloc(regular_len, GFP_KERNEL);
++	if (!regular)
++		return NULL;
++
++	(void)memset(regular, 0, regular_len);
++	regular_tmp = regular;
++	temp = value;
++	while (*temp != 0) {
++		if ((*temp == ':') || (*temp == ';'))
++			*regular_tmp++ = *temp;
++
++		*regular_tmp++ = *temp;
++		temp++;
++	}
++	*regular_tmp = '\0';
++
++	return regular;
++}
++
++int logbuff_to_exception(char category, int level, char log_type,
++			 char sn, const char *msg, int msglen)
++{
++	struct idap_header *hdr = NULL;
++	size_t buf_len = sizeof(int) + sizeof(struct idap_header) + msglen;
++	int ret;
++	int *check_code = NULL;
++	char *buffer = kmalloc(buf_len, GFP_KERNEL);
++
++	if (!buffer)
++		return -ENOMEM;
++
++	check_code = (int *)buffer;
++	*check_code = CHECK_CODE;
++
++	hdr = (struct idap_header *)(buffer + sizeof(int));
++	hdr->level = level;
++	hdr->category = category;
++	hdr->log_type = log_type;
++	hdr->sn = sn;
++
++	memcpy(buffer + sizeof(int) + sizeof(struct idap_header), msg, msglen);
++
++	ret = hievent_write_internal(buffer, buf_len);
++
++	kfree(buffer);
++
++	return ret;
++}
++
++static int hievent_fill_payload(struct hiview_hievent *event, char **pbuf,
++				char *tmp, int length)
++{
++	struct hievent_payload *p = event->head;
++	int len = length;
++	int tmplen;
++	unsigned int keycount = 0;
++
++	while (p) {
++		char *value = NULL;
++		char *regular_value = NULL;
++		int need_free = 1;
++
++		if (!p->value) {
++			p = p->next;
++			continue;
++		}
++		if (keycount == 0) {
++			tmplen = snprintf(tmp, len - 1, " --extra ");
++			BUF_POINTER_FORWARD;
++		}
++		keycount++;
++
++		/* fill key */
++		if (p->key)
++			tmplen = snprintf(tmp, len - 1, "%s:", p->key);
++
++		BUF_POINTER_FORWARD;
++		/* fill value */
++		tmplen = 0;
++
++		value = p->value;
++		regular_value = hievent_make_regular(value);
++		if (!regular_value) {
++			regular_value = "NULL";
++			need_free = 0;
++		}
++		tmplen = snprintf(tmp, len - 1, "%s;", regular_value);
++		if ((value != regular_value) && need_free)
++			kfree(regular_value);
++
++		BUF_POINTER_FORWARD;
++		p = p->next;
++	}
++	return len;
++}
++
++static int hievent_convert_string(struct hiview_hievent *event, char **pbuf)
++{
++	int len;
++	char *tmp = NULL;
++	int tmplen;
++	unsigned int i;
++
++	char *buf = kmalloc(EVENT_INFO_BUF_LEN, GFP_KERNEL);
++
++	if (!buf) {
++		*pbuf = NULL;
++		return 0;
++	}
++
++	(void)memset(buf, 0, EVENT_INFO_BUF_LEN);
++	len = EVENT_INFO_BUF_LEN;
++	tmp = buf;
++
++	/* fill eventid */
++	tmplen = snprintf(tmp, len - 1, "eventid %d", event->eventid);
++	BUF_POINTER_FORWARD;
++
++	/* fill the path */
++	for (i = 0; i < MAX_PATH_NUMBER; i++) {
++		if (!event->file_path[i])
++			break;
++
++		tmplen = snprintf(tmp, len - 1, " -i %s", event->file_path[i]);
++		BUF_POINTER_FORWARD;
++	}
++
++	/* fill time */
++	if (event->time) {
++		tmplen = snprintf(tmp, len - 1, " -t %lld",  event->time);
++		BUF_POINTER_FORWARD;
++	}
++
++	/* fill the payload info */
++	len = hievent_fill_payload(event, pbuf, tmp, len);
++	*pbuf = buf;
++	return (EVENT_INFO_BUF_LEN - len);
++}
++
++#define IDAP_LOGTYPE_CMD 1
++static int hievent_write_logexception(char *str, const int strlen)
++{
++	char tempchr;
++	char *strptr = str;
++	int left_buf_len = strlen + 1;
++	int sent_cnt = 0;
++
++	while (left_buf_len > 0) {
++		if (left_buf_len > EVENT_INFO_PACK_BUF_LEN) {
++			tempchr = strptr[EVENT_INFO_PACK_BUF_LEN - 1];
++			strptr[EVENT_INFO_PACK_BUF_LEN - 1] = '\0';
++			logbuff_to_exception(0, 0, IDAP_LOGTYPE_CMD, 1, strptr,
++					     EVENT_INFO_PACK_BUF_LEN);
++			left_buf_len -= (EVENT_INFO_PACK_BUF_LEN - 1);
++			strptr += (EVENT_INFO_PACK_BUF_LEN - 1);
++			strptr[0] = tempchr;
++			sent_cnt++;
++		} else {
++			logbuff_to_exception(0, 0, IDAP_LOGTYPE_CMD, 0, strptr,
++					     left_buf_len);
++			sent_cnt++;
++			break;
++		}
++	}
++
++	return sent_cnt;
++}
++
++int hievent_report(struct hiview_hievent *obj)
++{
++	char *str = NULL;
++	int buf_len;
++	int sent_packet;
++
++	if (!obj) {
++		pr_err("Bad event %s", __func__);
++		return -EINVAL;
++	}
++
++	buf_len = hievent_convert_string(obj, &str);
++	if (!str)
++		return -EINVAL;
++
++	sent_packet = hievent_write_logexception(str, buf_len);
++	pr_err("report: %s", str);
++	kfree(str);
++
++	return sent_packet;
++}
++
++void hievent_destroy(struct hiview_hievent *event)
++{
++	int i;
++	struct hievent_payload *p = NULL;
++
++	if (!event)
++		return;
++
++	p = event->head;
++	while (p) {
++		struct hievent_payload *del = p;
++
++		p = p->next;
++		hievent_payload_destroy(del);
++	}
++
++	event->head = NULL;
++	for (i = 0; i < MAX_PATH_NUMBER; i++) {
++		kfree(event->file_path[i]);
++		event->file_path[i] = NULL;
++	}
++
++	kfree(event);
++}
+diff --git a/drivers/staging/hievent/hiview_hievent.h b/drivers/staging/hievent/hiview_hievent.h
+new file mode 100644
+index 000000000..c1c003510
+--- /dev/null
++++ b/drivers/staging/hievent/hiview_hievent.h
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef HIVIEW_HIEVENT_H
++#define HIVIEW_HIEVENT_H
++
++#define MAX_PATH_NUMBER     10
++
++/* hievent struct */
++struct hiview_hievent {
++	unsigned int eventid;
++
++	long long time;
++
++	/* payload linked list */
++	struct hievent_payload *head;
++
++	/* file path needs uploaded */
++	char *file_path[MAX_PATH_NUMBER];
++};
++
++struct hiview_hievent *hievent_create(unsigned int eventid);
++int hievent_put_integer(struct hiview_hievent *event,
++			const char *key, long value);
++int hievent_put_string(struct hiview_hievent *event,
++		       const char *key, const char *value);
++int hievent_set_time(struct hiview_hievent *event, long long seconds);
++int hievent_add_filepath(struct hiview_hievent *event, const char *path);
++int hievent_report(struct hiview_hievent *obj);
++void hievent_destroy(struct hiview_hievent *event);
++
++#endif /* HIVIEW_HIEVENT_H */
+diff --git a/drivers/staging/hilog/Kconfig b/drivers/staging/hilog/Kconfig
+new file mode 100644
+index 000000000..243934c4c
+--- /dev/null
++++ b/drivers/staging/hilog/Kconfig
+@@ -0,0 +1,22 @@
++#
++# Sensor device configuration
++#
++
++config HILOG
++	tristate "Hilog support"
++	default n
++	help
++	  hilog buffer manager.
++
++	  Hilog is a simple log manager for OpenHarmonyOS.
++	  log string write to /dev/hilog, and the hilog driver copy it
++	  to the ring buffer. Ring buffer can be read from userspace.
++
++	  If unsure, say N.
++
++config HILOG_BUFFER_SIZE
++	int "hilog buffer size"
++	depends on HILOG
++	default 4096
++	help
++		Define the default ring buffer size of hilog
+diff --git a/drivers/staging/hilog/Makefile b/drivers/staging/hilog/Makefile
+new file mode 100644
+index 000000000..e53c86a5d
+--- /dev/null
++++ b/drivers/staging/hilog/Makefile
+@@ -0,0 +1,5 @@
++#
++# Makefile for the hi hilog drivers.
++#
++
++obj-$(CONFIG_HILOG)	+= hilog.o
+diff --git a/drivers/staging/hilog/hilog.c b/drivers/staging/hilog/hilog.c
+new file mode 100644
+index 000000000..4e6168ce7
+--- /dev/null
++++ b/drivers/staging/hilog/hilog.c
+@@ -0,0 +1,402 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/uaccess.h>
++#include <linux/fs.h>
++#include <linux/slab.h>
++#include <linux/cdev.h>
++#include <linux/sched.h>
++#include <linux/time.h>
++#include <linux/timex.h>
++#include <linux/rtc.h>
++#include <linux/version.h>
++
++#ifndef HILOGDEV_MAJOR
++#define HILOGDEV_MAJOR 245
++#endif
++
++#ifndef HILOG_NR_DEVS
++#define HILOG_NR_DEVS 2
++#endif
++
++#ifndef MEMDEV_SIZE
++#define MEMDEV_SIZE 4096
++#endif
++
++static int hilog_major = HILOGDEV_MAJOR;
++
++module_param(hilog_major, int, 0444);
++
++struct cdev g_hilog_cdev;
++
++#define HILOG_BUFFER ((size_t)CONFIG_HILOG_BUFFER_SIZE)
++#define HILOG_DRIVER "/dev/hilog"
++
++struct hilog_entry {
++	unsigned int len;
++	unsigned int header_size;
++	unsigned int pid : 16;
++	unsigned int task_id : 16;
++	unsigned int sec;
++	unsigned int nsec;
++	unsigned int reserved;
++	char msg[0];
++};
++
++static ssize_t hilog_write(struct file *file,
++			   const char __user *user_buf,
++			   size_t count, loff_t *ppos);
++static ssize_t hilog_read(struct file *file,
++			  char __user *user_buf, size_t count, loff_t *ppos);
++
++static const struct file_operations hilog_fops = {
++	.read = hilog_read,
++	.write = hilog_write,
++};
++
++struct hilog_char_device {
++	int flag;
++	struct mutex mtx; /* lock to protect read/write buffer */
++	unsigned char *buffer;
++	wait_queue_head_t wq;
++	size_t wr_off;
++	size_t hdr_off;
++	size_t size;
++	size_t count;
++} hilog_dev;
++
++static inline unsigned char *hilog_buffer_head(void)
++{
++	return hilog_dev.buffer + hilog_dev.hdr_off;
++}
++
++static void hilog_buffer_inc(size_t sz)
++{
++	if (hilog_dev.size + sz <= HILOG_BUFFER) {
++		hilog_dev.size += sz;
++		hilog_dev.wr_off += sz;
++		hilog_dev.wr_off %= HILOG_BUFFER;
++		hilog_dev.count++;
++	}
++}
++
++static void hilog_buffer_dec(size_t sz)
++{
++	if (hilog_dev.size >= sz) {
++		hilog_dev.size -= sz;
++		hilog_dev.hdr_off += sz;
++		hilog_dev.hdr_off %= HILOG_BUFFER;
++		hilog_dev.count--;
++	}
++}
++
++static int hilog_read_ring_buff(unsigned char __user *buffer, size_t buf_len)
++{
++	size_t retval;
++	size_t buf_left = HILOG_BUFFER - hilog_dev.hdr_off;
++
++	if (buf_left > buf_len) {
++		retval = copy_to_user(buffer, hilog_buffer_head(), buf_len);
++	} else {
++		size_t mem_len = (buf_len > buf_left) ? buf_left : buf_len;
++
++		retval = copy_to_user(buffer, hilog_buffer_head(), mem_len);
++		if (retval < 0)
++			return retval;
++
++		retval = copy_to_user(buffer + buf_left, hilog_dev.buffer,
++				      buf_len - buf_left);
++	}
++	return retval;
++}
++
++static int hilog_read_ring_head_buffer(unsigned char *buffer, size_t buf_len)
++{
++	size_t buf_left = HILOG_BUFFER - hilog_dev.hdr_off;
++
++	if (buf_left > buf_len) {
++		memcpy(buffer, hilog_buffer_head(), buf_len);
++	} else {
++		size_t mem_len = (buf_len > buf_left) ? buf_left : buf_len;
++
++		memcpy(buffer, hilog_buffer_head(), mem_len);
++		memcpy(buffer + buf_left, hilog_dev.buffer, buf_len - buf_left);
++	}
++
++	return 0;
++}
++
++static ssize_t hilog_read(struct file *file,
++			  char __user *user_buf, size_t count, loff_t *ppos)
++{
++	size_t retval;
++	struct hilog_entry header;
++
++	(void)file;
++	wait_event_interruptible(hilog_dev.wq, (hilog_dev.size > 0));
++
++	(void)mutex_lock(&hilog_dev.mtx);
++
++	retval = hilog_read_ring_head_buffer((unsigned char *)&header,
++					     sizeof(header));
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	if (count < header.len + sizeof(header)) {
++		pr_err("buffer too small,buf_len=%d, header.len=%d,%d\n",
++		       (int)count, header.len, header.header_size);
++		retval = -ENOMEM;
++		goto out;
++	}
++
++	hilog_buffer_dec(sizeof(header));
++	retval = copy_to_user((unsigned char *)user_buf,
++			      (unsigned char *)&header,
++			      min(count, sizeof(header)));
++
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	retval = hilog_read_ring_buff((unsigned char *)
++				      (user_buf + sizeof(header)),
++				      header.len);
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	hilog_buffer_dec(header.len);
++	retval = header.len + sizeof(header);
++out:
++	if (retval == -ENOMEM) {
++		// clean ring buffer
++		hilog_dev.wr_off = 0;
++		hilog_dev.hdr_off = 0;
++		hilog_dev.size = 0;
++		hilog_dev.count = 0;
++	}
++	(void)mutex_unlock(&hilog_dev.mtx);
++
++	return retval;
++}
++
++static int hilog_write_ring_buffer(unsigned char __user *buffer, size_t buf_len)
++{
++	int retval;
++	size_t buf_left = HILOG_BUFFER - hilog_dev.wr_off;
++
++	if (buf_len > buf_left) {
++		retval = copy_from_user(hilog_dev.buffer + hilog_dev.wr_off,
++					buffer, buf_left);
++		if (retval)
++			return -1;
++		retval = copy_from_user(hilog_dev.buffer, buffer + buf_left,
++					min(HILOG_BUFFER, buf_len - buf_left));
++	} else {
++		retval = copy_from_user(hilog_dev.buffer + hilog_dev.wr_off,
++					buffer, min(buf_left, buf_len));
++	}
++
++	if (retval < 0)
++		return -1;
++
++	return 0;
++}
++
++static int hilog_write_ring_head_buffer(unsigned char *buffer, size_t buf_len)
++{
++	size_t buf_left = HILOG_BUFFER - hilog_dev.wr_off;
++
++	if (buf_len > buf_left) {
++		memcpy(hilog_dev.buffer + hilog_dev.wr_off,
++		       buffer, buf_left);
++		memcpy(hilog_dev.buffer, buffer + buf_left,
++		       min(HILOG_BUFFER, buf_len - buf_left));
++	} else {
++		memcpy(hilog_dev.buffer + hilog_dev.wr_off,
++		       buffer, min(buf_left, buf_len));
++	}
++
++	return 0;
++}
++
++static void hilog_head_init(struct hilog_entry *header, size_t len)
++{
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
++#define NANOSEC_PER_MIRCOSEC 1000
++	struct timeval now = { 0 };
++
++	do_gettimeofday(&now);
++
++	header->sec = now.tv_sec;
++	header->nsec = now.tv_usec * NANOSEC_PER_MIRCOSEC;
++#else
++	struct timespec64 now = { 0 };
++
++	ktime_get_real_ts64(&now);
++
++	header->sec = now.tv_sec;
++	header->nsec = now.tv_nsec;
++#endif
++
++	header->len = len;
++	header->pid = current->pid;
++	header->task_id = current->tgid;
++	header->header_size = sizeof(struct hilog_entry);
++}
++
++static void hilog_cover_old_log(size_t buf_len)
++{
++	int retval;
++	struct hilog_entry header;
++	size_t total_size = buf_len + sizeof(struct hilog_entry);
++	static int drop_log_lines;
++	static bool is_last_time_full;
++	bool is_this_time_full = false;
++
++	while (total_size + hilog_dev.size > HILOG_BUFFER) {
++		retval = hilog_read_ring_head_buffer((unsigned char *)&header,
++						     sizeof(header));
++		if (retval < 0)
++			break;
++
++		drop_log_lines++;
++		is_this_time_full = true;
++		is_last_time_full = true;
++		hilog_buffer_dec(sizeof(header) + header.len);
++	}
++	if (is_last_time_full && !is_this_time_full) {
++		/* so we can only print one log if hilog ring buffer is full in a short time */
++		if (drop_log_lines > 0)
++			pr_info("hilog ringbuffer full, drop %d line(s) log\n",
++				drop_log_lines);
++		is_last_time_full = false;
++		drop_log_lines = 0;
++	}
++}
++
++int hilog_write_internal(const char __user *buffer, size_t buf_len)
++{
++	struct hilog_entry header;
++	int retval;
++
++	(void)mutex_lock(&hilog_dev.mtx);
++	hilog_cover_old_log(buf_len);
++	hilog_head_init(&header, buf_len);
++
++	retval = hilog_write_ring_head_buffer((unsigned char *)&header,
++					      sizeof(header));
++	if (retval) {
++		retval = -ENODATA;
++		goto out;
++	}
++	hilog_buffer_inc(sizeof(header));
++
++	retval = hilog_write_ring_buffer((unsigned char *)(buffer), header.len);
++	if (retval) {
++		retval = -ENODATA;
++		goto out;
++	}
++
++	hilog_buffer_inc(header.len);
++
++	retval = header.len;
++
++out:
++	(void)mutex_unlock(&hilog_dev.mtx);
++	if (retval > 0)
++		wake_up_interruptible(&hilog_dev.wq);
++	else if (retval < 0)
++		pr_err("write fail retval=%d\n", retval);
++
++	return retval;
++}
++
++static ssize_t hilog_write(struct file *file,
++			   const char __user *user_buf,
++			   size_t count, loff_t *ppos)
++{
++	(void)file;
++	if (count + sizeof(struct hilog_entry) > HILOG_BUFFER) {
++		pr_err("input too large\n");
++		return -ENOMEM;
++	}
++
++	return hilog_write_internal(user_buf, count);
++}
++
++static void hilog_device_init(void)
++{
++	hilog_dev.buffer = kmalloc(HILOG_BUFFER, GFP_KERNEL);
++	if (!hilog_dev.buffer)
++		return;
++
++	init_waitqueue_head(&hilog_dev.wq);
++	mutex_init(&hilog_dev.mtx);
++	hilog_dev.wr_off = 0;
++	hilog_dev.hdr_off = 0;
++	hilog_dev.size = 0;
++	hilog_dev.count = 0;
++}
++
++static int __init hilogdev_init(void)
++{
++	int result;
++	dev_t devno = MKDEV(hilog_major, 0);
++
++	result = register_chrdev_region(devno, 2, "hilog");
++	if (result < 0) {
++		pr_emerg("\t register hilog error %d\n", result);
++		return result;
++	}
++
++	cdev_init(&g_hilog_cdev, &hilog_fops);
++	g_hilog_cdev.owner = THIS_MODULE;
++	g_hilog_cdev.ops = &hilog_fops;
++
++	cdev_add(&g_hilog_cdev, MKDEV(hilog_major, 0), HILOG_NR_DEVS);
++
++	hilog_device_init();
++	return 0;
++}
++
++static void __exit hilog_exit_module(void)
++{
++	cdev_del(&g_hilog_cdev);
++	unregister_chrdev_region(MKDEV(hilog_major, 0), HILOG_NR_DEVS);
++}
++
++static int __init hilog_init_module(void)
++{
++	int state = hilogdev_init();
++
++	pr_info("\t hilog_init Start%d\n", state);
++	return 0;
++}
++
++module_init(hilog_init_module);
++module_exit(hilog_exit_module);
++
++MODULE_AUTHOR("OHOS");
++MODULE_DESCRIPTION("User mode hilog device interface");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("hilog");
+diff --git a/drivers/staging/hisysevent/Kconfig b/drivers/staging/hisysevent/Kconfig
+new file mode 100644
+index 000000000..a40621cb8
+--- /dev/null
++++ b/drivers/staging/hisysevent/Kconfig
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: GPL-2.0
++config HISYSEVENT
++	tristate "Enable hisysevent"
++	depends on HIEVENT
++	help
++	  Say Y here to enable hisysevent feature support.
+diff --git a/drivers/staging/hisysevent/Makefile b/drivers/staging/hisysevent/Makefile
+new file mode 100644
+index 000000000..f3b6c9296
+--- /dev/null
++++ b/drivers/staging/hisysevent/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_HISYSEVENT)		+= hiview_hisysevent.o
+diff --git a/drivers/staging/hisysevent/hiview_hisysevent.c b/drivers/staging/hisysevent/hiview_hisysevent.c
+new file mode 100644
+index 000000000..515b0a748
+--- /dev/null
++++ b/drivers/staging/hisysevent/hiview_hisysevent.c
+@@ -0,0 +1,519 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++#include <dfx/hiview_hisysevent.h>
++
++#ifdef CONFIG_HISYSEVENT
++
++#include <linux/cred.h>
++#include <linux/ctype.h>
++#include <linux/fs.h>
++#include <linux/module.h>
++#include <linux/sched.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/time.h>
++#include <linux/types.h>
++#include <linux/uio.h>
++#include <linux/vmalloc.h>
++#include <asm/current.h>
++
++#define PARAM_INT_MAX_LEN	21   // 21 = 20 (max len) + 1 ('\0')
++#define PARAM_STR_MAX_LEN	1536 // 1.5KB
++
++#define MAX_DOMAIN_LENGTH 16
++#define MAX_EVENT_NAME_LENGTH 32
++#define MAX_PARAM_NAME_LENGTH 48
++#define MAX_PARAM_NUMBER 128
++
++#define HISYSEVENT_WRITER_DEV "/dev/bbox"
++#define HISYSEVENT_INFO_BUF_LEN (2048 - 6)  // 2KB - 6 (read_gap)
++
++#define MINUTE_TO_SECS 60
++#define SEC_TO_MILLISEC 1000
++#define MILLISEC_TO_NANOSEC (1000 * 1000)
++#define TIME_ZONE_LEN 6
++
++#define BUF_POINTER_FORWARD	\
++	do {	\
++		if (tmp_len >= 0 && tmp_len < len) {	\
++			tmp += tmp_len;	\
++			len -= tmp_len;	\
++		} else {	\
++			pr_err("string over length");	\
++			tmp += len;	\
++			len = 0;	\
++		}	\
++	} while (0)
++
++static int CHECK_CODE = 0x7BCDABCD;
++
++struct hisysevent_payload {
++	/* key of the event param */
++	char *key;
++
++	/* value of the event param */
++	char *value;
++
++	/* next param */
++	struct hisysevent_payload *next;
++};
++
++/* hisysevent struct */
++struct hiview_hisysevent {
++	/* event domain */
++	char *domain;
++
++	/* event name */
++	char *name;
++
++	/* event type */
++	int type;
++
++	/* event time */
++	long long time;
++
++	/* time zone */
++	char *tz;
++
++	/* process id */
++	int pid;
++
++	/* thread id */
++	int tid;
++
++	/* user id */
++	int uid;
++
++	/* payload linked list */
++	struct hisysevent_payload *head;
++
++	/* length of payload */
++	int payload_cnt;
++};
++
++static struct hisysevent_payload *hisysevent_payload_create(void)
++{
++	struct hisysevent_payload *payload = NULL;
++
++	payload = kmalloc(sizeof(*payload), GFP_KERNEL);
++	if (!payload)
++		return NULL;
++
++	payload->key = NULL;
++	payload->value = NULL;
++	payload->next = NULL;
++	return payload;
++}
++
++static void hisysevent_payload_destroy(struct hisysevent_payload *p)
++{
++	if (!p)
++		return;
++
++	kfree(p->value);
++	kfree(p->key);
++	kfree(p);
++}
++
++static void
++hisysevent_add_payload(struct hiview_hisysevent *event, struct hisysevent_payload *payload)
++{
++	if (!event->head) {
++		event->head = payload;
++	} else {
++		struct hisysevent_payload *temp = event->head;
++
++		while (temp->next)
++			temp = temp->next;
++		temp->next = payload;
++	}
++}
++
++static struct hisysevent_payload *
++hisysevent_get_payload(struct hiview_hisysevent *event, const char *key)
++{
++	struct hisysevent_payload *p = event->head;
++
++	if (!key)
++		return NULL;
++
++	while (p) {
++		if (p->key && strcmp(p->key, key) == 0)
++			return p;
++		p = p->next;
++	}
++
++	return NULL;
++}
++
++static struct hisysevent_payload *
++hisysevent_get_or_create_payload(struct hiview_hisysevent *event, const char *key)
++{
++	struct hisysevent_payload *payload = hisysevent_get_payload(event, key);
++
++	if (payload) {
++		kfree(payload->value);
++		return payload;
++	}
++
++	payload = hisysevent_payload_create();
++	if (!payload)
++		return NULL;
++
++	payload->key = kstrdup(key, GFP_ATOMIC);
++	if (!payload->key) {
++		hisysevent_payload_destroy(payload);
++		return NULL;
++	}
++
++	hisysevent_add_payload(event, payload);
++	return payload;
++}
++
++static int json_add_number(char *json, size_t len, const char *key, long long num)
++{
++	return snprintf(json, len, "\"%s\":%lld,", key, num);
++}
++
++static int json_add_string(char *json, size_t len, const char *key, const char *str)
++{
++	return snprintf(json, len, "\"%s\":%s,", key, str);
++}
++
++static int json_add_string2(char *json, size_t len, const char *key, const char *str)
++{
++	return snprintf(json, len, "\"%s\":\"%s\",", key, str);
++}
++
++static int hisysevent_convert_base(const struct hiview_hisysevent *event, char **buf, int len)
++{
++	int tmp_len = 0;
++	char *tmp = *buf;
++
++	tmp_len = json_add_string2(tmp, len, "domain_", event->domain);
++	BUF_POINTER_FORWARD;
++	tmp_len = json_add_string2(tmp, len, "name_", event->name);
++	BUF_POINTER_FORWARD;
++	tmp_len = json_add_number(tmp, len, "type_", event->type);
++	BUF_POINTER_FORWARD;
++	tmp_len = json_add_number(tmp, len, "time_", event->time);
++	BUF_POINTER_FORWARD;
++	tmp_len = json_add_string2(tmp, len, "tz_", event->tz);
++	BUF_POINTER_FORWARD;
++	tmp_len = json_add_number(tmp, len, "pid_", event->pid);
++	BUF_POINTER_FORWARD;
++	tmp_len = json_add_number(tmp, len, "tid_", event->tid);
++	BUF_POINTER_FORWARD;
++	tmp_len = json_add_number(tmp, len, "uid_", event->uid);
++	BUF_POINTER_FORWARD;
++	*buf = tmp;
++	return len;
++}
++
++static int hisysevent_convert_payload(struct hisysevent_payload *payload, char **buf, int len)
++{
++	int tmp_len = 0;
++	char *tmp = *buf;
++	struct hisysevent_payload *tmp_payload = payload;
++
++	while (tmp_payload) {
++		if (!tmp_payload->key || !tmp_payload->value) {
++			pr_err("drop invalid payload");
++			tmp_payload = tmp_payload->next;
++			continue;
++		}
++		tmp_len = json_add_string(tmp, len, tmp_payload->key, tmp_payload->value);
++		BUF_POINTER_FORWARD;
++		tmp_payload = tmp_payload->next;
++	}
++	*buf = tmp;
++	return len;
++}
++
++static int hisysevent_convert_json(const struct hiview_hisysevent *event, char **buf_ptr)
++{
++	char *tmp;
++	int tmp_len = 0;
++	int buf_len = HISYSEVENT_INFO_BUF_LEN;
++	int len = buf_len;
++	char *buf = vmalloc(buf_len + 1);
++
++	if (!buf)
++		return -ENOMEM;
++	memset(buf, 0, buf_len + 1);
++
++	tmp = buf;
++	tmp_len = snprintf(tmp, len, "%c", '{');
++	BUF_POINTER_FORWARD;
++
++	len = hisysevent_convert_base(event, &tmp, len);
++	if (!event->head)
++		goto convert_end;
++	len = hisysevent_convert_payload(event->head, &tmp, len);
++
++convert_end:
++	if (len <= 1) { // remaining len must > 1, for '}' and '\0'
++		vfree(buf);
++		return -EINVAL;
++	}
++
++	tmp_len = snprintf(tmp - 1, len, "%c", '}');
++	BUF_POINTER_FORWARD;
++	*buf_ptr = buf;
++	return 0;
++}
++
++static void hisysevent_set_time(struct hiview_hisysevent *event)
++{
++	struct timespec64 ts;
++	struct timezone tz = sys_tz;
++	int tz_index = 0;
++	char time_zone[TIME_ZONE_LEN];
++	int tz_hour;
++	int tz_min;
++	long long millisecs = 0;
++
++	ktime_get_real_ts64(&ts);
++	millisecs = ts.tv_sec * SEC_TO_MILLISEC + ts.tv_nsec / MILLISEC_TO_NANOSEC;
++	event->time = millisecs;
++
++	tz_hour = (-tz.tz_minuteswest) / MINUTE_TO_SECS;
++	time_zone[tz_index++] = tz_hour >= 0 ? '+' : '-';
++	tz_min = (-tz.tz_minuteswest) % MINUTE_TO_SECS;
++	sprintf(&time_zone[tz_index], "%02u%02u", abs(tz_hour), abs(tz_min));
++	time_zone[TIME_ZONE_LEN - 1] = '\0';
++	event->tz = kstrdup(time_zone, GFP_ATOMIC);
++}
++
++static bool is_valid_string(const char *str, unsigned int max_len)
++{
++	unsigned int len = 0;
++	unsigned int i;
++
++	if (!str)
++		return false;
++
++	len = strlen(str);
++	if (len == 0 || len > max_len)
++		return false;
++
++	for (i = 0; i < len; i++) {
++		if (!isalpha(str[i]) && str[i] != '_')
++			return false;
++	}
++	return true;
++}
++
++static bool is_valid_num_of_param(struct hiview_hisysevent *event)
++{
++	if (!event)
++		return false;
++
++	return (event->payload_cnt) < MAX_PARAM_NUMBER;
++}
++
++struct hiview_hisysevent *
++hisysevent_create(const char *domain, const char *name, enum hisysevent_type type)
++{
++	struct hiview_hisysevent *event = NULL;
++
++	if (!is_valid_string(domain, MAX_DOMAIN_LENGTH)) {
++		pr_err("invalid event domain");
++		return NULL;
++	}
++	if (!is_valid_string(name, MAX_EVENT_NAME_LENGTH)) {
++		pr_err("invalid event name");
++		return NULL;
++	}
++
++	event = kmalloc(sizeof(*event), GFP_KERNEL);
++	if (!event)
++		return NULL;
++	memset(event, 0, sizeof(*event));
++
++	event->domain = kstrdup(domain, GFP_ATOMIC);
++	if (!(event->domain))
++		goto create_err;
++
++	event->name = kstrdup(name, GFP_ATOMIC);
++	if (!(event->name))
++		goto create_err;
++
++	event->type = type;
++	event->pid = current->pid;
++	event->tid = current->tgid;
++	event->uid = current_uid().val;
++	hisysevent_set_time(event);
++	if (!(event->tz))
++		goto create_err;
++
++	event->payload_cnt = 0;
++	pr_info("create hisysevent succ, domain=%s, name=%s, type=%d",
++		event->domain, event->name, event->type);
++	return (void *)event;
++
++create_err:
++	hisysevent_destroy(&event);
++	return NULL;
++}
++EXPORT_SYMBOL_GPL(hisysevent_create);
++
++void hisysevent_destroy(struct hiview_hisysevent **event)
++{
++	struct hisysevent_payload *payload = NULL;
++
++	if (!event || !*event)
++		return;
++
++	kfree((*event)->domain);
++	kfree((*event)->name);
++	kfree((*event)->tz);
++	payload = (*event)->head;
++	while (payload) {
++		struct hisysevent_payload *temp = payload;
++
++		payload = payload->next;
++		hisysevent_payload_destroy(temp);
++	}
++	kfree(*event);
++	*event = NULL;
++}
++EXPORT_SYMBOL_GPL(hisysevent_destroy);
++
++int hisysevent_put_integer(struct hiview_hisysevent *event, const char *key, long long value)
++{
++	struct hisysevent_payload *payload = NULL;
++
++	if (!event) {
++		pr_err("invalid event");
++		return -EINVAL;
++	}
++	if (!is_valid_num_of_param(event)) {
++		pr_err("invalid num of param");
++		return -EINVAL;
++	}
++	if (!is_valid_string(key, MAX_PARAM_NAME_LENGTH)) {
++		pr_err("invalid key");
++		return -EINVAL;
++	}
++
++	payload = hisysevent_get_or_create_payload(event, key);
++	if (!payload) {
++		pr_err("failed to get or create payload");
++		return -ENOMEM;
++	}
++
++	payload->value = kmalloc(PARAM_INT_MAX_LEN, GFP_KERNEL);
++	if (!payload->value)
++		return -ENOMEM;
++
++	memset(payload->value, 0, PARAM_INT_MAX_LEN);
++	snprintf(payload->value, PARAM_INT_MAX_LEN, "%lld", value);
++	event->payload_cnt++;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(hisysevent_put_integer);
++
++int hisysevent_put_string(struct hiview_hisysevent *event, const char *key, const char *value)
++{
++	struct hisysevent_payload *payload = NULL;
++	int len = 0;
++	int tmp_len = 0;
++	char *tmp_value = NULL;
++
++	if (!event) {
++		pr_err("invalid event");
++		return -EINVAL;
++	}
++	if (!is_valid_num_of_param(event)) {
++		pr_err("invalid num of param");
++		return -EINVAL;
++	}
++	if (!is_valid_string(key, MAX_PARAM_NAME_LENGTH)) {
++		pr_err("invalid key");
++		return -EINVAL;
++	}
++	if (!value) {
++		pr_err("invalid value");
++		return -EINVAL;
++	}
++
++	payload = hisysevent_get_or_create_payload(event, key);
++	if (!payload) {
++		pr_err("failed to get or create payload");
++		return -ENOMEM;
++	}
++
++	len = strlen(value);
++	if (len > PARAM_STR_MAX_LEN) {
++		pr_warn("string cannot exceed 1536 Byte, len=%d", len);
++		len = PARAM_STR_MAX_LEN;
++	}
++
++	tmp_len = len + 3; // 3 for \", \", \0
++	payload->value = kmalloc(tmp_len, GFP_KERNEL);
++	if (!payload->value)
++		return -ENOMEM;
++	memset(payload->value, 0, tmp_len);
++
++	tmp_value = payload->value;
++	snprintf(tmp_value++, tmp_len--, "%c", '\"');
++	memcpy(tmp_value, value, len);
++	snprintf(tmp_value + len, tmp_len - len, "%c", '\"');
++	event->payload_cnt++;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(hisysevent_put_string);
++
++int hisysevent_write(struct hiview_hisysevent *event)
++{
++	struct iov_iter iter;
++	mm_segment_t oldfs;
++	char *data = NULL;
++	struct file *filp = NULL;
++	struct iovec vec[3];
++	unsigned long vcount = 0;
++	int ret;
++
++	if (!event)
++		return -EINVAL;
++
++	ret = hisysevent_convert_json(event, &data);
++	if (ret != 0 || !data) {
++		pr_err("failed to convert event to string");
++		return -EINVAL;
++	}
++	pr_info("write hisysevent data=%s", data);
++
++	filp = filp_open(HISYSEVENT_WRITER_DEV, O_WRONLY, 0);
++
++	if (!filp || IS_ERR(filp)) {
++		ret = PTR_ERR(filp);
++		pr_err("failed to access '%s', res=%d", HISYSEVENT_WRITER_DEV, ret);
++		vfree(data);
++		return -ENODEV;
++	}
++
++	vec[vcount].iov_base = &CHECK_CODE;
++	vec[vcount++].iov_len = sizeof(CHECK_CODE);
++	vec[vcount].iov_base = data;
++	vec[vcount++].iov_len = strlen(data) + 1;
++
++	oldfs = get_fs();
++	set_fs(KERNEL_DS);
++	iov_iter_init(&iter, WRITE, vec, vcount, iov_length(vec, vcount));
++	ret = vfs_iter_write(filp, &iter, &filp->f_pos, 0);
++	set_fs(oldfs);
++
++	if (ret < 0)
++		pr_err("failed to write hisysevent, ret=%d", ret);
++
++	filp_close(filp, NULL);
++	vfree(data);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(hisysevent_write);
++
++#endif /* CONFIG_HISYSEVENT */
+diff --git a/drivers/staging/hungtask/Kconfig b/drivers/staging/hungtask/Kconfig
+new file mode 100644
+index 000000000..4e80dc9fc
+--- /dev/null
++++ b/drivers/staging/hungtask/Kconfig
+@@ -0,0 +1,14 @@
++# SPDX-License-Identifier: GPL-2.0
++config DFX_HUNGTASK
++	bool "DFX hungtask"
++	depends on DETECT_HUNG_TASK
++	default n
++	help
++	  Base DFX hungtask module
++
++config DFX_HUNGTASK_USER
++	bool "DFX hungtask user watchdog module"
++	depends on DFX_HUNGTASK
++	default n
++	help
++	  DFX hungtask user watchdog module
+\ No newline at end of file
+diff --git a/drivers/staging/hungtask/Makefile b/drivers/staging/hungtask/Makefile
+new file mode 100644
+index 000000000..12def220e
+--- /dev/null
++++ b/drivers/staging/hungtask/Makefile
+@@ -0,0 +1,3 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_DFX_HUNGTASK) += hungtask_base.o
++obj-$(CONFIG_DFX_HUNGTASK_USER) += hungtask_user.o
+diff --git a/drivers/staging/hungtask/hungtask_base.c b/drivers/staging/hungtask/hungtask_base.c
+new file mode 100644
+index 000000000..95c21dd04
+--- /dev/null
++++ b/drivers/staging/hungtask/hungtask_base.c
+@@ -0,0 +1,1031 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#define pr_fmt(fmt) "hungtask_base " fmt
++
++#include <linux/nmi.h>
++#include <linux/delay.h>
++#include <linux/freezer.h>
++#include <linux/utsname.h>
++#include <trace/events/sched.h>
++#include <linux/slab.h>
++#include <linux/version.h>
++#include <linux/sched/debug.h>
++#include <linux/suspend.h>
++#include <linux/spinlock.h>
++#ifdef CONFIG_DFX_ZEROHUNG
++#include <dfx/zrhung.h>
++#endif
++#include <dfx/hungtask_base.h>
++#include "hungtask_user.h"
++
++static struct rb_root list_tasks = RB_ROOT;
++static DEFINE_SPINLOCK(list_tasks_lock);
++static struct hlist_head whitelist[WHITELIST_LEN];
++static struct whitelist_item whitetmplist[WHITELIST_LEN];
++static bool whitelist_empty = true;
++static int remove_cnt;
++static struct task_item *remove_list[MAX_REMOVE_LIST_NUM + 1];
++static unsigned long __read_mostly hungtask_timeout_secs =
++	CONFIG_DEFAULT_HUNG_TASK_TIMEOUT;
++static int did_panic;
++static unsigned int hungtask_enable = HT_DISABLE;
++static unsigned int whitelist_type = WHITE_LIST;
++static int whitelist_dump_cnt = DEFAULT_WHITE_DUMP_CNT;
++static int whitelist_panic_cnt = DEFAULT_WHITE_PANIC_CNT;
++static int appspawn_pid;
++static int dump_and_upload;
++static int time_since_upload;
++static int hung_task_must_panic;
++static int report_zrhung_id;
++static struct task_hung_upload upload;
++static int do_refresh;
++static char frozen_buf[FROZEN_BUF_LEN];
++static int frozen_used;
++static bool frozed_head;
++static unsigned long cur_heartbeat;
++static struct work_struct send_work;
++static char report_buf_text[REPORT_MSGLENGTH];
++
++bool hashlist_find(struct hlist_head *head, int count, pid_t tgid)
++{
++	struct hashlist_node *hnode = NULL;
++
++	if (count <= 0)
++		return false;
++	if (hlist_empty(&head[tgid % count]))
++		return false;
++	hlist_for_each_entry(hnode, &head[tgid % count], list) {
++		if (hnode->pid == tgid)
++			return true;
++	}
++	return false;
++}
++
++void hashlist_clear(struct hlist_head *head, int count)
++{
++	int i = 0;
++	struct hlist_node *n = NULL;
++	struct hashlist_node *hnode = NULL;
++
++	for (i = 0; i < count; i++) {
++		hlist_for_each_entry_safe(hnode, n, &head[i], list) {
++			hlist_del(&hnode->list);
++			kfree(hnode);
++			hnode = NULL;
++		}
++	}
++	for (i = 0; i < count; i++)
++		INIT_HLIST_HEAD(&head[i]);
++}
++
++bool hashlist_insert(struct hlist_head *head, int count, pid_t tgid)
++{
++	struct hashlist_node *hnode = NULL;
++
++	if (hashlist_find(head, count, tgid))
++		return false;
++	hnode = kmalloc(sizeof(struct hashlist_node), GFP_ATOMIC);
++	if (!hnode)
++		return false;
++	INIT_HLIST_NODE(&hnode->list);
++	hnode->pid = tgid;
++	hlist_add_head(&hnode->list, &head[tgid % count]);
++	return true;
++}
++
++static bool rcu_lock_break(struct task_struct *g, struct task_struct *t)
++{
++	bool can_cont = false;
++
++	get_task_struct(g);
++	get_task_struct(t);
++	rcu_read_unlock();
++	cond_resched();
++	rcu_read_lock();
++	can_cont = pid_alive(g) && pid_alive(t);
++	put_task_struct(t);
++	put_task_struct(g);
++	return can_cont;
++}
++
++static bool rcu_break(int *max_count, int *batch_count,
++		      struct task_struct *g,
++		      struct task_struct *t)
++{
++	if (!(*max_count)--)
++		return true;
++	if (!--(*batch_count)) {
++		*batch_count = HUNG_TASK_BATCHING;
++		if (!rcu_lock_break(g, t))
++			return true;
++	}
++	return false;
++}
++
++static pid_t get_pid_by_name(const char *name)
++{
++	int max_count = PID_MAX_LIMIT;
++	int batch_count = HUNG_TASK_BATCHING;
++	struct task_struct *g = NULL;
++	struct task_struct *t = NULL;
++	int pid = 0;
++
++	rcu_read_lock();
++	do_each_thread(g, t) {
++		if (rcu_break(&max_count, &batch_count, g, t))
++			goto unlock;
++		if (!strncmp(t->comm, name, TASK_COMM_LEN)) {
++			pid = t->tgid;
++			goto unlock;
++		}
++	} while_each_thread(g, t);
++
++unlock:
++	rcu_read_unlock();
++	return pid;
++}
++
++static unsigned int get_task_type(pid_t pid, pid_t tgid, struct task_struct *parent)
++{
++	unsigned int flag = TASK_TYPE_IGNORE;
++	/* check tgid of it's parent as PPID */
++	if (parent) {
++		pid_t ppid = parent->tgid;
++
++		if (ppid == PID_KTHREAD)
++			flag |= TASK_TYPE_KERNEL;
++		else if (ppid == appspawn_pid)
++			flag |= TASK_TYPE_APP;
++		else if (ppid == PID_INIT)
++			flag |= TASK_TYPE_NATIVE;
++	}
++	if (!whitelist_empty && hashlist_find(whitelist, WHITELIST_LEN, tgid))
++		flag |= TASK_TYPE_WHITE | TASK_TYPE_JANK;
++
++	return flag;
++}
++
++static void refresh_appspawn_pids(void)
++{
++	int max_count = PID_MAX_LIMIT;
++	int batch_count = HUNG_TASK_BATCHING;
++	struct task_struct *g = NULL;
++	struct task_struct *t = NULL;
++
++	rcu_read_lock();
++	do_each_thread(g, t) {
++		if (rcu_break(&max_count, &batch_count, g, t))
++			goto unlock;
++		if (!strncmp(t->comm, "appspawn", TASK_COMM_LEN))
++			appspawn_pid = t->tgid;
++	} while_each_thread(g, t);
++unlock:
++	rcu_read_unlock();
++}
++
++static void refresh_task_type(pid_t pid, int task_type)
++{
++	struct task_item *item = NULL;
++	struct rb_node *p = NULL;
++
++	spin_lock(&list_tasks_lock);
++	for (p = rb_first(&list_tasks); p; p = rb_next(p)) {
++		item = rb_entry(p, struct task_item, node);
++		if (item->tgid == pid)
++			item->task_type = task_type;
++	}
++	spin_unlock(&list_tasks_lock);
++}
++
++static void refresh_whitelist_pids(void)
++{
++	int i;
++
++	hashlist_clear(whitelist, WHITELIST_LEN);
++	for (i = 0; i < WHITELIST_LEN; i++) {
++		if (!strlen(whitetmplist[i].name))
++			continue;
++		whitetmplist[i].pid =
++			get_pid_by_name(whitetmplist[i].name);
++		if (!whitetmplist[i].pid)
++			continue;
++		refresh_task_type(whitetmplist[i].pid,
++			TASK_TYPE_WHITE | TASK_TYPE_JANK);
++		if (hashlist_insert(whitelist, WHITELIST_LEN,
++			whitetmplist[i].pid))
++			pr_info("whitelist[%d]-%s-%d\n", i,
++				whitetmplist[i].name, whitetmplist[i].pid);
++		else
++			pr_info("can't find %s\n", whitetmplist[i].name);
++	}
++	refresh_appspawn_pids();
++}
++
++static struct task_item *find_task(pid_t pid, struct rb_root *root)
++{
++	struct rb_node **p = &root->rb_node;
++	struct task_item *cur = NULL;
++	struct rb_node *parent = NULL;
++
++	while (*p) {
++		parent = *p;
++		cur = rb_entry(parent, struct task_item, node);
++		if (!cur)
++			return NULL;
++		if (pid < cur->pid)
++			p = &(*p)->rb_left;
++		else if (pid > cur->pid)
++			p = &(*p)->rb_right;
++		else
++			return cur;
++	}
++	return NULL;
++}
++
++static bool insert_task(struct task_item *item, struct rb_root *root)
++{
++	struct rb_node **p = &root->rb_node;
++	struct rb_node *parent = NULL;
++	struct task_item *cur = NULL;
++
++	while (*p) {
++		parent = *p;
++
++		cur = rb_entry(parent, struct task_item, node);
++		if (!cur)
++			return false;
++		if (item->pid < cur->pid) {
++			p = &(*p)->rb_left;
++		} else if (item->pid > cur->pid) {
++			p = &(*p)->rb_right;
++		} else {
++			pr_info("insert pid=%d,tgid=%d,name=%s,type=%d fail\n",
++				item->pid, item->tgid,
++				item->name, item->task_type);
++			return false;
++		}
++	}
++	rb_link_node(&item->node, parent, p);
++	rb_insert_color(&item->node, root);
++	return true;
++}
++
++void show_block_task(struct task_item *taskitem, struct task_struct *p)
++{
++	unsigned long last_arrival;
++	unsigned long last_queued;
++
++#ifdef CONFIG_SCHED_INFO
++	last_arrival = p->sched_info.last_arrival;
++	last_queued = p->sched_info.last_queued;
++#else
++	last_arrival = 0;
++	last_queued = 0;
++#endif /* CONFIG_SCHED_INFO */
++	if (unlikely(p->flags & PF_FROZEN)) {
++		if (taskitem)
++			pr_err("name=%s,PID=%d,tgid=%d,tgname=%s,"
++			       "FROZEN for %ds,type=%d,la%lu/lq%lu\n",
++			       p->comm, p->pid, p->tgid,
++			       p->group_leader->comm,
++			       taskitem->d_state_time * HEARTBEAT_TIME,
++			       taskitem->task_type,
++			       last_arrival, last_queued);
++		else
++			pr_err("name=%s,PID=%d,tgid=%d,tgname=%s,"
++			       "just FROZE,la%lu/lq%lu\n",
++			       p->comm, p->pid, p->tgid,
++			       p->group_leader->comm,
++			       last_arrival, last_queued);
++	} else {
++		if (taskitem)
++			pr_err("name=%s,PID=%d,tgid=%d,prio=%d,cpu=%d,tgname=%s,"
++			       "type=%d,blocked for %ds,la%lu/lq%lu\n",
++			       taskitem->name, taskitem->pid, p->tgid, p->prio,
++			       task_cpu(p), p->group_leader->comm, taskitem->task_type,
++			       taskitem->d_state_time * HEARTBEAT_TIME,
++			       last_arrival, last_queued);
++		else
++			pr_err("name=%s,PID=%d,tgid=%d,prio=%d,cpu=%d,"
++			       "tgname=%s,la%lu/lq%lu\n",
++			       p->comm, p->pid, p->tgid, p->prio, task_cpu(p),
++			       p->group_leader->comm,
++			       last_arrival, last_queued);
++
++		sched_show_task(p);
++	}
++}
++
++void htbase_show_state_filter(unsigned long state_filter)
++{
++	struct task_struct *g = NULL;
++	struct task_struct *p = NULL;
++	struct task_item *taskitem = NULL;
++
++#if BITS_PER_LONG == 32
++	pr_info("  task                PC stack   pid father\n");
++#else
++	pr_info("  task                        PC stack   pid father\n");
++#endif
++	rcu_read_lock();
++	for_each_process_thread(g, p) {
++		/*
++		 * reset the NMI-timeout, listing all files on a slow
++		 * console might take a lot of time:
++		 */
++		touch_nmi_watchdog();
++		if ((p->state == TASK_RUNNING) || (p->state & state_filter)) {
++			spin_lock(&list_tasks_lock);
++			taskitem = find_task(p->pid, &list_tasks);
++			spin_unlock(&list_tasks_lock);
++			show_block_task(taskitem, p);
++		}
++	}
++	touch_all_softlockup_watchdogs();
++	rcu_read_unlock();
++	/* Show locks if hungtask happen */
++	if ((state_filter == TASK_UNINTERRUPTIBLE) || !state_filter)
++		debug_show_all_locks();
++}
++
++void hungtask_show_state_filter(unsigned long state_filter)
++{
++	pr_err("BinderChain_SysRq start\n");
++	htbase_show_state_filter(state_filter);
++	pr_err("BinderChain_SysRq end\n");
++}
++
++void do_dump_task(struct task_struct *task)
++{
++	sched_show_task(task);
++	debug_show_held_locks(task);
++}
++
++void do_show_task(struct task_struct *task, unsigned int flag, int d_state_time)
++{
++	pr_err("%s, flag=%d\n", __func__, flag);
++	rcu_read_lock();
++	if (!pid_alive(task)) {
++		rcu_read_unlock();
++		return;
++	}
++	if (flag & (FLAG_DUMP_WHITE | FLAG_DUMP_APP)) {
++		int cnt = 0;
++
++		trace_sched_process_hang(task);
++		cnt = d_state_time;
++		pr_err("INFO: task %s:%d tgid:%d blocked for %ds in %s\n",
++		       task->comm, task->pid, task->tgid,
++		       (HEARTBEAT_TIME * cnt),
++		       (flag & FLAG_DUMP_WHITE) ? "whitelist" : "applist");
++		pr_err("      %s %s %.*s\n",
++		       print_tainted(), init_utsname()->release,
++		       (int)strcspn(init_utsname()->version, " "),
++		       init_utsname()->version);
++		do_dump_task(task);
++		touch_nmi_watchdog();
++		if (flag & FLAG_DUMP_WHITE && (!dump_and_upload)) {
++			dump_and_upload++;
++			upload.pid = task->pid;
++			upload.tgid = task->tgid;
++			upload.duration = d_state_time;
++			memset(upload.name, 0, sizeof(upload.name));
++			strncpy(upload.name, task->comm, sizeof(upload.name));
++			upload.flag = flag;
++			if (task->flags & PF_FROZEN)
++				upload.flag = (upload.flag | FLAG_PF_FROZEN);
++		}
++	}
++	rcu_read_unlock();
++}
++
++static void do_panic(void)
++{
++	if (sysctl_hung_task_panic) {
++		trigger_all_cpu_backtrace();
++		panic("hungtask: blocked tasks");
++	}
++}
++
++static void create_taskitem(struct task_item *taskitem,
++			    struct task_struct *task)
++{
++	taskitem->pid = task->pid;
++	taskitem->tgid = task->tgid;
++	memset(taskitem->name, 0, sizeof(taskitem->name));
++	strncpy(taskitem->name, task->comm, sizeof(taskitem->name));
++	taskitem->switch_count = task->nvcsw + task->nivcsw;
++	taskitem->dump_wa = 0; /* whitelist or applist task dump times */
++	taskitem->panic_wa = 0; /* whitelist or applist task panic times */
++	taskitem->d_state_time = -1;
++	taskitem->isdone_wa = true; /* if task in white or app dealed */
++}
++
++static bool refresh_task(struct task_item *taskitem, struct task_struct *task)
++{
++	bool is_called = false;
++
++	if (taskitem->switch_count != (task->nvcsw + task->nivcsw)) {
++		taskitem->switch_count = task->nvcsw + task->nivcsw;
++		is_called = true;
++		return is_called;
++	}
++	if (taskitem->task_type & TASK_TYPE_WHITE) {
++		taskitem->isdone_wa = false;
++		taskitem->dump_wa++;
++		taskitem->panic_wa++;
++	}
++	taskitem->d_state_time++;
++	if (task->flags & PF_FROZEN)
++		taskitem->task_type |= TASK_TYPE_FROZEN;
++	return is_called;
++}
++
++static void remove_list_tasks(struct task_item *item)
++{
++	rb_erase(&item->node, &list_tasks);
++	kfree(item);
++}
++
++static void shrink_process_item(struct task_item *item, bool *is_finish)
++{
++	if (remove_cnt >= MAX_REMOVE_LIST_NUM) {
++		int i;
++
++		remove_list[remove_cnt++] = item;
++		for (i = 0; i < remove_cnt; i++)
++			remove_list_tasks(remove_list[i]);
++		remove_cnt = 0;
++		*is_finish = false;
++	} else {
++		remove_list[remove_cnt++] = item;
++	}
++}
++
++static void shrink_list_tasks(void)
++{
++	int i;
++	bool is_finish = false;
++	struct rb_node *n = NULL;
++	struct task_item *item = NULL;
++
++	spin_lock(&list_tasks_lock);
++	while (!is_finish) {
++		is_finish = true;
++		for (n = rb_first(&list_tasks); n != NULL; n = rb_next(n)) {
++			item = rb_entry(n, struct task_item, node);
++			if (!item)
++				continue;
++			if (item->isdone_wa) {
++				shrink_process_item(item, &is_finish);
++				if (!is_finish)
++					break;
++			}
++		}
++	}
++	for (i = 0; i < remove_cnt; i++)
++		remove_list_tasks(remove_list[i]);
++	remove_cnt = 0;
++	spin_unlock(&list_tasks_lock);
++}
++
++static void check_parameters(void)
++{
++	if ((whitelist_dump_cnt < 0) ||
++		(whitelist_dump_cnt > DEFAULT_WHITE_DUMP_CNT))
++		whitelist_dump_cnt = DEFAULT_WHITE_DUMP_CNT;
++	if ((whitelist_panic_cnt <= 0) ||
++		(whitelist_panic_cnt > DEFAULT_WHITE_PANIC_CNT))
++		whitelist_panic_cnt = DEFAULT_WHITE_PANIC_CNT;
++}
++
++static void send_work_handler(struct work_struct *data)
++{
++#ifdef CONFIG_DFX_ZEROHUNG
++	zrhung_send_event(HUNGTASK_DOMAIN, HUNGTASK_NAME,
++		report_buf_text);
++#endif
++}
++
++static void htbase_report_zrhung_event(const char *report_buf_tag)
++{
++	htbase_show_state_filter(TASK_UNINTERRUPTIBLE);
++	pr_err("%s end\n", report_buf_tag);
++	schedule_work(&send_work);
++	report_zrhung_id++;
++}
++
++static void htbase_report_zrhung(unsigned int event)
++{
++	bool report_load = false;
++	char report_buf_tag[REPORT_MSGLENGTH] = {0};
++	char report_name[TASK_COMM_LEN + 1] = {0};
++	int report_pid = 0;
++	int report_hungtime = 0;
++	int report_tasktype = 0;
++
++	if (!event)
++		return;
++	if (event & HUNGTASK_EVENT_WHITELIST) {
++		snprintf(report_buf_tag, sizeof(report_buf_tag),
++			 "hungtask_whitelist_%d", report_zrhung_id);
++		strncpy(report_name, upload.name, TASK_COMM_LEN);
++		report_pid = upload.pid;
++		report_tasktype = TASK_TYPE_WHITE;
++		report_hungtime = whitelist_dump_cnt * HEARTBEAT_TIME;
++		report_load = true;
++	} else {
++		pr_err("No such event report to zerohung!");
++	}
++	pr_err("%s start\n", report_buf_tag);
++	if (event & HUNGTASK_EVENT_WHITELIST)
++		pr_err("report HUNGTASK_EVENT_WHITELIST to zrhung\n");
++	if (upload.flag & FLAG_PF_FROZEN)
++		snprintf(report_buf_text, sizeof(report_buf_text),
++			 "Task %s(%s) pid %d type %d blocked %ds.",
++			 report_name, "FROZEN", report_pid, report_tasktype, report_hungtime);
++	else
++		snprintf(report_buf_text, sizeof(report_buf_text),
++			 "Task %s pid %d type %d blocked %ds.",
++			 report_name, report_pid, report_tasktype, report_hungtime);
++	if (report_load)
++		htbase_report_zrhung_event(report_buf_tag);
++}
++
++static int print_frozen_list_item(int pid)
++{
++	int tmp;
++
++	if (!frozed_head) {
++		tmp = snprintf(frozen_buf, FROZEN_BUF_LEN, "%s", "FROZEN Pid:");
++		if (tmp < 0)
++			return -1;
++		frozen_used += min(tmp, FROZEN_BUF_LEN - 1);
++		frozed_head = true;
++	}
++	tmp = snprintf(frozen_buf + frozen_used, FROZEN_BUF_LEN - frozen_used, "%d,",
++		pid);
++	if (tmp < 0)
++		return -1;
++	frozen_used += min(tmp, FROZEN_BUF_LEN - frozen_used - 1);
++	return frozen_used;
++}
++
++int dump_task_wa(struct task_item *item, int dump_cnt,
++	struct task_struct *task, unsigned int flag)
++{
++	int ret = 0;
++
++	if ((item->d_state_time > TWO_MINUTES) &&
++		(item->d_state_time % TWO_MINUTES != 0))
++		return ret;
++	if ((item->d_state_time > HUNG_TEN_MINUTES) &&
++		(item->d_state_time % HUNG_TEN_MINUTES != 0))
++		return ret;
++	if ((item->d_state_time > HUNG_ONE_HOUR) &&
++		(item->d_state_time % HUNG_ONE_HOUR != 0))
++		return ret;
++	if (dump_cnt && (item->dump_wa > dump_cnt)) {
++		item->dump_wa = 1;
++		if (!dump_and_upload && task->flags & PF_FROZEN) {
++			int tmp = print_frozen_list_item(item->pid);
++			if (tmp < 0)
++				return ret;
++			if (tmp >= FROZEN_BUF_LEN - 1) {
++				pr_err("%s", frozen_buf);
++				memset(frozen_buf, 0, sizeof(frozen_buf));
++				frozen_used = 0;
++				frozed_head = false;
++				print_frozen_list_item(item->pid);
++			}
++		} else if (!dump_and_upload) {
++			pr_err("Ready to dump a task %s\n", item->name);
++			do_show_task(task, flag, item->d_state_time);
++			ret++;
++		}
++	}
++	return ret;
++}
++
++static void update_panic_task(struct task_item *item)
++{
++	if (upload.pid != 0)
++		return;
++
++	upload.pid = item->pid;
++	upload.tgid = item->tgid;
++	memset(upload.name, 0, sizeof(upload.name));
++	strncpy(upload.name, item->name, sizeof(upload.name));
++}
++
++static void deal_task(struct task_item *item, struct task_struct *task, bool is_called)
++{
++	int any_dumped_num = 0;
++
++	if (is_called) {
++		item->dump_wa = 1;
++		item->panic_wa = 1;
++		item->d_state_time = 0;
++		return;
++	}
++	if (item->task_type & TASK_TYPE_WHITE)
++		any_dumped_num = dump_task_wa(item, whitelist_dump_cnt, task,
++					      FLAG_DUMP_WHITE);
++	if (!is_called && (item->task_type & TASK_TYPE_WHITE)) {
++		if (whitelist_panic_cnt && item->panic_wa > whitelist_panic_cnt) {
++			pr_err("Task %s is causing panic\n", item->name);
++			update_panic_task(item);
++			item->panic_wa = 0;
++			hung_task_must_panic++;
++		} else {
++			item->isdone_wa = false;
++		}
++	}
++	if (item->isdone_wa)
++		remove_list_tasks(item);
++}
++
++static bool check_conditions(struct task_struct *task, unsigned int task_type)
++{
++	bool no_check = true;
++
++	if (task->flags & PF_FROZEN)
++		return no_check;
++	if (task_type & TASK_TYPE_WHITE &&
++		(whitelist_dump_cnt || whitelist_panic_cnt))
++		no_check = false;
++	return no_check;
++}
++
++static void htbase_check_one_task(struct task_struct *t)
++{
++	unsigned int task_type = TASK_TYPE_IGNORE;
++	unsigned long switch_count = t->nvcsw + t->nivcsw;
++	struct task_item *taskitem = NULL;
++	bool is_called = false;
++
++	if (unlikely(!switch_count)) {
++		pr_info("skip one's switch_count is zero\n");
++		return;
++	}
++
++	taskitem = find_task(t->pid, &list_tasks);
++	if (taskitem) {
++		if (check_conditions(t, taskitem->task_type))
++			return;
++		is_called = refresh_task(taskitem, t);
++	} else {
++		task_type = get_task_type(t->pid, t->tgid, t->real_parent);
++		if (check_conditions(t, task_type))
++			return;
++		taskitem = kmalloc(sizeof(*taskitem), GFP_ATOMIC);
++		if (!taskitem) {
++			pr_err("kmalloc failed");
++			return;
++		}
++		memset(taskitem, 0, sizeof(*taskitem));
++		taskitem->task_type = task_type;
++		create_taskitem(taskitem, t);
++		is_called = refresh_task(taskitem, t);
++		insert_task(taskitem, &list_tasks);
++	}
++	deal_task(taskitem, t, is_called);
++}
++
++static void htbase_pre_process(void)
++{
++	htbase_set_timeout_secs(sysctl_hung_task_timeout_secs);
++	cur_heartbeat++;
++	if ((cur_heartbeat % REFRESH_INTERVAL) == 0)
++		do_refresh = 1;
++	else
++		do_refresh = 0;
++	if (do_refresh || (cur_heartbeat < TIME_REFRESH_PIDS)) {
++		refresh_whitelist_pids();
++		check_parameters();
++	}
++}
++
++static void htbase_post_process(void)
++{
++	struct rb_node *n = NULL;
++	unsigned int hungevent = 0;
++
++	if (frozen_used) {
++		pr_err("%s", frozen_buf);
++		memset(frozen_buf, 0, sizeof(frozen_buf));
++		frozen_used = 0;
++		frozed_head = false;
++	}
++	if (dump_and_upload == HUNG_TASK_UPLOAD_ONCE) {
++		hungevent |= HUNGTASK_EVENT_WHITELIST;
++		dump_and_upload++;
++	}
++	if (dump_and_upload > 0) {
++		time_since_upload++;
++		if (time_since_upload > (whitelist_panic_cnt - whitelist_dump_cnt)) {
++			dump_and_upload = 0;
++			time_since_upload = 0;
++		}
++	}
++	if (hung_task_must_panic) {
++		htbase_show_state_filter(TASK_UNINTERRUPTIBLE);
++		hung_task_must_panic = 0;
++		pr_err("Task %s:%d blocked for %ds is causing panic\n",
++		       upload.name, upload.pid,
++		       whitelist_panic_cnt * HEARTBEAT_TIME);
++		do_panic();
++	}
++	htuser_post_process_userlist();
++	shrink_list_tasks();
++	for (n = rb_first(&list_tasks); n != NULL; n = rb_next(n)) {
++		struct task_item *item = rb_entry(n, struct task_item, node);
++		item->isdone_wa = true;
++	}
++
++	if (hungevent)
++		htbase_report_zrhung(hungevent);
++}
++
++void htbase_check_tasks(unsigned long timeout)
++{
++	int max_count = PID_MAX_LIMIT;
++	int batch_count = HUNG_TASK_BATCHING;
++	struct task_struct *g = NULL;
++	struct task_struct *t = NULL;
++
++	if (!hungtask_enable)
++		return;
++	if (test_taint(TAINT_DIE) || did_panic) {
++		pr_err("already in doing panic\n");
++		return;
++	}
++
++	htbase_pre_process();
++	rcu_read_lock();
++	for_each_process_thread(g, t) {
++		if (!max_count--)
++			goto unlock;
++		if (!--batch_count) {
++			batch_count = HUNG_TASK_BATCHING;
++			if (!rcu_lock_break(g, t))
++				goto unlock;
++		}
++		if ((t->state == TASK_UNINTERRUPTIBLE) ||
++		    (t->state == TASK_KILLABLE))
++			htbase_check_one_task(t);
++	}
++unlock:
++	rcu_read_unlock();
++	htbase_post_process();
++}
++
++static ssize_t htbase_enable_show(struct kobject *kobj,
++				  struct kobj_attribute *attr,
++				  char *buf)
++{
++	if (hungtask_enable)
++		return snprintf(buf, ENABLE_SHOW_LEN, "on\n");
++	else
++		return snprintf(buf, ENABLE_SHOW_LEN, "off\n");
++}
++
++static ssize_t htbase_enable_store(struct kobject *kobj,
++				   struct kobj_attribute *attr,
++				   const char *buf, size_t count)
++{
++	char tmp[6]; /* only storage "on" "off" "kick" and enter */
++	size_t len;
++	char *p = NULL;
++
++	if (!buf)
++		return -EINVAL;
++	if ((count < 2) || (count > (sizeof(tmp) - 1))) {
++		pr_err("string too long or too short\n");
++		return -EINVAL;
++	}
++
++	p = memchr(buf, '\n', count);
++	len = p ? (size_t)(p - buf) : count;
++	memset(tmp, 0, sizeof(tmp));
++	strncpy(tmp, buf, len);
++	if (!strncmp(tmp, "on", strlen(tmp))) {
++		hungtask_enable = HT_ENABLE;
++		pr_info("set hungtask_enable to enable\n");
++	} else if (!strncmp(tmp, "off", strlen(tmp))) {
++		hungtask_enable = HT_DISABLE;
++		pr_info("set hungtask_enable to disable\n");
++	} else {
++		pr_err("only accept on or off\n");
++	}
++	return (ssize_t) count;
++}
++
++static ssize_t htbase_monitorlist_show(struct kobject *kobj,
++				       struct kobj_attribute *attr,
++				       char *buf)
++{
++	int i;
++	char *start = buf;
++	char all_buf[WHITELIST_STORE_LEN - 20];	/* exclude extra header len 20*/
++	unsigned long len = 0;
++
++	memset(all_buf, 0, sizeof(all_buf));
++	for (i = 0; i < WHITELIST_LEN; i++) {
++		if (whitetmplist[i].pid > 0) {
++			len += snprintf(all_buf + len, sizeof(all_buf) - len,
++					"%s-%d,", whitetmplist[i].name, whitetmplist[i].pid);
++			if (!(len < sizeof(all_buf))) {
++				len = sizeof(all_buf) - 1;
++				break;
++			}
++		}
++	}
++	if (len > 0)
++		all_buf[len] = 0;
++	if (whitelist_type == WHITE_LIST)
++		buf += snprintf(buf, WHITELIST_STORE_LEN, "whitelist:[%s]\n", all_buf);
++	else if (whitelist_type == BLACK_LIST)
++		buf += snprintf(buf, WHITELIST_STORE_LEN, "blacklist:[%s]\n", all_buf);
++	else
++		buf += snprintf(buf, WHITELIST_STORE_LEN, "\n");
++	return buf - start;
++}
++
++static void htbase_monitorlist_update(char **cur)
++{
++	int index = 0;
++	char *token = NULL;
++
++	hashlist_clear(whitelist, WHITELIST_LEN);
++	memset(whitetmplist, 0, sizeof(whitetmplist));
++	/* generate the new whitelist */
++	for (; ; ) {
++		token = strsep(cur, ",");
++		if (token && strlen(token)) {
++			strncpy(whitetmplist[index].name, token, TASK_COMM_LEN);
++			if (strlen(whitetmplist[index].name) > 0)
++				whitelist_empty = false;
++			index++;
++			if (index >= WHITELIST_LEN)
++				break;
++		}
++		if (!(*cur))
++			break;
++	}
++}
++
++/*
++ * monitorlist_store    -  Called when 'write/echo' method is
++ * used on entry '/sys/kernel/hungtask/monitorlist'.
++ */
++static ssize_t htbase_monitorlist_store(struct kobject *kobj,
++					struct kobj_attribute *attr,
++					const char *buf, size_t n)
++{
++	size_t len;
++	char *p = NULL;
++	char all_buf[WHITELIST_STORE_LEN];
++	char *cur = all_buf;
++
++
++	if ((n < 2) || (n > (sizeof(all_buf) - 1))) {
++		pr_err("whitelist input string illegal\n");
++		return -EINVAL;
++	}
++	if (!buf)
++		return -EINVAL;
++	/*
++	 * input format:
++	 * write /sys/kernel/hungtask/monitorlist "whitelist,
++	 * system_server,surfaceflinger"
++	 */
++	p = memchr(buf, '\n', n);
++	len = p ? (size_t)(p - buf) : n; /* exclude the '\n' */
++
++	memset(all_buf, 0, sizeof(all_buf));
++	len =  len > WHITELIST_STORE_LEN ? WHITELIST_STORE_LEN : len;
++	strncpy(all_buf, buf, len);
++	p = strsep(&cur, ",");
++	if (!cur) {
++		pr_err("string is not correct\n");
++		return -EINVAL;
++	}
++	if (!strncmp(p, "whitelist", n)) {
++		whitelist_type = WHITE_LIST;
++	} else {
++		if (!strncmp(p, "blacklist", n))
++			pr_err("blacklist is not support\n");
++		else
++			pr_err("wrong list type is set\n");
++		return -EINVAL;
++	}
++	if (!strlen(cur)) {
++		pr_err("at least one process need to be set\n");
++		return -EINVAL;
++	}
++	pr_err("whitelist is %s\n", cur);
++
++	htbase_monitorlist_update(&cur);
++	/* check again in case user input "whitelist,,,,,," */
++	if (whitelist_empty) {
++		pr_err("at least one process need to be set\n");
++		return -EINVAL;
++	}
++	return (ssize_t) n;
++}
++
++/* used for sysctl at "/proc/sys/kernel/hung_task_timeout_secs" */
++void htbase_set_timeout_secs(unsigned long new_hungtask_timeout_secs)
++{
++	if ((new_hungtask_timeout_secs > CONFIG_DEFAULT_HUNG_TASK_TIMEOUT) ||
++		(new_hungtask_timeout_secs % HEARTBEAT_TIME))
++		return;
++	hungtask_timeout_secs = new_hungtask_timeout_secs;
++	/*
++	 * if user change panic timeout value, we sync it to dump value
++	 * defaultly, user can set it diffrently
++	 */
++	whitelist_panic_cnt = (int)(hungtask_timeout_secs / HEARTBEAT_TIME);
++	if (whitelist_panic_cnt > THIRTY_SECONDS)
++		whitelist_dump_cnt = whitelist_panic_cnt / HT_DUMP_IN_PANIC_LOOSE;
++	else
++		whitelist_dump_cnt = whitelist_panic_cnt / HT_DUMP_IN_PANIC_STRICT;
++}
++
++void htbase_set_panic(int new_did_panic)
++{
++	did_panic = new_did_panic;
++}
++
++static struct kobj_attribute timeout_attribute = {
++	.attr = {
++		 .name = "enable",
++		 .mode = 0640,
++	},
++	.show = htbase_enable_show,
++	.store = htbase_enable_store,
++};
++
++static struct kobj_attribute monitorlist_attr = {
++	.attr = {
++		 .name = "monitorlist",
++		 .mode = 0640,
++	},
++	.show = htbase_monitorlist_show,
++	.store = htbase_monitorlist_store,
++};
++
++#ifdef CONFIG_DFX_HUNGTASK_USER
++static struct kobj_attribute userlist_attr = {
++	.attr = {
++		 .name = "userlist",
++		 .mode = 0640,
++	},
++	.show = htuser_list_show,
++	.store = htuser_list_store,
++};
++#endif
++
++static struct attribute *attrs[] = {
++	&timeout_attribute.attr,
++	&monitorlist_attr.attr,
++#ifdef CONFIG_DFX_HUNGTASK_USER
++	&userlist_attr.attr,
++#endif
++	NULL
++};
++
++static struct attribute_group hungtask_attr_group = {
++	.attrs = attrs,
++};
++
++static struct kobject *hungtask_kobj;
++int htbase_create_sysfs(void)
++{
++	int i;
++	int ret;
++
++	/* sleep 1000ms and wait /sys/kernel ready */
++	while (!kernel_kobj)
++		msleep(1000);
++
++	/* Create kobject named "hungtask" located at /sys/kernel/huangtask */
++	hungtask_kobj = kobject_create_and_add("hungtask", kernel_kobj);
++	if (!hungtask_kobj)
++		return -ENOMEM;
++	ret = sysfs_create_group(hungtask_kobj, &hungtask_attr_group);
++	if (ret)
++		kobject_put(hungtask_kobj);
++
++	for (i = 0; i < WHITELIST_LEN; i++)
++		INIT_HLIST_HEAD(&whitelist[i]);
++	memset(whitetmplist, 0, sizeof(whitetmplist));
++
++	INIT_WORK(&send_work, send_work_handler);
++
++	return ret;
++}
+diff --git a/drivers/staging/hungtask/hungtask_user.c b/drivers/staging/hungtask/hungtask_user.c
+new file mode 100644
+index 000000000..39b0b1bd5
+--- /dev/null
++++ b/drivers/staging/hungtask/hungtask_user.c
+@@ -0,0 +1,260 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#define pr_fmt(fmt) "hungtask_user " fmt
++
++#include <linux/cred.h>
++#include <linux/sched/debug.h>
++#include <linux/profile.h>
++#include <linux/sched.h>
++#include <linux/syscalls.h>
++
++#include <dfx/hungtask_base.h>
++
++#define CMD_MIN_LEN 3
++#define CMD_MAX_LEN 20
++#define USERLIST_NUM 10
++#define MAX_USER_TIMEOUT 120
++#define MAX_SHOW_LEN 512
++
++struct user_item {
++	pid_t pid;
++	int cur_cnt;
++	int panic_cnt;
++};
++
++static struct user_item userlist[USERLIST_NUM];
++static int userlist_count;
++static DEFINE_SPINLOCK(userlist_lock);
++static bool is_registered;
++static bool need_panic;
++static bool need_dump;
++static int block_time;
++static int block_pid;
++
++static void htuser_show_task(int pid)
++{
++	struct task_struct *p = NULL;
++
++	p = pid_task(find_vpid(pid), PIDTYPE_PID);
++	if (p == NULL) {
++		pr_err("can not find pid %d\n", pid);
++		return;
++	}
++
++	if (p->flags & PF_FROZEN) {
++		pr_info("process %d is frozen\n", pid);
++		return;
++	}
++	if (p->state == TASK_UNINTERRUPTIBLE) {
++		pr_err("UserList_KernelStack start\n");
++		sched_show_task(p);
++		pr_err("UserList_KernelStack end\n");
++	}
++}
++
++static void htuser_list_insert(int pid, int count)
++{
++	spin_lock(&userlist_lock);
++	if (userlist_count >= USERLIST_NUM) {
++		pr_err("list is full\n");
++		spin_unlock(&userlist_lock);
++		return;
++	}
++	userlist[userlist_count].pid = pid;
++	userlist[userlist_count].cur_cnt = 0;
++	userlist[userlist_count].panic_cnt = count;
++	userlist_count++;
++	spin_unlock(&userlist_lock);
++}
++
++static int htuser_list_remove(int pid)
++{
++	int i;
++
++	spin_lock(&userlist_lock);
++	for (i = 0; i < userlist_count; i++) {
++		if (userlist[i].pid == pid) {
++			if (i == userlist_count - 1) {
++				memset(&userlist[i], 0, sizeof(userlist[i]));
++			} else {
++				int len = sizeof(userlist[0]) * (userlist_count - i - 1);
++				memmove(&userlist[i], &userlist[i + 1], len);
++			}
++			userlist_count--;
++			spin_unlock(&userlist_lock);
++			return 0;
++		}
++	}
++	spin_unlock(&userlist_lock);
++	return -ENOENT;
++}
++
++static void htuser_list_update(void)
++{
++	int i;
++
++	need_panic = false;
++	need_dump = false;
++	spin_lock(&userlist_lock);
++	for (i = 0; i < userlist_count; i++) {
++		userlist[i].cur_cnt++;
++		if ((userlist[i].cur_cnt >= userlist[i].panic_cnt) ||
++		    (userlist[i].cur_cnt == userlist[i].panic_cnt / 2)) {
++			htuser_show_task(userlist[i].pid);
++			pr_err("process %d not scheduled for %ds\n",
++				userlist[i].pid,
++				userlist[i].cur_cnt * HEARTBEAT_TIME);
++		}
++		if (userlist[i].cur_cnt == userlist[i].panic_cnt) {
++			need_dump = true;
++			need_panic = true;
++			block_time = userlist[i].cur_cnt * HEARTBEAT_TIME;
++			block_pid = userlist[i].pid;
++		}
++	}
++	spin_unlock(&userlist_lock);
++}
++
++static void htuser_list_kick(int pid)
++{
++	int i;
++
++	spin_lock(&userlist_lock);
++	for (i = 0; i < userlist_count; i++) {
++		if (userlist[i].pid == pid) {
++			userlist[i].cur_cnt = 0;
++			spin_unlock(&userlist_lock);
++			return;
++		}
++	}
++	spin_unlock(&userlist_lock);
++}
++
++void htuser_post_process_userlist(void)
++{
++	htuser_list_update();
++	if (need_dump) {
++		pr_err("print all cpu stack and D state stack\n");
++		hungtask_show_state_filter(TASK_UNINTERRUPTIBLE);
++	}
++	if (need_panic)
++		panic("UserList Process %d blocked for %ds causing panic", block_pid, block_time);
++}
++
++static int htuser_process_notifier(struct notifier_block *self,
++	unsigned long cmd, void *v)
++{
++	struct task_struct *task = v;
++
++	if (task == NULL)
++		return NOTIFY_OK;
++
++	if ((task->tgid == task->pid) && (!htuser_list_remove(task->tgid)))
++		pr_err("remove success due to process %d die\n", task->tgid);
++
++	return NOTIFY_OK;
++}
++
++static struct notifier_block htuser_process_notify = {
++	.notifier_call = htuser_process_notifier,
++};
++
++ssize_t htuser_list_show(struct kobject *kobj,
++	struct kobj_attribute *attr, char *buf)
++{
++	int i;
++	char tmp[MAX_SHOW_LEN] = {0};
++	int len = 0;
++
++	len += snprintf(tmp + len, MAX_SHOW_LEN - len,
++		"   Pid   Current(sec)  Expired(sec)\n");
++
++	spin_lock(&userlist_lock);
++	for (i = 0; i < userlist_count; i++) {
++		len += snprintf(tmp + len, MAX_SHOW_LEN - len,
++			"%5d    %5d      %5d", userlist[i].pid,
++			userlist[i].cur_cnt * HEARTBEAT_TIME,
++			userlist[i].panic_cnt * HEARTBEAT_TIME);
++		if (len >= MAX_SHOW_LEN) {
++			len = MAX_SHOW_LEN - 1;
++			break;
++		}
++	}
++	spin_unlock(&userlist_lock);
++	pr_info("%s\n", tmp);
++	strncpy(buf, tmp, len);
++
++	return len;
++}
++
++static int htuser_list_store_on(char *tmp, size_t len, int pid)
++{
++	unsigned long sec = 0;
++
++	if (kstrtoul(tmp + 3, 10, &sec)) {
++		pr_err("invalid timeout value\n");
++		return -EINVAL;
++	}
++	if ((sec > MAX_USER_TIMEOUT) || !sec) {
++		pr_err("invalid timeout value, should be in 0-%d\n", MAX_USER_TIMEOUT);
++		return -EINVAL;
++	}
++	if (sec % HEARTBEAT_TIME) {
++		pr_err("invalid timeout value, should be devided by %d\n", HEARTBEAT_TIME);
++		return -EINVAL;
++	}
++	pr_info("process %d set to enable, timeout=%ld\n", pid, sec);
++	htuser_list_insert(pid, sec / HEARTBEAT_TIME);
++	if (!is_registered) {
++		profile_event_register(PROFILE_TASK_EXIT,
++			&htuser_process_notify);
++		is_registered = true;
++	}
++
++	return 0;
++}
++
++ssize_t htuser_list_store(struct kobject *kobj,
++			  struct kobj_attribute *attr,
++			  const char *buf, size_t count)
++{
++	char tmp[CMD_MAX_LEN]; /* on/off/kick */
++	size_t len;
++	char *p = NULL;
++	int pid = current->tgid;
++	int uid = current->cred->euid.val;
++
++	if (uid >= 10000)
++		pr_err("non-system process %d(uid=%d) can not be added to hungtask userlist\n",
++			pid, uid);
++	if ((count < CMD_MIN_LEN) || (count > CMD_MAX_LEN)) {
++		pr_err("string too long or too short\n");
++		return -EINVAL;
++	}
++	if (!buf)
++		return -EINVAL;
++
++	memset(tmp, 0, sizeof(tmp));
++	p = memchr(buf, '\n', count);
++	len = p ? (size_t)(p - buf) : count;
++	strncpy(tmp, buf, len);
++
++	if (strncmp(tmp, "on", CMD_MIN_LEN) == 0) {
++		if (htuser_list_store_on(tmp, len, pid))
++			return -EINVAL;
++	} else if (unlikely(strncmp(tmp, "off", CMD_MIN_LEN) == 0)) {
++		pr_info("process %d set to disable\n", pid);
++		if (!htuser_list_remove(pid))
++			pr_err("remove success duet to process %d call off\n", pid);
++	} else if (likely(strncmp(tmp, "kick", CMD_MIN_LEN) == 0)) {
++		pr_info("process %d is kicked\n", pid);
++		htuser_list_kick(pid);
++	} else {
++		pr_err("only accept on off or kick\n");
++	}
++	return (ssize_t)count;
++}
++
+diff --git a/drivers/staging/hungtask/hungtask_user.h b/drivers/staging/hungtask/hungtask_user.h
+new file mode 100644
+index 000000000..17ea7212b
+--- /dev/null
++++ b/drivers/staging/hungtask/hungtask_user.h
+@@ -0,0 +1,37 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef DFX_HUNGTASK_USER_H
++#define DFX_HUNGTASK_USER_H
++
++#include <linux/types.h>
++
++#ifdef CONFIG_DFX_HUNGTASK_USER
++void htuser_post_process_userlist(void);
++ssize_t htuser_list_store(struct kobject *kobj,
++			  struct kobj_attribute *attr, const char *buf, size_t count);
++ssize_t htuser_list_show(struct kobject *kobj,
++			 struct kobj_attribute *attr, char *buf);
++#else
++static inline void htuser_post_process_userlist(void)
++{
++}
++
++static inline ssize_t htuser_list_store(struct kobject *kobj,
++					struct kobj_attribute *attr,
++					const char *buf, size_t count)
++{
++	return 0;
++}
++static inline ssize_t htuser_list_show(struct kobject *kobj,
++				       struct kobj_attribute *attr,
++				       char *buf)
++{
++	return 0;
++}
++
++#endif
++
++#endif /* DFX_HUNGTASK_USER_H */
+diff --git a/drivers/staging/zerohung/Kconfig b/drivers/staging/zerohung/Kconfig
+new file mode 100644
+index 000000000..913d28efb
+--- /dev/null
++++ b/drivers/staging/zerohung/Kconfig
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: GPL-2.0
++config DFX_ZEROHUNG
++	bool "zerohung driver"
++	default n
++	depends on HISYSEVENT
++	help
++	  This feature support to catch hung log
+diff --git a/drivers/staging/zerohung/Makefile b/drivers/staging/zerohung/Makefile
+new file mode 100644
+index 000000000..3727a0e91
+--- /dev/null
++++ b/drivers/staging/zerohung/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_DFX_ZEROHUNG) += zrhung_event.o watchpoint/
+diff --git a/drivers/staging/zerohung/watchpoint/Makefile b/drivers/staging/zerohung/watchpoint/Makefile
+new file mode 100644
+index 000000000..1cb8d7f99
+--- /dev/null
++++ b/drivers/staging/zerohung/watchpoint/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_DFX_ZEROHUNG) += hung_wp_screen.o
+diff --git a/drivers/staging/zerohung/watchpoint/hung_wp_screen.c b/drivers/staging/zerohung/watchpoint/hung_wp_screen.c
+new file mode 100644
+index 000000000..3b5f2d6da
+--- /dev/null
++++ b/drivers/staging/zerohung/watchpoint/hung_wp_screen.c
+@@ -0,0 +1,299 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#define pr_fmt(fmt) "zrhung " fmt
++
++#include <linux/sched/clock.h>
++#include <linux/sched/debug.h>
++#include <linux/kernel.h>
++#include <linux/fb.h>
++#include <linux/notifier.h>
++#include <linux/module.h>
++#include <linux/string.h>
++#include <linux/spinlock.h>
++#include <linux/workqueue.h>
++#include <linux/time.h>
++#include <linux/input.h>
++#include <linux/jiffies.h>
++#include <linux/sched/debug.h>
++#include <dfx/zrhung.h>
++#include <dfx/hung_wp_screen.h>
++
++#define TIME_CONVERT_UNIT 1000
++#define DEFAULT_TIMEOUT 10
++
++#define LPRESSEVENT_TIME 5
++#define POWERKEYEVENT_MAX_COUNT 10
++#define POWERKEYEVENT_DEFAULT_COUNT 3
++#define POWERKEYEVENT_DEFAULT_TIMEWINDOW 5
++#define POWERKEYEVENT_DEFAULT_LIMIT_MS 300
++#define POWERKEYEVENT_DEFAULT_REPORT_MIN 2
++#define POWERKEYEVENT_TIME_LEN (POWERKEYEVENT_MAX_COUNT + 2)
++
++struct hung_wp_screen_data {
++	struct timer_list timer;
++	struct timer_list long_press_timer;
++	struct workqueue_struct *workq;
++	struct work_struct send_work;
++	spinlock_t lock;
++	int fb_blank;
++	int check_id;
++	int tag_id;
++};
++
++static bool init_done;
++static struct hung_wp_screen_data g_hung_data;
++static unsigned int lastreport_time;
++static unsigned int lastprkyevt_time;
++static unsigned int powerkeyevent_time[POWERKEYEVENT_TIME_LEN] = {0};
++static unsigned int newevt;
++static unsigned int headevt;
++static int *check_off_point;
++struct work_struct powerkeyevent_sendwork;
++struct work_struct lpressevent_sendwork;
++static struct notifier_block hung_wp_screen_setblank_ncb;
++
++static void zrhung_lpressevent_send_work(struct work_struct *work)
++{
++	pr_info("LONGPRESS_EVENT send to zerohung\n");
++	zrhung_send_event(WP_SCREEN_DOMAIN, WP_SCREEN_LPRESS_NAME, "none");
++}
++
++static void zrhung_wp_lpress_send(struct timer_list *t)
++{
++	int *check_off = check_off_point;
++
++	del_timer(&g_hung_data.long_press_timer);
++	*check_off = 0;
++	queue_work(g_hung_data.workq, &lpressevent_sendwork);
++}
++
++static void zrhung_powerkeyevent_send_work(struct work_struct *work)
++{
++	pr_info("POWERKEY_EVENT send to zerohung\n");
++	zrhung_send_event(WP_SCREEN_DOMAIN, WP_SCREEN_PWK_NAME, "none");
++}
++
++static void zrhung_powerkeyevent_report(unsigned int dur, unsigned int end)
++{
++	unsigned int send_interval;
++
++	send_interval = end > lastreport_time ?
++	    ((end - lastreport_time) / TIME_CONVERT_UNIT) : POWERKEYEVENT_DEFAULT_REPORT_MIN;
++	if (unlikely(lastreport_time == 0)) {
++		lastreport_time = end;
++	} else if (send_interval < POWERKEYEVENT_DEFAULT_REPORT_MIN) {
++		pr_info("powerkeyevent too fast to report: %d\n", end);
++		return;
++	}
++	lastreport_time = end;
++	queue_work(g_hung_data.workq, &powerkeyevent_sendwork);
++}
++
++static unsigned int refresh_prkyevt_index(unsigned int event)
++{
++	unsigned int evt = event;
++
++	if (evt < POWERKEYEVENT_MAX_COUNT)
++		evt++;
++	else
++		evt = 0;
++	return evt;
++}
++
++static void zrhung_new_powerkeyevent(unsigned int tmescs)
++{
++	unsigned int prkyevt_interval;
++	unsigned int evt_index;
++	int diff;
++
++	powerkeyevent_time[newevt] = tmescs;
++	evt_index = (newevt >= headevt) ?
++	    (newevt - headevt) : (newevt + POWERKEYEVENT_MAX_COUNT + 1 - headevt);
++	if (evt_index < (POWERKEYEVENT_DEFAULT_COUNT - 1)) {
++		pr_info("powerkeyevent not enough-%d\n", POWERKEYEVENT_DEFAULT_COUNT);
++	} else {
++		diff = powerkeyevent_time[newevt] - powerkeyevent_time[headevt];
++		if (diff < 0) {
++			pr_info("powerkeyevent sth wrong in record time\n");
++			return;
++		}
++
++		prkyevt_interval = (unsigned int)(diff / TIME_CONVERT_UNIT);
++		if (prkyevt_interval <= POWERKEYEVENT_DEFAULT_TIMEWINDOW)
++			zrhung_powerkeyevent_report(prkyevt_interval, tmescs);
++		headevt = refresh_prkyevt_index(headevt);
++	}
++	newevt = refresh_prkyevt_index(newevt);
++}
++
++static void zrhung_powerkeyevent_handler(void)
++{
++	unsigned int curtime;
++	unsigned long curjiff;
++
++	pr_info("powerkeyevent check start");
++	curjiff = jiffies;
++	curtime = jiffies_to_msecs(curjiff);
++	if (unlikely(lastprkyevt_time > curtime)) {
++		pr_info("powerkeyevent check but time overflow");
++		lastprkyevt_time = curtime;
++		return;
++	} else if ((curtime - lastprkyevt_time) < POWERKEYEVENT_DEFAULT_LIMIT_MS) {
++		pr_info("powerkeyevent user press powerkey too fast-time:%d", curtime);
++		return;
++	}
++	lastprkyevt_time = curtime;
++	zrhung_new_powerkeyevent(curtime);
++}
++
++static int hung_wp_screen_setblank(struct notifier_block *self, unsigned long event, void *data)
++{
++	unsigned long flags;
++	struct fb_event *evdata = data;
++	int blank;
++
++	if (!init_done)
++		return 0;
++
++	if (event != FB_EVENT_BLANK)
++		return 0;
++
++	blank = *(int *)evdata->data;
++	spin_lock_irqsave(&(g_hung_data.lock), flags);
++	g_hung_data.fb_blank = blank;
++	if (((g_hung_data.check_id == ZRHUNG_WP_SCREENON) && (blank == 0)) ||
++	    ((g_hung_data.check_id == ZRHUNG_WP_SCREENOFF) && (blank != 0))) {
++		pr_info("check_id=%d, blank=%d", g_hung_data.check_id, g_hung_data.fb_blank);
++		del_timer(&g_hung_data.timer);
++		g_hung_data.check_id = ZRHUNG_WP_NONE;
++	}
++	spin_unlock_irqrestore(&(g_hung_data.lock), flags);
++
++	return 0;
++}
++
++static void hung_wp_screen_send_work(struct work_struct *work)
++{
++	unsigned long flags = 0;
++
++	show_state_filter(TASK_UNINTERRUPTIBLE);
++
++	if (g_hung_data.check_id == 1)
++		zrhung_send_event(WP_SCREEN_DOMAIN, WP_SCREEN_ON_NAME, "none");
++	else
++		zrhung_send_event(WP_SCREEN_DOMAIN, WP_SCREEN_OFF_NAME, "none");
++	pr_info("send event: %d\n", g_hung_data.check_id);
++	spin_lock_irqsave(&(g_hung_data.lock), flags);
++	g_hung_data.check_id = ZRHUNG_WP_NONE;
++	spin_unlock_irqrestore(&(g_hung_data.lock), flags);
++}
++
++static void hung_wp_screen_send(struct timer_list *t)
++{
++	del_timer(&g_hung_data.timer);
++	pr_info("hung_wp_screen_%d end\n", g_hung_data.tag_id);
++	queue_work(g_hung_data.workq, &g_hung_data.send_work);
++}
++
++static void hung_wp_screen_start(int check_id)
++{
++	if (g_hung_data.check_id != ZRHUNG_WP_NONE) {
++		pr_info("already in check_id: %d\n", g_hung_data.check_id);
++		return;
++	}
++
++	g_hung_data.check_id = check_id;
++	if (timer_pending(&g_hung_data.timer))
++		del_timer(&g_hung_data.timer);
++
++	g_hung_data.timer.expires = jiffies + msecs_to_jiffies(DEFAULT_TIMEOUT * TIME_CONVERT_UNIT);
++	add_timer(&g_hung_data.timer);
++	pr_info("going to check ID=%d timeout=%d\n", check_id, DEFAULT_TIMEOUT);
++}
++
++void hung_wp_screen_powerkey_ncb(int event)
++{
++	static int check_off;
++	unsigned long flags = 0;
++
++	if (!init_done)
++		return;
++
++	spin_lock_irqsave(&(g_hung_data.lock), flags);
++	if (event == WP_SCREEN_PWK_PRESS) {
++		pr_info("hung_wp_screen_%d start! fb_blank=%d",
++			++g_hung_data.tag_id, g_hung_data.fb_blank);
++		check_off = 0;
++		if (g_hung_data.fb_blank != 0) {
++			hung_wp_screen_start(ZRHUNG_WP_SCREENON);
++		} else {
++			check_off = 1;
++			pr_info("start longpress test timer\n");
++			check_off_point = &check_off;
++			g_hung_data.long_press_timer.expires = jiffies +
++				msecs_to_jiffies(LPRESSEVENT_TIME * TIME_CONVERT_UNIT);
++			if (!timer_pending(&g_hung_data.long_press_timer))
++				add_timer(&g_hung_data.long_press_timer);
++		}
++		zrhung_powerkeyevent_handler();
++	} else if (check_off) {
++		check_off = 0;
++		del_timer(&g_hung_data.long_press_timer);
++		if (event == WP_SCREEN_PWK_RELEASE && g_hung_data.fb_blank == 0)
++			hung_wp_screen_start(ZRHUNG_WP_SCREENOFF);
++	}
++	spin_unlock_irqrestore(&(g_hung_data.lock), flags);
++}
++
++static int __init hung_wp_screen_init(void)
++{
++	init_done = false;
++	pr_info("%s start\n", __func__);
++	g_hung_data.fb_blank = 0;
++	g_hung_data.tag_id = 0;
++	g_hung_data.check_id = ZRHUNG_WP_NONE;
++	spin_lock_init(&(g_hung_data.lock));
++
++	timer_setup(&g_hung_data.timer, hung_wp_screen_send, 0);
++	timer_setup(&g_hung_data.long_press_timer, zrhung_wp_lpress_send, 0);
++
++	g_hung_data.workq = create_workqueue("hung_wp_screen_workq");
++	if (g_hung_data.workq == NULL) {
++		pr_err("create workq failed\n");
++		return -EFAULT;
++	}
++	INIT_WORK(&g_hung_data.send_work, hung_wp_screen_send_work);
++	INIT_WORK(&powerkeyevent_sendwork, zrhung_powerkeyevent_send_work);
++	INIT_WORK(&lpressevent_sendwork, zrhung_lpressevent_send_work);
++
++	hung_wp_screen_setblank_ncb.notifier_call = hung_wp_screen_setblank;
++	fb_register_client(&hung_wp_screen_setblank_ncb);
++
++	init_done = true;
++	pr_info("%s done\n", __func__);
++	return 0;
++}
++
++static void __exit hung_wp_screen_exit(void)
++{
++	fb_unregister_client(&hung_wp_screen_setblank_ncb);
++
++	cancel_work_sync(&lpressevent_sendwork);
++	cancel_work_sync(&powerkeyevent_sendwork);
++	cancel_work_sync(&g_hung_data.send_work);
++
++	destroy_workqueue(g_hung_data.workq);
++
++	del_timer_sync(&g_hung_data.timer);
++	del_timer_sync(&g_hung_data.long_press_timer);
++}
++
++module_init(hung_wp_screen_init);
++module_exit(hung_wp_screen_exit);
++
++MODULE_AUTHOR("OHOS");
++MODULE_DESCRIPTION("Reporting the frozen screen alarm event");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/staging/zerohung/zrhung_event.c b/drivers/staging/zerohung/zrhung_event.c
+new file mode 100644
+index 000000000..04b94a77e
+--- /dev/null
++++ b/drivers/staging/zerohung/zrhung_event.c
+@@ -0,0 +1,34 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#define pr_fmt(fmt) "zrhung " fmt
++
++#include <dfx/hiview_hisysevent.h>
++#include <dfx/zrhung.h>
++
++#include <linux/errno.h>
++#include <linux/printk.h>
++
++int zrhung_send_event(const char *domain, const char *event_name, const char *msg_buf)
++{
++	struct hiview_hisysevent *event = NULL;
++	int ret = 0;
++
++	event = hisysevent_create(domain, event_name, FAULT);
++	if (!event) {
++		pr_err("failed to create event");
++		return -EINVAL;
++	}
++	ret = hisysevent_put_string(event, "MSG", msg_buf);
++	if (ret != 0) {
++		pr_err("failed to put sting to event, ret=%d", ret);
++		goto hisysevent_end;
++	}
++	ret = hisysevent_write(event);
++
++hisysevent_end:
++	hisysevent_destroy(&event);
++	return ret;
++}
+diff --git a/include/dfx/hiview_hisysevent.h b/include/dfx/hiview_hisysevent.h
+new file mode 100644
+index 000000000..c47d419a2
+--- /dev/null
++++ b/include/dfx/hiview_hisysevent.h
+@@ -0,0 +1,67 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef HIVIEW_HISYSEVENT_H
++#define HIVIEW_HISYSEVENT_H
++
++enum hisysevent_type {
++	/* fault event */
++	FAULT = 1,
++
++	/* statistic event */
++	STATISTIC = 2,
++
++	/* security event */
++	SECURITY = 3,
++
++	/* behavior event */
++	BEHAVIOR = 4
++};
++
++struct hiview_hisysevent;
++
++#ifdef CONFIG_HISYSEVENT
++
++struct hiview_hisysevent *
++hisysevent_create(const char *domain, const char *name, enum hisysevent_type type);
++void hisysevent_destroy(struct hiview_hisysevent **event);
++int hisysevent_put_integer(struct hiview_hisysevent *event, const char *key, long long value);
++int hisysevent_put_string(struct hiview_hisysevent *event, const char *key, const char *value);
++int hisysevent_write(struct hiview_hisysevent *event);
++
++#else
++
++#include <linux/errno.h>
++#include <linux/stddef.h>
++
++static inline struct hiview_hisysevent *
++hisysevent_create(const char *domain, const char *name, enum hisysevent_type type)
++{
++	return NULL;
++}
++
++static inline void hisysevent_destroy(struct hiview_hisysevent **event)
++{}
++
++static inline int
++hisysevent_put_integer(struct hiview_hisysevent *event, const char *key, long long value)
++{
++	return -EOPNOTSUPP;
++}
++
++static inline int
++hisysevent_put_string(struct hiview_hisysevent *event, const char *key, const char *value)
++{
++	return -EOPNOTSUPP;
++}
++
++static inline int hisysevent_write(struct hiview_hisysevent *event)
++{
++	return -EOPNOTSUPP;
++}
++
++#endif /* CONFIG_HISYSEVENT */
++
++#endif /* HIVIEW_HISYSEVENT_H */
+diff --git a/include/dfx/hung_wp_screen.h b/include/dfx/hung_wp_screen.h
+new file mode 100644
+index 000000000..39bad044c
+--- /dev/null
++++ b/include/dfx/hung_wp_screen.h
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef HUNG_WP_SCREEN_H
++#define HUNG_WP_SCREEN_H
++
++#define WP_SCREEN_PWK_RELEASE 0
++#define WP_SCREEN_PWK_PRESS 1
++
++#define ZRHUNG_WP_NONE 0
++#define ZRHUNG_WP_SCREENON 1
++#define ZRHUNG_WP_SCREENOFF 2
++
++#define WP_SCREEN_DOMAIN "KERNEL_VENDOR"
++#define WP_SCREEN_PWK_NAME "POWER_KEY"
++#define WP_SCREEN_LPRESS_NAME "LONG_PRESS"
++#define WP_SCREEN_ON_NAME "SCREEN_ON"
++#define WP_SCREEN_OFF_NAME "SCREEN_OFF"
++
++void hung_wp_screen_powerkey_ncb(int event);
++
++#endif /* HUNG_WP_SCREEN_H */
+diff --git a/include/dfx/hungtask_base.h b/include/dfx/hungtask_base.h
+new file mode 100644
+index 000000000..b3cf189a0
+--- /dev/null
++++ b/include/dfx/hungtask_base.h
+@@ -0,0 +1,111 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef DFX_HUNGTASK_BASE_H
++#define DFX_HUNGTASK_BASE_H
++
++#include <linux/list.h>
++#include <linux/sched.h>
++#include <linux/types.h>
++
++#define ENABLE_SHOW_LEN 8
++#define WHITELIST_STORE_LEN 400
++#define WHITELIST_LEN 61
++#define WHITE_LIST 1
++#define BLACK_LIST 2
++#define HT_ENABLE 1
++#define HT_DISABLE 0
++#define HEARTBEAT_TIME 3
++#define MAX_LOOP_NUM (CONFIG_DEFAULT_HUNG_TASK_TIMEOUT / HEARTBEAT_TIME)
++#define ONE_MINUTE (60 / HEARTBEAT_TIME)
++#define ONE_AND_HALF_MINUTE (90 / HEARTBEAT_TIME)
++#define TWO_MINUTES (120 / HEARTBEAT_TIME)
++#define THREE_MINUTES (180 / HEARTBEAT_TIME)
++#define TWENTY_SECONDS (21 / HEARTBEAT_TIME)
++#define THIRTY_SECONDS (30 / HEARTBEAT_TIME)
++#define HUNG_ONE_HOUR (3600 / HEARTBEAT_TIME)
++#define HUNG_TEN_MINUTES (600 / HEARTBEAT_TIME)
++#define HUNGTASK_REPORT_TIMECOST TWENTY_SECONDS
++#define HT_DUMP_IN_PANIC_LOOSE 5
++#define HT_DUMP_IN_PANIC_STRICT 2
++#define REFRESH_INTERVAL THREE_MINUTES
++#define FLAG_DUMP_WHITE (1 << 0)
++#define FLAG_DUMP_APP (1 << 1)
++#define FLAG_DUMP_NOSCHEDULE (1 << 2)
++#define FLAG_DUMP_JANK (1 << 3)
++#define FLAG_PANIC (1 << 4)
++#define FLAG_PF_FROZEN (1 << 6)
++#define TASK_TYPE_IGNORE 0
++#define TASK_TYPE_WHITE (1 << 0)
++#define TASK_TYPE_APP (1 << 1)
++#define TASK_TYPE_JANK (1 << 2)
++#define TASK_TYPE_KERNEL (1 << 3)
++#define TASK_TYPE_NATIVE (1 << 4)
++#define TASK_TYPE_FROZEN (1 << 6)
++#define PID_INIT 1
++#define PID_KTHREAD 2
++#define DEFAULT_WHITE_DUMP_CNT MAX_LOOP_NUM
++#define DEFAULT_WHITE_PANIC_CNT MAX_LOOP_NUM
++#define HUNG_TASK_UPLOAD_ONCE 1
++#define FROZEN_BUF_LEN 1024
++#define MAX_REMOVE_LIST_NUM 200
++#define HUNGTASK_DOMAIN "KERNEL_VENDOR"
++#define HUNGTASK_NAME "HUNGTASK"
++#define INIT_FREEZE_NAME "INIT_FREEZE"
++#define HUNG_TASK_BATCHING 1024
++#define TIME_REFRESH_PIDS 20
++#define PID_ERROR (-1)
++#define HUNGTASK_EVENT_WHITELIST 1
++#define REPORT_MSGLENGTH 200
++
++struct task_item {
++	struct rb_node node;
++	pid_t pid;
++	pid_t tgid;
++	char name[TASK_COMM_LEN + 1];
++	unsigned long switch_count;
++	unsigned int task_type;
++	int dump_wa;
++	int panic_wa;
++	int dump_jank;
++	int d_state_time;
++	bool isdone_wa;
++};
++
++struct hashlist_node {
++	pid_t pid;
++	struct hlist_node list;
++};
++
++struct whitelist_item {
++	pid_t pid;
++	char name[TASK_COMM_LEN + 1];
++};
++
++struct task_hung_upload {
++	char name[TASK_COMM_LEN + 1];
++	pid_t pid;
++	pid_t tgid;
++	unsigned int flag;
++	int duration;
++};
++
++extern unsigned long sysctl_hung_task_timeout_secs;
++extern unsigned int sysctl_hung_task_panic;
++
++void do_dump_task(struct task_struct *task);
++int dump_task_wa(struct task_item *item, int dump_cnt,
++		 struct task_struct *task, unsigned int flag);
++void do_show_task(struct task_struct *task, unsigned int flag, int d_state_time);
++void hungtask_show_state_filter(unsigned long state_filter);
++int htbase_create_sysfs(void);
++void htbase_set_panic(int new_did_panic);
++void htbase_set_timeout_secs(unsigned long new_hungtask_timeout_secs);
++void htbase_check_tasks(unsigned long timeout);
++bool hashlist_find(struct hlist_head *head, int count, pid_t tgid);
++void hashlist_clear(struct hlist_head *head, int count);
++bool hashlist_insert(struct hlist_head *head, int count, pid_t tgid);
++
++#endif /* DFX_HUNGTASK_BASE_H */
+diff --git a/include/dfx/zrhung.h b/include/dfx/zrhung.h
+new file mode 100644
+index 000000000..a63462a28
+--- /dev/null
++++ b/include/dfx/zrhung.h
+@@ -0,0 +1,11 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef ZRHUNG_H
++#define ZRHUNG_H
++
++int zrhung_send_event(const char *domain, const char *event_name, const char *msg_buf);
++
++#endif /* ZRHUNG_H */
+diff --git a/include/linux/blackbox.h b/include/linux/blackbox.h
+new file mode 100644
+index 000000000..ed470e4a6
+--- /dev/null
++++ b/include/linux/blackbox.h
+@@ -0,0 +1,84 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef BLACKBOX_H
++#define BLACKBOX_H
++
++#include <linux/printk.h>
++#include <linux/time.h>
++
++#define PATH_MAX_LEN         256
++#define EVENT_MAX_LEN        32
++#define CATEGORY_MAX_LEN     32
++#define MODULE_MAX_LEN       32
++#define TIMESTAMP_MAX_LEN    24
++#define ERROR_DESC_MAX_LEN   512
++#define LOG_FLAG             "VALIDLOG"
++
++/* module type */
++#define MODULE_SYSTEM        "SYSTEM"
++
++/* fault category type */
++#define CATEGORY_SYSTEM_REBOOT         "SYSREBOOT"
++#define CATEGORY_SYSTEM_POWEROFF       "POWEROFF"
++#define CATEGORY_SYSTEM_PANIC          "PANIC"
++#define CATEGORY_SYSTEM_OOPS           "OOPS"
++#define CATEGORY_SYSTEM_CUSTOM         "CUSTOM"
++#define CATEGORY_SYSTEM_WATCHDOG       "HWWATCHDOG"
++#define CATEGORY_SYSTEM_HUNGTASK       "HUNGTASK"
++#define CATEGORY_SUBSYSTEM_CUSTOM      "CUSTOM"
++
++/* fault event type */
++#define EVENT_SYSREBOOT      "SYSREBOOT"
++#define EVENT_LONGPRESS      "LONGPRESS"
++#define EVENT_COMBINATIONKEY "COMBINATIONKEY"
++#define EVENT_SUBSYSREBOOT   "SUBSYSREBOOT"
++#define EVENT_POWEROFF       "POWEROFF"
++#define EVENT_PANIC          "PANIC"
++#define EVENT_OOPS           "OOPS"
++#define EVENT_SYS_WATCHDOG   "SYSWATCHDOG"
++#define EVENT_HUNGTASK       "HUNGTASK"
++#define EVENT_BOOTFAIL       "BOOTFAIL"
++
++#define FILE_NAME(x) (strrchr(x, '/') ? (strrchr(x, '/') + 1) : x)
++#define BBOX_DECORATOR_HILOG(level, fmt, args...)  \
++	pr_err("bbox:[%s][%s:%d] " fmt, level, FILE_NAME(__FILE__), __LINE__, ##args)
++
++#define bbox_print_fatal(fmt, args...) BBOX_DECORATOR_HILOG("fatal", fmt, ##args)
++#define bbox_print_err(fmt, args...) BBOX_DECORATOR_HILOG("err", fmt, ##args)
++#define bbox_print_warn(fmt, args...) BBOX_DECORATOR_HILOG("warn", fmt, ##args)
++#define bbox_print_info(fmt, args...) BBOX_DECORATOR_HILOG("info", fmt, ##args)
++#define bbox_print_debug(fmt, args...) BBOX_DECORATOR_HILOG("debug", fmt, ##args)
++
++struct error_info {
++	char event[EVENT_MAX_LEN];
++	char category[CATEGORY_MAX_LEN];
++	char module[MODULE_MAX_LEN];
++	char error_time[TIMESTAMP_MAX_LEN];
++	char error_desc[ERROR_DESC_MAX_LEN];
++};
++
++struct fault_log_info {
++	char flag[8]; /* 8 is the length of the flag */
++	size_t len; /* length of the kernel fault log */
++	struct error_info info;
++};
++
++struct module_ops {
++	char module[MODULE_MAX_LEN];
++	void (*dump)(const char *log_dir, struct error_info *info);
++	void (*reset)(struct error_info *info);
++	int (*get_last_log_info)(struct error_info *info);
++	int (*save_last_log)(const char *log_dir, struct error_info *info);
++};
++
++void get_timestamp(char *buf, size_t buf_size);
++int bbox_register_module_ops(struct module_ops *ops);
++int bbox_notify_error(const char event[EVENT_MAX_LEN],
++		const char module[MODULE_MAX_LEN],
++		const char error_desc[ERROR_DESC_MAX_LEN],
++		int need_sys_reset);
++
++#endif /* BLACKBOX_H */
+diff --git a/include/linux/blackbox_common.h b/include/linux/blackbox_common.h
+new file mode 100644
+index 000000000..ae8e0d229
+--- /dev/null
++++ b/include/linux/blackbox_common.h
+@@ -0,0 +1,44 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef BLACKBOX_COMMON_H
++#define BLACKBOX_COMMON_H
++
++#include <linux/types.h>
++
++/* bbox/BBOX - blackbox */
++#define YEAR_BASE            1900
++#define SECONDS_PER_MINUTE   60
++#define AID_ROOT             0
++#define AID_SYSTEM           1000
++#define BBOX_DIR_LIMIT       0775
++#define BBOX_FILE_LIMIT      0664
++#define PATH_MAX_LEN         256
++
++/*
++ * format:
++ * [topCategoryName],module[moduleName],category[categoryName],\
++ * event[eventName],time[seconds from 1970-01-01 00:00:00 UTC-tick],\
++ * sysreboot[true|false],errordesc[errorDescription],logpath[logpath]\n
++ */
++#define HISTORY_LOG_FORMAT "[%s],module[%s],category[%s],event[%s],"\
++	"time[%s],sysreboot[%s],errdesc[%s],logpath[%s]\n"
++#define TIMESTAMP_FORMAT "%04d%02d%02d%02d%02d%02d-%08llu"
++
++void sys_reset(void);
++void change_own(char *path, int uid, int gid);
++int full_write_file(const char *pfile_path, char *buf,
++		size_t buf_size, bool read_file);
++int file_exists(const char *name);
++int create_log_dir(const char *path);
++unsigned long long get_ticks(void);
++struct file *file_open(const char *filename, int open_mode, int mode);
++void file_close(struct file *filp);
++ssize_t file_read(struct file *file, loff_t offset, unsigned char *data,
++				  size_t size);
++int file_delete(struct file *filp);
++char *getfullpath(struct file *filp);
++
++#endif /* BLACKBOX_COMMON_H */
+diff --git a/include/linux/blackbox_storage.h b/include/linux/blackbox_storage.h
+new file mode 100644
+index 000000000..52d67523d
+--- /dev/null
++++ b/include/linux/blackbox_storage.h
+@@ -0,0 +1,22 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef BLACKBOX_STORAGE_H
++#define BLACKBOX_STORAGE_H
++
++#include <linux/kmsg_dump.h>
++
++struct reboot_crashlog_storage {
++	int (*storage_log)(void *out, unsigned int outlen);
++	int (*get_log)(void *in, unsigned int inlen);
++	void (*blackbox_dump)(struct kmsg_dumper *dumper, enum kmsg_dump_reason reason);
++	const char *material;
++};
++
++extern char *storage_material;
++extern const struct reboot_crashlog_storage *storage_lastword;
++extern const struct reboot_crashlog_storage storage_lastwords[];
++
++#endif /* BLACKBOX_STORAGE_H */
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 1cd97e434..ffce4e3a2 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1375,6 +1375,12 @@ struct task_struct {
+ 	struct callback_head		mce_kill_me;
+ 	int				mce_count;
+ #endif
++
++#ifdef CONFIG_ACCESS_TOKENID
++	u64				token;
++	u64				ftoken;
++#endif
++
+ 	ANDROID_VENDOR_DATA_ARRAY(1, 64);
+ 	ANDROID_OEM_DATA_ARRAY(1, 32);
+ 
+diff --git a/include/linux/uidgid.h b/include/linux/uidgid.h
+index b0542cd11..c7ca50d59 100644
+--- a/include/linux/uidgid.h
++++ b/include/linux/uidgid.h
+@@ -55,6 +55,10 @@ static inline gid_t __kgid_val(kgid_t gid)
+ #define GLOBAL_ROOT_UID KUIDT_INIT(0)
+ #define GLOBAL_ROOT_GID KGIDT_INIT(0)
+ 
++#ifdef CONFIG_ACCESS_TOKENID
++#define NWEBSPAWN_UID KUIDT_INIT(3081)
++#endif
++
+ #define INVALID_UID KUIDT_INIT(-1)
+ #define INVALID_GID KGIDT_INIT(-1)
+ 
+diff --git a/include/uapi/linux/android/binder.h b/include/uapi/linux/android/binder.h
+index 7badb670f..81dbc66df 100644
+--- a/include/uapi/linux/android/binder.h
++++ b/include/uapi/linux/android/binder.h
+@@ -284,6 +284,16 @@ struct binder_frozen_status_info {
+ 	__u32            async_recv;
+ };
+ 
++struct binder_feature_set {
++	__u64 feature_set;
++};
++
++struct access_token {
++	__u64 sender_tokenid;
++	__u64 first_tokenid;
++	__u64 reserved[2];
++};
++
+ #define BINDER_WRITE_READ		_IOWR('b', 1, struct binder_write_read)
+ #define BINDER_SET_IDLE_TIMEOUT		_IOW('b', 3, __s64)
+ #define BINDER_SET_MAX_THREADS		_IOW('b', 5, __u32)
+@@ -298,6 +308,10 @@ struct binder_frozen_status_info {
+ #define BINDER_GET_FROZEN_INFO		_IOWR('b', 15, struct binder_frozen_status_info)
+ #define BINDER_ENABLE_ONEWAY_SPAM_DETECTION	_IOW('b', 16, __u32)
+ 
++
++#define BINDER_FEATURE_SET	_IOWR('b', 30, struct binder_feature_set)
++#define BINDER_GET_ACCESS_TOKEN	_IOWR('b', 31, struct access_token)
++
+ /*
+  * NOTE: Two special error codes you should check for when calling
+  * in to the driver are:
+diff --git a/kernel/fork.c b/kernel/fork.c
+index f73e3e694..b3d5d3fc7 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -907,6 +907,10 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
+ 
+ 	err = arch_dup_task_struct(tsk, orig);
+ 
++#ifdef CONFIG_ACCESS_TOKENID
++	tsk->token = orig->token;
++	tsk->ftoken = 0;
++#endif
+ 	/*
+ 	 * arch_dup_task_struct() clobbers the stack-related fields.  Make
+ 	 * sure they're properly initialized before using any stack-related
+-- 
+2.25.1
+

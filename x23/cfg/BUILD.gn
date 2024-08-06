@@ -1,0 +1,50 @@
+# Copyright (c) 2024 Institute of Software, Chinese Academy of Sciences. 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+import("//build/ohos.gni")
+
+ohos_prebuilt_etc("init.without_two_stages.cfg") {
+  source = "init.without_two_stages.cfg"
+  part_name = "oniro_products"
+  install_images = [ system_base_dir ]
+  install_enable = true
+}
+
+ohos_prebuilt_etc("init.x23.usb.cfg") {
+  source = "init.x23.usb.cfg"
+  part_name = "oniro_products"
+  install_images = [ vendor_base_dir ]
+  install_enable = true
+}
+
+ohos_prebuilt_etc("fstab.x23") {
+  source = "fstab.x23"
+  part_name = "oniro_products"
+  install_images = [ vendor_base_dir ]
+  install_enable = true
+}
+
+ohos_prebuilt_etc("fstab.required") {
+  source = "fstab.required"
+  part_name = "oniro_products"
+  install_images = [ ramdisk_base_dir, system_base_dir ]
+  install_enable = true
+}
+
+group("init_configs") {
+  deps = [
+    ":fstab.required",
+    ":fstab.x23",
+    ":init.without_two_stages.cfg",
+    ":init.x23.usb.cfg"
+  ]
+}

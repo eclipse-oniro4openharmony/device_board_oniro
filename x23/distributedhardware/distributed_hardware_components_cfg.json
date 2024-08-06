@@ -1,0 +1,28 @@
+{
+    "distributed_components": [
+        {
+            "name": "distributed_camera",
+            "type": "CAMERA",
+            "comp_handler_loc": "libdistributed_camera_handler.z.so",
+            "comp_handler_version": "1.0",
+            "comp_source_loc": "libdistributed_camera_source_sdk.z.so",
+            "comp_source_version": "1.0",
+            "comp_source_sa_id": 4803,
+            "comp_sink_loc": "libdistributed_camera_sink_sdk.z.so",
+            "comp_sink_version": "1.0",
+            "comp_sink_sa_id": 4804
+        },
+        {
+            "name": "distributed_screen",
+            "type": "SCREEN",
+            "comp_handler_loc": "libdistributed_screen_handler.z.so",
+            "comp_handler_version": "1.0",
+            "comp_source_loc": "libdistributed_screen_source_sdk.z.so",
+            "comp_source_version": "1.0",
+            "comp_source_sa_id": 4807,
+            "comp_sink_loc": "libdistributed_screen_sink_sdk.z.so",
+            "comp_sink_version": "1.0",
+            "comp_sink_sa_id": 4808
+        }
+    ]
+}
