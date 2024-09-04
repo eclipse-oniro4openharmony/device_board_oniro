@@ -21,15 +21,25 @@ if (!defined(defines)) {
   defines = []
 }
 
+declare_args() {                                                  
+  is_support_boot_animation = true
+  is_support_graphic = true
+  is_support_codec = true
+}
+
+if (!defined(global_parts_info.graphic_graphic_2d)) {             
+  is_support_graphic = false
+}
+
+if (!defined(global_parts_info.hdf_drivers_peripheral_codec)) {   
+  is_support_codec = false
+}
+
+
 product_config_path = "//vendor/${product_company}/${product_name}"
 board_camera_path = "//device/board/${product_company}/${device_name}/camera"
 is_support_v4l2 = true
 if (is_support_v4l2) {
   is_support_mpi = false
   defines += [ "SUPPORT_V4L2" ]
-  chipset_build_deps = "$board_camera_path:chipset_build"
-  camera_device_manager_deps =
-      "$board_camera_path/device_manager:camera_device_manager"
-  camera_pipeline_core_deps =
-      "$board_camera_path/pipeline_core:camera_pipeline_core"
 }
