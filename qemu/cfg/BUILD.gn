@@ -14,28 +14,28 @@ import("//build/ohos.gni")
 
 ohos_prebuilt_etc("init.without_two_stages.cfg") {
   source = "init.without_two_stages.cfg"
-  part_name = "oniro_products"
+  part_name = "device_qemu"
   install_images = [ system_base_dir ]
   install_enable = true
 }
 
 ohos_prebuilt_etc("init.qemu.usb.cfg") {
   source = "init.qemu.usb.cfg"
-  part_name = "oniro_products"
+  part_name = "device_qemu"
   install_images = [ vendor_base_dir ]
   install_enable = true
 }
 
 ohos_prebuilt_etc("fstab.qemu") {
   source = "fstab.qemu"
-  part_name = "oniro_products"
+  part_name = "device_qemu"
   install_images = [ vendor_base_dir ]
   install_enable = true
 }
 
 ohos_prebuilt_etc("fstab.required") {
   source = "fstab.required"
-  part_name = "oniro_products"
+  part_name = "device_qemu"
   install_images = [ ramdisk_base_dir, system_base_dir ]
   install_enable = true
 }

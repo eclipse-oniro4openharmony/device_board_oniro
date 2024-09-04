@@ -13,16 +13,40 @@
             "comp_sink_sa_id": 4804
         },
         {
+            "name": "distributed_audio",
+            "type": "AUDIO",
+            "comp_handler_loc": "libdistributed_audio_handler.z.so",
+            "comp_handler_version": "1.0",
+            "comp_source_loc": "libdistributed_audio_source_sdk.z.so",
+            "comp_source_version": "1.0",
+            "comp_source_sa_id": 4805,
+            "comp_sink_loc": "libdistributed_audio_sink_sdk.z.so",
+            "comp_sink_version": "1.0",
+            "comp_sink_sa_id": 4806
+        },
+        {
             "name": "distributed_screen",
             "type": "SCREEN",
             "comp_handler_loc": "libdistributed_screen_handler.z.so",
             "comp_handler_version": "1.0",
             "comp_source_loc": "libdistributed_screen_source_sdk.z.so",
-            "comp_source_version": "1.0",
+            "comp_source_version": "2.0",
             "comp_source_sa_id": 4807,
             "comp_sink_loc": "libdistributed_screen_sink_sdk.z.so",
-            "comp_sink_version": "1.0",
+            "comp_sink_version": "2.0",
             "comp_sink_sa_id": 4808
+        },
+        {
+            "name": "distributed_input",
+            "type": "INPUT",
+            "comp_handler_loc": "libdinput_handler.z.so",
+            "comp_handler_version": "1.0",
+            "comp_source_loc": "libdinput_source_handler.z.so",
+            "comp_source_version": "1.0",
+            "comp_source_sa_id": 4809,
+            "comp_sink_loc": "libdinput_sink_handler.z.so",
+            "comp_sink_version": "1.0",
+            "comp_sink_sa_id": 4810
         }
     ]
 }
