@@ -12,14 +12,25 @@
 # limitations under the License.
 import("//build/ohos.gni")
 
-ohos_prebuilt_etc("distributed_hardware_components_cfg") {
+ohos_prebuilt_etc("distributed_hardware_components_cfg.json") {
   source = "distributed_hardware_components_cfg.json"
   install_enable = true
   module_install_dir = "etc/distributedhardware/"
-  install_images = [ "vendor" ]
-  part_name = "oniro_products"
+  install_images = [ chipset_base_dir ]
+  part_name = "device_x23"
+}
+
+ohos_prebuilt_etc("dinput_business_event_whitelist.cfg") {
+  source = "dinput_business_event_whitelist.cfg"
+  install_enable = true
+  module_install_dir = "etc/distributedhardware/"
+  install_images = [ chipset_base_dir ]
+  part_name = "device_x23"
 }
 
 group("distributedhardware") {
-  deps = [ ":distributed_hardware_components_cfg" ]
+  deps = [
+    ":dinput_business_event_whitelist.cfg",
+    ":distributed_hardware_components_cfg.json",
+  ]
 }

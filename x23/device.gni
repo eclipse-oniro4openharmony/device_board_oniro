@@ -1,4 +1,5 @@
 # Copyright (C) 2021 HiHope Open Source Organization .
+# Copyright (c) 2024 Institute of Software, Chinese Academy of Sciences. 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -11,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-soc_company = "oniro"
-soc_name = "mt6789"
+soc_company = "broadcom"
+soc_name = "bcm2711"
 
 import("//device/soc/${soc_company}/${soc_name}/soc.gni")
 
@@ -21,15 +22,32 @@ if (!defined(defines)) {
   defines = []
 }
 
+declare_args() {                                                  #2024/04/07 ��
+  is_support_boot_animation = true
+  is_support_graphic = true
+  is_support_codec = true
+}
+
+if (!defined(global_parts_info.graphic_graphic_2d)) {             #2024/04/07 ��
+  is_support_graphic = false
+}
+
+if (!defined(global_parts_info.hdf_drivers_peripheral_codec)) {   #2024/04/07 ��
+  is_support_codec = false
+}
+
 product_config_path = "//vendor/${product_company}/${product_name}"
-board_camera_path = "//device/board/${product_company}/${device_name}/camera"
+board_camera_path = "//device/board/oniro/x23/camera"
 is_support_v4l2 = true
 if (is_support_v4l2) {
   is_support_mpi = false
   defines += [ "SUPPORT_V4L2" ]
-  chipset_build_deps = "$board_camera_path:chipset_build"
-  camera_device_manager_deps =
-      "$board_camera_path/device_manager:camera_device_manager"
-  camera_pipeline_core_deps =
-      "$board_camera_path/pipeline_core:camera_pipeline_core"
+  #chipset_build_deps = "$board_camera_path:chipset_build"       #2024/04/07 ɾ
+  #camera_device_manager_deps =
+      #"$board_camera_path/device_manager:camera_device_manager" #2024/04/07 ɾ
+  #camera_pipeline_core_deps =                                   #2024/04/07 ɾ
+      #"$board_camera_path/pipeline_core:camera_pipeline_core"   #2024/04/07 ɾ
+  # chipset_build_deps = "$board_camera_path:chipset_build"      #2024/04/07 ��
+  # camera_device_manager_deps = "$board_camera_path/device_manager:camera_device_manager"  #2024/04/07 ��
+  # camera_pipeline_core_deps = "$board_camera_path/pipeline_core:camera_pipeline_core"     #2024/04/07 ��
 }
