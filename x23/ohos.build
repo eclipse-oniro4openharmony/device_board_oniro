@@ -1,9 +1,9 @@
 {
-    "subsystem": "oniro_products",
+    "subsystem": "device_x23",
     "parts": {
-        "oniro_products": {
+        "device_x23": {
             "module_list": [
-                "//device/board/${product_company}/${device_name}:x23_group"
+                "//device/board/oniro/${device_name}:x23_group"
             ]
         }
     }

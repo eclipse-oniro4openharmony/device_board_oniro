@@ -12,39 +12,40 @@
 # limitations under the License.
 import("//build/ohos.gni")
 
-ohos_prebuilt_etc("init.without_two_stages.cfg") {
-  source = "init.without_two_stages.cfg"
-  part_name = "oniro_products"
-  install_images = [ system_base_dir ]
+ohos_prebuilt_etc("init.x23.cfg") {
+  source = "init.x23.cfg"
+  part_name = "device_x23"
+  install_images = [ vendor_base_dir ]
   install_enable = true
 }
 
 ohos_prebuilt_etc("init.x23.usb.cfg") {
   source = "init.x23.usb.cfg"
-  part_name = "oniro_products"
+  part_name = "device_x23"
   install_images = [ vendor_base_dir ]
   install_enable = true
 }
 
 ohos_prebuilt_etc("fstab.x23") {
   source = "fstab.x23"
-  part_name = "oniro_products"
+  part_name = "device_x23"
   install_images = [ vendor_base_dir ]
   install_enable = true
 }
 
 ohos_prebuilt_etc("fstab.required") {
   source = "fstab.required"
-  part_name = "oniro_products"
-  install_images = [ ramdisk_base_dir, system_base_dir ]
+  part_name = "device_x23"
+  install_images = [ ramdisk_base_dir ]
   install_enable = true
 }
+
 
 group("init_configs") {
   deps = [
     ":fstab.required",
     ":fstab.x23",
-    ":init.without_two_stages.cfg",
-    ":init.x23.usb.cfg"
+    ":init.x23.cfg",
+    ":init.x23.usb.cfg",
   ]
 }
