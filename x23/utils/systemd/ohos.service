@@ -1,0 +1,13 @@
+[Unit]
+Description=Start ohos system
+After=systemd-user-sessions.service
+After=lightdm.service
+
+[Service]
+Type=exec
+ExecStart=/home/phablet/start-ohos.sh
+ExecStop=/usr/bin/lxc-stop -W -n openharmony -k
+
+[Install]
+WantedBy=graphical.target
+
