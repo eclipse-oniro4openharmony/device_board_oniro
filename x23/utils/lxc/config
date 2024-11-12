@@ -1,0 +1,39 @@
+lxc.rootfs.path = /home/phablet/openharmony-container/rootfs
+lxc.uts.name = openharmony
+
+lxc.log.syslog = daemon
+# Uncomment for more debugging info.
+# lxc.log.level = 3
+
+lxc.execute.cmd = "/bin/sh"
+lxc.init.cmd = "/init"
+
+lxc.net.0.type = none
+
+lxc.namespace.keep = net user ipc
+
+lxc.tty.dir = lxc
+lxc.tty.max = 4
+lxc.pty.max = 1024
+lxc.cap.drop = mac_admin mac_override
+
+lxc.apparmor.profile = unconfined
+lxc.autodev = 0
+
+lxc.mount.entry = tmpfs dev tmpfs nosuid,mode=0755 0 0
+#lxc.mount.entry = /dev/__properties__ dev/__properties__ bind bind,create=dir 0 0
+lxc.mount.entry = /dev/binderfs/anbox-binder dev/binder bind bind,create=file,optional 0 0
+lxc.mount.entry = /dev/binderfs/anbox-hwbinder dev/hwbinder bind bind,create=file,optional 0 0
+lxc.mount.entry = /dev/binderfs/anbox-vndbinder  dev/vndbinder bind bind,create=file,optional 0 0
+#lxc.mount.entry = /dev/dri/card0 dev/dri/card0 bind bind,create=file,optional 0 0
+lxc.mount.entry = /dev/access_token_id dev/access_token_id bind bind,create=file,optional 0 0
+lxc.mount.entry = /dev/ashmem dev/ashmem bind bind,create=file,optional 0 0
+lxc.mount.entry = /dev/urandom dev/urandom bind bind,create=file,optional 0 0
+lxc.mount.entry = /dev/null dev/null bind bind,create=file,optional 0 0
+#lxc.mount.entry = /dev/socket dev/socket bind bind,create=dir 0 0
+#lxc.mount.entry = proc proc proc nodev,noexec,nosuid 0 0
+#lxc.mount.entry = sys sys sysfs nodev,noexec,nosuid 0 0
+#lxc.mount.entry = selinuxfs sys/fs/selinux selinuxfs optional 0 0
+
+lxc.cgroup.devices.allow = a
+lxc.cgroup2.devices.allow = a
