@@ -5,7 +5,7 @@ After=lightdm.service
 
 [Service]
 Type=exec
-ExecStart=/home/phablet/start-ohos.sh
+ExecStart=/home/phablet/openharmony/start-ohos.sh
 ExecStop=/usr/bin/lxc-stop -W -n openharmony -k
 
 [Install]
