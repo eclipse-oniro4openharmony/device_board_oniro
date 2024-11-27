@@ -1,0 +1,101 @@
+diff --git a/services/etc/init.without_two_stages.cfg b/services/etc/init.without_two_stages.cfg
+index dfa415fb..6812e536 100755
+--- a/services/etc/init.without_two_stages.cfg
++++ b/services/etc/init.without_two_stages.cfg
+@@ -7,6 +7,9 @@
+     "jobs" : [{
+             "name" : "pre-init",
+             "cmds" : [
++                "chmod 0777 /dev/binder",
++                "chmod 0777 /dev/hwbinder",
++                "chmod 0777 /dev/vndbinder",
+                 "write /proc/sys/kernel/sysrq 0",
+                 "start ueventd",
+                 "start watchdog_service",
+@@ -80,7 +83,7 @@
+         }, {
+             "name" : "post-fs",
+             "cmds" : [
+-                "mount rootfs rootfs / remount bind ro nodev",
++                "mount rootfs rootfs / remount bind rw nodev",
+                 "chown root log /proc/vmallocinfo",
+                 "chmod 0440 /proc/vmallocinfo",
+                 "chown root log /proc/slabinfo",
+@@ -107,8 +110,11 @@
+                 "mkdir /data/app/el4 0711 root root",
+                 "mkdir /data/service/el1 0711 root root",
+                 "mkdir /data/service/el1/public 0711 root root",
++                "mkdir /data/service/el1/public/AbilityManagerService 0711 system system",
+                 "mkdir /data/service/el2 0711 root root",
+                 "mkdir /data/service/el2/public 0711 root root",
++                "mkdir /data/service/el3 0711 root root",
++                "mkdir /data/service/el4 0711 root root",
+                 "mkdir /data/chipset 0711 root root",
+                 "mkdir /data/chipset/el1 0711 root root",
+                 "mkdir /data/chipset/el1/public 0711 root root",
+@@ -130,17 +136,21 @@
+                 "mkdir /data/service/el2/0/hmdfs 0711 system system",
+                 "mkdir /data/chipset/el1/0 0711 root root",
+                 "mkdir /data/chipset/el2/0 0711 root root",
++                "mkdir /storage/media 0711 root root",
+                 "mkdir /data/bootchart 0755 shell shell",
+                 "mkdir /data/app-staging 0750 system system",
+                 "copy /data/system/entropy.dat /dev/urandom",
+                 "mkdir /data/misc 01771 system misc",
++                "mkdir /data/misc/shared_relro 0771 nwebspawn nwebspawn",
+                 "mkdir /data/local 0751 root root",
+                 "mkdir /data/preloads 0775 system system",
+                 "mkdir /data/vendor 0771 root root",
++                "mkdir /data/local/ark-cache 0711 root root",
+                 "mkdir /data/vendor_ce 0771 root root",
+                 "mkdir /data/vendor_de 0771 root root",
+                 "mkdir /data/vendor/hardware 0771 root root",
+                 "mkdir /data/local/tmp 0771 shell shell",
++                "mkdir /data/local/tmp/debugserver 0755 shell shell",
+                 "mkdir /data/local/traces 0777 shell shell",
+                 "mkdir /data/data 0771 system system",
+                 "mkdir /data/app-private 0771 system system",
+@@ -199,7 +209,9 @@
+                 "chown system system /sys/class/leds/green/brightness",
+                 "chown system system /sys/class/leds/blue/brightness",
+                 "chown root radio /proc/cmdline",
+-                "setparam net.tcp.default_init_rwnd 60"
++                "setparam net.tcp.default_init_rwnd 60",
++                "chmod 666 /dev/dri/card0",
++                "chmod 666 /dev/ashmem"
+             ]
+         }, {
+             "name" : "param:sys.sysctl.extra_free_kbytes=*",
+diff --git a/services/init/init_common_service.c b/services/init/init_common_service.c
+index fefdbd15..c7132c53 100644
+--- a/services/init/init_common_service.c
++++ b/services/init/init_common_service.c
+@@ -793,7 +793,7 @@ void ServiceReap(Service *service)
+             service->pid = tmp;
+             ServiceReapHookExecute(service);
+             service->pid = -1;
+-            ExecReboot("panic");
++            //ExecReboot("panic");
+         }
+     } else if (!(service->attribute & SERVICE_ATTR_NEED_RESTART)) {
+         if (!CalculateCrashTime(service, service->crashTime, service->crashCount)) {
+diff --git a/services/init/standard/init_firststage.c b/services/init/standard/init_firststage.c
+index 04ffcb53..c59941ed 100755
+--- a/services/init/standard/init_firststage.c
++++ b/services/init/standard/init_firststage.c
+@@ -116,6 +116,7 @@ static void StartSecondStageInit(long long uptime)
+     // It will panic if close stdio before execv("/bin/sh", NULL)
+     CloseStdio();
+ 
++    /*
+     SwitchRoot("/usr");
+     char buf[64];
+     snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, "%lld", uptime);
+@@ -130,6 +131,7 @@ static void StartSecondStageInit(long long uptime)
+         INIT_LOGE("Failed to exec \"/bin/init\", err = %d", errno);
+         exit(-1);
+     }
++    */
+ }
+ 
+ static void EarlyLogInit(void)
