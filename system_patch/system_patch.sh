@@ -17,17 +17,29 @@ set -e
 PROJECT_ROOT=$(pwd)/
 PATCH_SRC_PATH=${PROJECT_ROOT}device/board/oniro/system_patch
 
-# #chmod
-chmod 777 ${PROJECT_ROOT}device/board/oniro/qemu/kernel/build_kernel.sh
-chmod 777 ${PROJECT_ROOT}device/board/oniro/qemu/kernel/check_patch.sh
-chmod 777 ${PROJECT_ROOT}device/board/oniro/qemu/kernel/make_kernel.sh
-chmod 777 ${PROJECT_ROOT}device/board/oniro/qemu/kernel/make_dtb.mk
-chmod 777 ${PROJECT_ROOT}device/board/oniro/qemu/kernel/make_kernel_32.mk
-chmod 777 ${PROJECT_ROOT}device/board/oniro/qemu/kernel/make_kernel_64.mk
-
 #whitelist
 cp -arfL ${PATCH_SRC_PATH}/whitelist/compile_standard_whitelist.json ${PROJECT_ROOT}build/compile_standard_whitelist.json
 
 #graphic_2d
 cp -arfL ${PATCH_SRC_PATH}/graphic_2d/rs_draw_cmd.cpp ${PROJECT_ROOT}foundation/graphic/graphic_2d/rosen/modules/render_service_base/src/pipeline/rs_draw_cmd.cpp
 cp -arfL ${PATCH_SRC_PATH}/graphic_2d/surface_image.cpp ${PROJECT_ROOT}foundation/graphic/graphic_2d/frameworks/surfaceimage/src/surface_image.cpp
+
+
+# patching base/startup/init
+PATCH_FILE="${PROJECT_ROOT}device/board/oniro/system_patch/base_startup_init/base_startup_init.patch"
+
+cd "${PROJECT_ROOT}base/startup/init" || exit 1
+
+# Check if the patch has been applied
+if git apply --check "$PATCH_FILE" >/dev/null 2>&1; then
+  echo "The patch has not been applied yet. Applying the patch..."
+  git apply "$PATCH_FILE"
+  if [ $? -eq 0 ]; then
+    echo "Patch applied successfully."
+  else
+    echo "Failed to apply the patch."
+    exit 1
+  fi
+else
+  echo "The patch is already applied or cannot be applied."
+fi
