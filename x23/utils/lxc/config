@@ -1,4 +1,4 @@
-lxc.rootfs.path = /home/phablet/openharmony-container/rootfs
+lxc.rootfs.path = /home/phablet/openharmony/rootfs
 lxc.uts.name = openharmony
 
 lxc.log.syslog = daemon

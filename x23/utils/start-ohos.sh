@@ -11,9 +11,9 @@ until check_lightdm; do
     sleep 1
 done
 
-# Lightdm is running, wait for 3 seconds
-echo "Lightdm is active. Waiting for 3 seconds..."
-sleep 3
+# Lightdm is running, wait for 1 second
+echo "Lightdm is active. Waiting for 1 second..."
+sleep 1
 
 # Stop lightdm
 echo "Stopping lightdm..."
