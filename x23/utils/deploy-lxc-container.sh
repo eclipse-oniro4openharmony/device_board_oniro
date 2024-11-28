@@ -5,19 +5,22 @@ export OHOS_DIR=$(dirname "$(realpath $0)")/../../../../../
 ROOTFS_TARBALL_PATH="${OHOS_DIR}/out/x23/packages/phone/images/ohos-rootfs.tar.gz"
 PREBUILT_ROOTFS_TARBALL=""
 DEVICE_PASSWORD="1234"
+DISABLE_SERVICE=false
 
 usage() {
-    echo "Usage: $0 [-p <path_to_prebuilt_rootfs_tarball>]"
+    echo "Usage: $0 [-p <path_to_prebuilt_rootfs_tarball>] [-d]"
     echo "  -p: Specify the path to a prebuilt rootfs tarball. If provided, skips the creation of the rootfs tarball and uses the specified file instead."
+    echo "  -d: Disable the ohos systemd service and reboot the device. Exits the script without deploying."
     exit 1
 }
 
-while getopts "p:" opt; do
+while getopts "p:d" opt; do
   if [ "$#" -eq 0 ]; then
     usage
   fi
   case "$opt" in
     p) PREBUILT_ROOTFS_TARBALL="$OPTARG";;
+    d) DISABLE_SERVICE=true;;
     *) usage;;
   esac
 done
@@ -27,6 +30,14 @@ log() {
 }
 
 log "Starting OHOS deployment script."
+
+if [ "$DISABLE_SERVICE" = true ]; then
+    log "Disabling ohos systemd service..."
+    adb shell "echo $DEVICE_PASSWORD | sudo -S systemctl disable ohos" && log "Disabled ohos systemd service."
+    log "Rebooting device..."
+    adb shell "echo $DEVICE_PASSWORD | sudo -S reboot" && log "Device reboot initiated."
+    exit 0
+fi
 
 if [ -z "$PREBUILT_ROOTFS_TARBALL" ]; then
     log "Removing existing root filesystem directories..."
