@@ -4,6 +4,7 @@ export OHOS_DIR=$(dirname "$(realpath $0)")/../../../../../
 
 ROOTFS_TARBALL_PATH="${OHOS_DIR}/out/x23/packages/phone/images/ohos-rootfs.tar.gz"
 PREBUILT_ROOTFS_TARBALL=""
+DEVICE_PASSWORD="1234"
 
 usage() {
     echo "Usage: $0 [-p <path_to_prebuilt_rootfs_tarball>]"
@@ -54,22 +55,22 @@ adb push ${OHOS_DIR}/device/board/oniro/x23/utils/start-ohos.sh /home/phablet/op
 adb push ${OHOS_DIR}/device/board/oniro/x23/utils/systemd/ohos.service /home/phablet/openharmony/ && log "Service file pushed."
 
 log "Configuring device directories and permissions..."
-adb shell "echo 1234 | sudo -S mount -o remount,rw /" && log "Remounted root filesystem as read-write."
-adb shell "echo 1234 | sudo -S mkdir -p /var/lib/lxc/openharmony" && log "Created LXC directory on device."
-adb shell "echo 1234 | sudo -S mv /home/phablet/openharmony/config /var/lib/lxc/openharmony" && log "Moved config file to LXC directory."
+adb shell "echo $DEVICE_PASSWORD | sudo -S mount -o remount,rw /" && log "Remounted root filesystem as read-write."
+adb shell "echo $DEVICE_PASSWORD | sudo -S mkdir -p /var/lib/lxc/openharmony" && log "Created LXC directory on device."
+adb shell "echo $DEVICE_PASSWORD | sudo -S mv /home/phablet/openharmony/config /var/lib/lxc/openharmony" && log "Moved config file to LXC directory."
 
 log "Extracting root filesystem on device..."
-adb shell "echo 1234 | sudo -S rm -rf /home/phablet/openharmony/rootfs" && log "Removed existing rootfs directory on device."
+adb shell "echo $DEVICE_PASSWORD | sudo -S rm -rf /home/phablet/openharmony/rootfs" && log "Removed existing rootfs directory on device."
 adb shell mkdir -p /home/phablet/openharmony/rootfs && log "Created rootfs directory on device."
 adb shell tar -xzvf /home/phablet/openharmony/$(basename $ROOTFS_TARBALL_PATH) -C /home/phablet/openharmony/rootfs && log "Extracted root filesystem archive on device."
 
 log "Setting permissions and moving service file..."
 adb shell chmod +x /home/phablet/openharmony/start-ohos.sh && log "Made start script executable."
-adb shell "echo 1234 | sudo -S mv /home/phablet/openharmony/ohos.service /lib/systemd/system" && log "Moved service file to systemd directory."
-adb shell "echo 1234 | sudo -S systemctl enable ohos" && log "Enabled ohos systemd service."
+adb shell "echo $DEVICE_PASSWORD | sudo -S mv /home/phablet/openharmony/ohos.service /lib/systemd/system" && log "Moved service file to systemd directory."
+adb shell "echo $DEVICE_PASSWORD | sudo -S systemctl enable ohos" && log "Enabled ohos systemd service."
 
 log "Rebooting device..."
-adb shell "echo 1234 | sudo -S reboot" && log "Device reboot initiated."
+adb shell "echo $DEVICE_PASSWORD | sudo -S reboot" && log "Device reboot initiated."
 
 log "OHOS deployment script completed."
 
