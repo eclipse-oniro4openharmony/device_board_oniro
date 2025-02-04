@@ -1,17 +1,19 @@
-From 85c3a7c5bf59856de8deb65b8dff8ffead776b88 Mon Sep 17 00:00:00 2001
+From 33ec58bf7ffe25eec911da149bf5442d5b7e302b Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham@huawei.com>
-Date: Fri, 28 Jun 2024 15:20:06 +0200
-Subject: [PATCH] OpenHarmony 3.2 Release adaptation
+Date: Tue, 4 Feb 2025 14:08:10 +0100
+Subject: [PATCH 1/3] OpenHarmony 4.1 Release adaptation
 
 apply OpenHarmony adaptation code for  accesstokenid, blackbox,
 hievent, hilog, hisysevent, hungtask, zerohung
+
+Signed-off-by: Francesco Pham <francesco.pham@huawei.com>
 ---
  drivers/Kconfig                               |    3 +
  drivers/Makefile                              |    2 +
  drivers/accesstokenid/Kconfig                 |    5 +
  drivers/accesstokenid/Makefile                |    2 +
- drivers/accesstokenid/access_tokenid.c        |  180 +++
- drivers/accesstokenid/access_tokenid.h        |   34 +
+ drivers/accesstokenid/access_tokenid.c        |  397 +++++++
+ drivers/accesstokenid/access_tokenid.h        |   73 ++
  drivers/android/Kconfig                       |    7 +
  drivers/android/binder.c                      |  255 +++-
  drivers/android/binder_internal.h             |   12 +
@@ -24,16 +26,22 @@ hievent, hilog, hisysevent, hungtask, zerohung
  drivers/staging/blackbox/blackbox_storage.c   |  203 ++++
  drivers/staging/hievent/Kconfig               |   12 +
  drivers/staging/hievent/Makefile              |    2 +
- drivers/staging/hievent/hievent_driver.c      |  416 +++++++
+ drivers/staging/hievent/hievent_driver.c      |  422 +++++++
  drivers/staging/hievent/hievent_driver.h      |   22 +
  drivers/staging/hievent/hiview_hievent.c      |  488 ++++++++
  drivers/staging/hievent/hiview_hievent.h      |   34 +
  drivers/staging/hilog/Kconfig                 |   22 +
  drivers/staging/hilog/Makefile                |    5 +
- drivers/staging/hilog/hilog.c                 |  402 +++++++
+ drivers/staging/hilog/hilog.c                 |  409 +++++++
  drivers/staging/hisysevent/Kconfig            |    6 +
- drivers/staging/hisysevent/Makefile           |    2 +
- .../staging/hisysevent/hiview_hisysevent.c    |  519 +++++++++
+ drivers/staging/hisysevent/Makefile           |    6 +
+ .../staging/hisysevent/hisysevent_builder.c   |  363 ++++++
+ .../staging/hisysevent/hisysevent_builder.h   |   87 ++
+ .../staging/hisysevent/hisysevent_raw_data.c  |  117 ++
+ .../staging/hisysevent/hisysevent_raw_data.h  |   33 +
+ .../hisysevent/hisysevent_raw_data_encoder.c  |  123 ++
+ .../hisysevent/hisysevent_raw_data_encoder.h  |   21 +
+ .../staging/hisysevent/hiview_hisysevent.c    |  161 +++
  drivers/staging/hungtask/Kconfig              |   14 +
  drivers/staging/hungtask/Makefile             |    3 +
  drivers/staging/hungtask/hungtask_base.c      | 1031 +++++++++++++++++
@@ -55,7 +63,7 @@ hievent, hilog, hisysevent, hungtask, zerohung
  include/linux/uidgid.h                        |    4 +
  include/uapi/linux/android/binder.h           |   14 +
  kernel/fork.c                                 |    4 +
- 49 files changed, 5708 insertions(+), 2 deletions(-)
+ 55 files changed, 6367 insertions(+), 2 deletions(-)
  create mode 100644 drivers/accesstokenid/Kconfig
  create mode 100644 drivers/accesstokenid/Makefile
  create mode 100644 drivers/accesstokenid/access_tokenid.c
@@ -76,6 +84,12 @@ hievent, hilog, hisysevent, hungtask, zerohung
  create mode 100644 drivers/staging/hilog/hilog.c
  create mode 100644 drivers/staging/hisysevent/Kconfig
  create mode 100644 drivers/staging/hisysevent/Makefile
+ create mode 100644 drivers/staging/hisysevent/hisysevent_builder.c
+ create mode 100644 drivers/staging/hisysevent/hisysevent_builder.h
+ create mode 100644 drivers/staging/hisysevent/hisysevent_raw_data.c
+ create mode 100644 drivers/staging/hisysevent/hisysevent_raw_data.h
+ create mode 100644 drivers/staging/hisysevent/hisysevent_raw_data_encoder.c
+ create mode 100644 drivers/staging/hisysevent/hisysevent_raw_data_encoder.h
  create mode 100644 drivers/staging/hisysevent/hiview_hisysevent.c
  create mode 100644 drivers/staging/hungtask/Kconfig
  create mode 100644 drivers/staging/hungtask/Makefile
@@ -138,15 +152,15 @@ index 000000000..738a550f8
 +obj-$(CONFIG_ACCESS_TOKENID)		+= access_tokenid.o
 diff --git a/drivers/accesstokenid/access_tokenid.c b/drivers/accesstokenid/access_tokenid.c
 new file mode 100644
-index 000000000..e7bae802c
+index 000000000..a9340d471
 --- /dev/null
 +++ b/drivers/accesstokenid/access_tokenid.c
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,397 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * access_tokenid.c
 + *
-+ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ * Copyright (C) 2022-2023 Huawei Technologies Co., Ltd. All rights reserved.
 + *
 + */
 +
@@ -156,8 +170,19 @@ index 000000000..e7bae802c
 +#include <linux/fs.h>
 +#include <linux/miscdevice.h>
 +#include <linux/module.h>
++#include <linux/rwlock.h>
 +#include <linux/sched.h>
++#include <linux/slab.h>
 +#include "access_tokenid.h"
++
++DEFINE_RWLOCK(token_rwlock);
++#define ACCESS_TOKEN_UID KUIDT_INIT(3020)
++#define MAX_NODE_NUM 500
++#define UINT32_T_BITS 32
++
++static struct kmem_cache *g_cache = NULL;
++static struct token_perm_node *g_token_perm_root = NULL;
++static size_t g_total_node_num = 0;
 +
 +int access_tokenid_get_tokenid(struct file *file, void __user *uarg)
 +{
@@ -165,10 +190,11 @@ index 000000000..e7bae802c
 +			    sizeof(current->token)) ? -EFAULT : 0;
 +}
 +
-+static bool check_permission_for_set_tokenid(struct file *file)
++static bool check_permission_for_set_tokenid(struct file *file, unsigned long long tokenid)
 +{
 +	kuid_t uid = current_uid();
 +	struct inode *inode = file->f_inode;
++	access_tokenid_inner *tokenid_inner = (access_tokenid_inner *)&tokenid;
 +
 +	if (inode == NULL) {
 +		pr_err("%s: file inode is null\n", __func__);
@@ -177,6 +203,8 @@ index 000000000..e7bae802c
 +
 +	if (uid_eq(uid, GLOBAL_ROOT_UID) ||
 +	    uid_eq(uid, inode->i_uid)) {
++		return true;
++	} else if (uid_eq(uid, NWEBSPAWN_UID) && (tokenid_inner->render_flag == 1)) {
 +		return true;
 +	}
 +
@@ -187,11 +215,11 @@ index 000000000..e7bae802c
 +{
 +	unsigned long long tmp = 0;
 +
-+	if (!check_permission_for_set_tokenid(file))
-+		return -EPERM;
-+
 +	if (copy_from_user(&tmp, uarg, sizeof(tmp)))
 +		return -EFAULT;
++
++	if (!check_permission_for_set_tokenid(file, tmp))
++		return -EPERM;
 +
 +	current->token = tmp;
 +	return 0;
@@ -249,6 +277,199 @@ index 000000000..e7bae802c
 +	return 0;
 +}
 +
++static bool check_permission_for_set_token_permission()
++{
++	kuid_t uid = current_uid();
++	return uid_eq(uid, ACCESS_TOKEN_UID);
++}
++
++static void add_node_to_left_tree_tail(struct token_perm_node *root_node, struct token_perm_node *node)
++{
++	if ((root_node == NULL) || (node == NULL))
++		return;
++
++	struct token_perm_node *current_node = root_node;
++	while (true) {
++		if (current_node->left == NULL) {
++			current_node->left = node;
++			break;
++		}
++		current_node = current_node->left;
++	}
++}
++
++static void find_node_by_token(struct token_perm_node *root_node, uint32_t token,
++	struct token_perm_node **target_node, struct token_perm_node **parent_node)
++{
++	*target_node = NULL;
++	*parent_node = NULL;
++	struct token_perm_node *current_node = root_node;
++	while (current_node != NULL) {
++		if (current_node->perm_data.token == token) {
++			*target_node = current_node;
++			break;
++		}
++		*parent_node = current_node;
++		if (current_node->perm_data.token > token) {
++			current_node = current_node->left;
++		} else {
++			current_node = current_node->right;
++		}
++	}
++}
++
++static int add_node_to_tree(struct token_perm_node *root_node, struct token_perm_node *node)
++{
++	struct token_perm_node *target_node = NULL;
++	struct token_perm_node *parent_node = NULL;
++	find_node_by_token(root_node, node->perm_data.token, &target_node, &parent_node);
++	if (target_node != NULL) {
++		target_node->perm_data = node->perm_data;
++		return 0;
++	}
++	if (g_total_node_num >= MAX_NODE_NUM) {
++		pr_err("%s: the number of token nodes is exceeded.\n", __func__);
++		return -EDQUOT;
++	}
++	if (parent_node == NULL) {
++		g_token_perm_root = node;
++	} else if (parent_node->perm_data.token > node->perm_data.token) {
++		parent_node->left = node;
++	} else {
++		parent_node->right = node;
++	}
++	g_total_node_num++;
++	return 1;
++}
++
++static struct token_perm_node *remove_node_by_token(struct token_perm_node *root_node, uint32_t token)
++{
++	struct token_perm_node *target_node = NULL;
++	struct token_perm_node *parent_node = NULL;
++	find_node_by_token(root_node, token, &target_node, &parent_node);
++	if (target_node == NULL) {
++		pr_err("%s: target token to be removed not found.\n", __func__);
++		return NULL;
++	}
++
++	struct token_perm_node **new_node_addr = NULL;
++	if (parent_node == NULL) {
++		new_node_addr = &root_node;
++	} else if (parent_node->perm_data.token > token) {
++		new_node_addr = &(parent_node->left);
++	} else {
++		new_node_addr = &(parent_node->right);
++	}
++	if (target_node->right != NULL) {
++		*new_node_addr = target_node->right;
++		add_node_to_left_tree_tail(target_node->right, target_node->left);
++	} else {
++		*new_node_addr = target_node->left;
++	}
++	g_total_node_num--;
++	return target_node;
++}
++
++int access_tokenid_add_permission(struct file *file, void __user *uarg)
++{
++	if (!check_permission_for_set_token_permission())
++		return -EPERM;
++
++	struct token_perm_node *node = kmem_cache_zalloc(g_cache, GFP_KERNEL);
++	if (node == NULL)
++		return -ENOMEM;
++	if (copy_from_user(&(node->perm_data), uarg, sizeof(ioctl_add_perm_data))) {
++		kmem_cache_free(g_cache, node);
++		return -EFAULT;
++	}
++
++	write_lock(&token_rwlock);
++	int ret = add_node_to_tree(g_token_perm_root, node);
++	write_unlock(&token_rwlock);
++	if (ret <= 0) {
++		kmem_cache_free(g_cache, node);
++		return ret;
++	}
++	return 0;
++}
++
++int access_tokenid_remove_permission(struct file *file, void __user *uarg)
++{
++	if (!check_permission_for_set_token_permission())
++		return -EPERM;
++
++	uint32_t token = 0;
++	if (copy_from_user(&token, uarg, sizeof(token)))
++		return -EFAULT;
++
++	write_lock(&token_rwlock);
++	struct token_perm_node *target_node = remove_node_by_token(g_token_perm_root, token);
++	write_unlock(&token_rwlock);
++
++	if (target_node != NULL)
++		kmem_cache_free(g_cache, target_node);
++
++	return 0;
++}
++
++int access_tokenid_set_permission(struct file *file, void __user *uarg)
++{
++	if (!check_permission_for_set_token_permission())
++		return -EPERM;
++
++	ioctl_set_get_perm_data set_perm_data;
++	if (copy_from_user(&set_perm_data, uarg, sizeof(set_perm_data)))
++		return -EFAULT;
++
++	uint32_t idx = set_perm_data.op_code / UINT32_T_BITS;
++	if (idx >= MAX_PERM_GROUP_NUM) {
++		pr_err("%s: invalid op_code.\n", __func__);
++		return -EINVAL;
++	}
++
++	struct token_perm_node *target_node = NULL;
++	struct token_perm_node *parent_node = NULL;
++	write_lock(&token_rwlock);
++	find_node_by_token(g_token_perm_root, set_perm_data.token, &target_node, &parent_node);
++	if (target_node == NULL) {
++		write_unlock(&token_rwlock);
++		pr_err("%s: token not found.\n", __func__);
++		return -ENODATA;
++	}
++	uint32_t bit_idx = set_perm_data.op_code % UINT32_T_BITS;
++	if (set_perm_data.is_granted) {
++		target_node->perm_data.perm[idx] |= (uint32_t)0x01 << bit_idx;
++	} else {
++		target_node->perm_data.perm[idx] &= ~((uint32_t)0x01 << bit_idx);
++	}
++	write_unlock(&token_rwlock);
++	return 0;
++}
++
++int access_tokenid_get_permission(struct file *file, void __user *uarg)
++{
++	ioctl_set_get_perm_data get_perm_data;
++	if (copy_from_user(&get_perm_data, uarg, sizeof(get_perm_data)))
++		return -EFAULT;
++
++	uint32_t idx = get_perm_data.op_code / UINT32_T_BITS;
++	if (idx >= MAX_PERM_GROUP_NUM) {
++		pr_err("%s: invalid op_code.\n", __func__);
++		return -EINVAL;
++	}
++
++	struct token_perm_node *target_node = NULL;
++	struct token_perm_node *parent_node = NULL;
++	read_lock(&token_rwlock);
++	find_node_by_token(g_token_perm_root, get_perm_data.token, &target_node, &parent_node);
++	read_unlock(&token_rwlock);
++	if (target_node == NULL)
++		return -ENODATA;
++
++	uint32_t bit_idx = get_perm_data.op_code % UINT32_T_BITS;
++	return (target_node->perm_data.perm[idx] & ((uint32_t)0x01 << bit_idx)) >> bit_idx;
++}
++
 +typedef int (*access_token_id_func)(struct file *file, void __user *arg);
 +
 +static access_token_id_func g_func_array[ACCESS_TOKENID_MAX_NR] = {
@@ -257,6 +478,10 @@ index 000000000..e7bae802c
 +	access_tokenid_set_tokenid,
 +	access_tokenid_get_ftokenid,
 +	access_tokenid_set_ftokenid,
++	access_tokenid_add_permission,
++	access_tokenid_remove_permission,
++	access_tokenid_get_permission,
++	access_tokenid_set_permission,
 +};
 +
 +static long access_tokenid_ioctl(struct file *file, unsigned int cmd,
@@ -310,12 +535,18 @@ index 000000000..e7bae802c
 +		return err;
 +	}
 +
++	g_cache = kmem_cache_create("access_token_node", sizeof(struct token_perm_node), 0, SLAB_HWCACHE_ALIGN, NULL);
++	if (g_cache == NULL) {
++		pr_err("access_tokenid kmem_cache create failed\n");
++		return -ENOMEM;
++	}
 +	pr_info("access_tokenid init success\n");
 +	return 0;
 +}
 +
 +static void access_tokenid_exit_module(void)
 +{
++	kmem_cache_destroy(g_cache);
 +	misc_deregister(&access_tokenid_device);
 +}
 +
@@ -324,15 +555,15 @@ index 000000000..e7bae802c
 +module_exit(access_tokenid_exit_module);
 diff --git a/drivers/accesstokenid/access_tokenid.h b/drivers/accesstokenid/access_tokenid.h
 new file mode 100644
-index 000000000..318b54831
+index 000000000..7eb3119ef
 --- /dev/null
 +++ b/drivers/accesstokenid/access_tokenid.h
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,73 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * access_tokenid.h
 + *
-+ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ * Copyright (C) 2022-2023 Huawei Technologies Co., Ltd. All rights reserved.
 + *
 + */
 +
@@ -343,13 +574,44 @@ index 000000000..318b54831
 +#include <linux/types.h>
 +
 +#define	ACCESS_TOKEN_ID_IOCTL_BASE	'A'
++#define MAX_PERM_GROUP_NUM 64
 +
 +enum {
 +	GET_TOKEN_ID = 1,
 +	SET_TOKEN_ID,
 +	GET_FTOKEN_ID,
 +	SET_FTOKEN_ID,
++	ADD_PERMISSIONS,
++	REMOVE_PERMISSIONS,
++	GET_PERMISSION,
++	SET_PERMISSION,
 +	ACCESS_TOKENID_MAX_NR
++};
++
++typedef struct {
++	unsigned int token_uniqueid : 20;
++	unsigned int res : 5;
++	unsigned int render_flag : 1;
++	unsigned int dlp_flag : 1;
++	unsigned int type : 2;
++	unsigned int version : 3;
++} access_tokenid_inner;
++
++typedef struct {
++	uint32_t token;
++	uint32_t op_code;
++	bool is_granted;
++} ioctl_set_get_perm_data;
++
++typedef struct {
++	uint32_t token;
++	uint32_t perm[MAX_PERM_GROUP_NUM];
++} ioctl_add_perm_data;
++
++struct token_perm_node {
++	ioctl_add_perm_data perm_data;
++	struct token_perm_node *left;
++	struct token_perm_node *right;
 +};
 +
 +#define	ACCESS_TOKENID_GET_TOKENID \
@@ -360,6 +622,14 @@ index 000000000..318b54831
 +	_IOR(ACCESS_TOKEN_ID_IOCTL_BASE, GET_FTOKEN_ID, unsigned long long)
 +#define	ACCESS_TOKENID_SET_FTOKENID \
 +	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, SET_FTOKEN_ID, unsigned long long)
++#define	ACCESS_TOKENID_ADD_PERMISSIONS \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, ADD_PERMISSIONS, ioctl_add_perm_data)
++#define	ACCESS_TOKENID_REMOVE_PERMISSIONS \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, REMOVE_PERMISSIONS, uint32_t)
++#define	ACCESS_TOKENID_GET_PERMISSION \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, GET_PERMISSION, ioctl_set_get_perm_data)
++#define	ACCESS_TOKENID_SET_PERMISSION \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, SET_PERMISSION, ioctl_set_get_perm_data)
 +
 +#endif /* _ACCESS_TOKEN_ID_H */
 diff --git a/drivers/android/Kconfig b/drivers/android/Kconfig
@@ -2042,10 +2312,10 @@ index 000000000..5b2adc23a
 \ No newline at end of file
 diff --git a/drivers/staging/hievent/hievent_driver.c b/drivers/staging/hievent/hievent_driver.c
 new file mode 100644
-index 000000000..86363d11d
+index 000000000..83c9dc831
 --- /dev/null
 +++ b/drivers/staging/hievent/hievent_driver.c
-@@ -0,0 +1,416 @@
+@@ -0,0 +1,422 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
@@ -2173,9 +2443,15 @@ index 000000000..86363d11d
 +
 +	(void)file;
 +
-+	wait_event_interruptible(hievent_dev.wq, (hievent_dev.size > 0));
++	if (wait_event_interruptible(hievent_dev.wq, (hievent_dev.size > 0)))
++		return -EINVAL;
 +
 +	(void)mutex_lock(&hievent_dev.mtx);
++
++	if (hievent_dev.size == 0) {
++		retval = 0;
++		goto out;
++	}
 +
 +	retval = hievent_read_ring_head_buffer((unsigned char *)&header,
 +					       sizeof(header));
@@ -3065,10 +3341,10 @@ index 000000000..e53c86a5d
 +obj-$(CONFIG_HILOG)	+= hilog.o
 diff --git a/drivers/staging/hilog/hilog.c b/drivers/staging/hilog/hilog.c
 new file mode 100644
-index 000000000..4e6168ce7
+index 000000000..1c9deca41
 --- /dev/null
 +++ b/drivers/staging/hilog/hilog.c
-@@ -0,0 +1,402 @@
+@@ -0,0 +1,409 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
@@ -3219,9 +3495,15 @@ index 000000000..4e6168ce7
 +	struct hilog_entry header;
 +
 +	(void)file;
-+	wait_event_interruptible(hilog_dev.wq, (hilog_dev.size > 0));
++	if (wait_event_interruptible(hilog_dev.wq, (hilog_dev.size > 0)))
++		return -EINVAL;
 +
 +	(void)mutex_lock(&hilog_dev.mtx);
++
++	if (hilog_dev.size == 0) {
++		retval = 0;
++		goto out;
++	}
 +
 +	retval = hilog_read_ring_head_buffer((unsigned char *)&header,
 +					     sizeof(header));
@@ -3353,7 +3635,8 @@ index 000000000..4e6168ce7
 +		drop_log_lines++;
 +		is_this_time_full = true;
 +		is_last_time_full = true;
-+		hilog_buffer_dec(sizeof(header) + header.len);
++		hilog_buffer_dec(sizeof(header));
++		hilog_buffer_dec(header.len);
 +	}
 +	if (is_last_time_full && !is_this_time_full) {
 +		/* so we can only print one log if hilog ring buffer is full in a short time */
@@ -3485,22 +3768,807 @@ index 000000000..a40621cb8
 +	  Say Y here to enable hisysevent feature support.
 diff --git a/drivers/staging/hisysevent/Makefile b/drivers/staging/hisysevent/Makefile
 new file mode 100644
-index 000000000..f3b6c9296
+index 000000000..025a2349b
 --- /dev/null
 +++ b/drivers/staging/hisysevent/Makefile
-@@ -0,0 +1,2 @@
+@@ -0,0 +1,6 @@
 +# SPDX-License-Identifier: GPL-2.0
 +obj-$(CONFIG_HISYSEVENT)		+= hiview_hisysevent.o
-diff --git a/drivers/staging/hisysevent/hiview_hisysevent.c b/drivers/staging/hisysevent/hiview_hisysevent.c
++# add lightweight writing feature
++obj-$(CONFIG_HISYSEVENT)		+= hisysevent_builder.o
++obj-$(CONFIG_HISYSEVENT)		+= hisysevent_raw_data_encoder.o
++obj-$(CONFIG_HISYSEVENT)		+= hisysevent_raw_data.o
+diff --git a/drivers/staging/hisysevent/hisysevent_builder.c b/drivers/staging/hisysevent/hisysevent_builder.c
 new file mode 100644
-index 000000000..515b0a748
+index 000000000..d9dc011da
 --- /dev/null
-+++ b/drivers/staging/hisysevent/hiview_hisysevent.c
-@@ -0,0 +1,519 @@
++++ b/drivers/staging/hisysevent/hisysevent_builder.c
+@@ -0,0 +1,363 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
-+ * Copyright (C) 2022 Huawei Technologies Co., Ltd. All rights reserved.
++ * Copyright (C) 2023 Huawei Technologies Co., Ltd. All rights reserved.
 + */
++
++#include "hisysevent_builder.h"
++
++#include <linux/cred.h>
++#include <linux/ctype.h>
++#include <linux/fs.h>
++#include <linux/module.h>
++#include <linux/sched.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/time.h>
++#include <linux/types.h>
++#include <linux/uio.h>
++#include <linux/vmalloc.h>
++#include <asm/current.h>
++
++#define MAX_PARAM_NAME_LENGTH 48
++
++#define PARAM_STR_MAX_LEN	1536 // 1.5KB
++#define HISYSEVENT_INFO_BUF_LEN (2048 - 6)  // 2KB - 6 (read_gap)
++
++#define TIME_ZONE_LEN 6
++#define TIME_ZONE_TOTAL_CNT 38
++#define DEFAULT_TZ_POS 14
++
++#define MINUTE_TO_SECS 60
++#define SEC_TO_MILLISEC 1000
++#define MILLISEC_TO_NANOSEC (1000 * 1000)
++
++#define MAX_PARAM_NUMBER 128
++
++#define HISYSEVENT_HEADER_SIZE sizeof(struct hisysevent_header)
++
++enum value_type {
++	/* int64_t */
++	INT64 = 8,
++
++	/* string */
++	STRING = 12,
++};
++
++static int parse_time_zone(const char *time_zone_formatted)
++{
++	int ret;
++
++	static const char *const time_zone_list[] = {
++		"-0100", "-0200", "-0300", "-0330", "-0400", "-0500", "-0600",
++		"-0700", "-0800", "-0900", "-0930", "-1000", "-1100", "-1200",
++		"+0000", "+0100", "+0200", "+0300", "+0330", "+0400", "+0430",
++		"+0500", "+0530", "+0545", "+0600", "+0630", "+0700", "+0800",
++		"+0845", "+0900", "+0930", "+1000", "+1030", "+1100", "+1200",
++		"+1245", "+1300", "+1400"
++	};
++	if (!time_zone_formatted)
++		return DEFAULT_TZ_POS;
++
++	ret = match_string(time_zone_list, TIME_ZONE_LEN, time_zone_formatted);
++	if (ret < 0)
++		return DEFAULT_TZ_POS;
++
++	return ret;
++}
++
++static void hisysevent_builder_set_time(struct hisysevent_header *header)
++{
++	struct timespec64 ts;
++	struct timezone tz = sys_tz;
++	int tz_index = 0;
++	char time_zone[TIME_ZONE_LEN];
++	int tz_hour;
++	int tz_min;
++	long long millisecs = 0;
++
++	ktime_get_real_ts64(&ts);
++	millisecs = ts.tv_sec * SEC_TO_MILLISEC + ts.tv_nsec / MILLISEC_TO_NANOSEC;
++	header->timestamp = (u64)millisecs;
++
++	tz_hour = (-tz.tz_minuteswest) / MINUTE_TO_SECS;
++	time_zone[tz_index++] = tz_hour >= 0 ? '+' : '-';
++	tz_min = (-tz.tz_minuteswest) % MINUTE_TO_SECS;
++	sprintf(&time_zone[tz_index], "%02u%02u", abs(tz_hour), abs(tz_min));
++	time_zone[TIME_ZONE_LEN - 1] = '\0';
++	header->time_zone = (u8)parse_time_zone(time_zone);
++}
++
++static bool is_valid_num_of_param(struct hisysevent_params *params)
++{
++	if (!params)
++		return false;
++
++	return params->total_cnt < MAX_PARAM_NUMBER;
++}
++
++static bool is_valid_string(const char *str, unsigned int max_len)
++{
++	unsigned int len = 0;
++	unsigned int i;
++
++	if (!str)
++		return false;
++
++	len = strlen(str);
++	if (len == 0 || len > max_len)
++		return false;
++
++	if (!isalpha(str[0]))
++		return false;
++
++	for (i = 1; i < len; i++) {
++		if (!isalnum(str[i]) && str[i] != '_')
++			return false;
++	}
++	return true;
++}
++
++static int hisysevent_init_header(struct hisysevent_header *header, const char *domain,
++				  const char *name, enum hisysevent_type type)
++{
++	if (!is_valid_string(domain, MAX_DOMAIN_LENGTH) ||
++	    !is_valid_string(name, MAX_EVENT_NAME_LENGTH)) {
++		pr_err("domain or name is invalid");
++		return -EINVAL;
++	}
++
++	strcpy(header->domain, domain);
++	strcpy(header->name, name);
++
++	header->type = (u8)(type - 1);
++	header->pid = (u32)current->pid;
++	header->tid = (u32)current->tgid;
++	header->uid = (u32)current_uid().val;
++	header->is_open_trace = 0; // in kernel, this value is always 0
++
++	hisysevent_builder_set_time(header);
++	if (!(header->time_zone)) {
++		pr_err("failed to parse the time zone");
++		goto init_error;
++	}
++
++	pr_info("create hisysevent succeed, domain=%s, name=%s, type=%d",
++		header->domain, header->name, (header->type + 1));
++
++	return 0;
++
++init_error:
++	memset(header, 0, sizeof(*header));
++	return -EINVAL;
++}
++
++static int hisysevent_init_params(struct hisysevent_params *params)
++{
++	if (!params) {
++		pr_err("params is null");
++		return -EINVAL;
++	}
++
++	params->raw_data = raw_data_create();
++	if (!(params->raw_data))
++		return -EINVAL;
++
++	params->total_cnt = 0;
++	return 0;
++}
++
++static void hisysevent_params_destroy(struct hisysevent_params *params)
++{
++	if (!params) {
++		pr_err("params is null");
++		return;
++	}
++	raw_data_destroy(params->raw_data);
++}
++
++static bool hisysevent_check_params_validity(struct hisysevent_builder *builder)
++{
++	if (!builder) {
++		pr_err("builder is null");
++		return false;
++	}
++
++	if (!is_valid_num_of_param(&builder->params)) {
++		pr_err("number of param is invalid");
++		return false;
++	}
++
++	return true;
++}
++
++struct hisysevent_builder*
++hisysevent_builder_create(const char *domain, const char *name, enum hisysevent_type type)
++{
++	struct hisysevent_builder *builder;
++
++	builder = kzalloc(sizeof(*builder), GFP_KERNEL);
++	if (!builder)
++		return NULL;
++
++	// header struct initialize
++	if (hisysevent_init_header(&builder->header, domain, name, type) != 0)
++		goto create_err;
++
++	// parameters struct initialize
++	if (hisysevent_init_params(&builder->params) != 0)
++		goto create_err;
++
++	return builder;
++
++create_err:
++	hisysevent_builder_destroy(builder);
++	return NULL;
++}
++EXPORT_SYMBOL_GPL(hisysevent_builder_create);
++
++void hisysevent_builder_destroy(struct hisysevent_builder *builder)
++{
++	if (!builder) {
++		pr_err("try to destroy an invalid builder");
++		return;
++	}
++
++	// destroy hisysevent parameters
++	hisysevent_params_destroy(&builder->params);
++
++	kfree(builder);
++}
++EXPORT_SYMBOL_GPL(hisysevent_builder_destroy);
++
++int hisysevent_builder_put_integer(struct hisysevent_builder *builder, const char *key,
++				   s64 value)
++{
++	int ret;
++	struct hisysevent_raw_data *raw_data;
++
++	if (!is_valid_string(key, MAX_PARAM_NAME_LENGTH)) {
++		pr_err("try to put an invalid key");
++		return -EINVAL;
++	}
++	if (!hisysevent_check_params_validity(builder))
++		return -EINVAL;
++
++	raw_data = raw_data_create();
++	if (!raw_data) {
++		pr_err("failed to create raw data for an new integer parameter");
++		return -ENOMEM;
++	}
++
++	ret = -EINVAL;
++	if ((str_length_delimited_encode(raw_data, key) != 0) ||
++	    (key_value_type_encode(raw_data, (u8)0, (u8)INT64, (u8)0) != 0) ||
++	    (int64_t_varint_encode(raw_data, value) != 0)) {
++		pr_err("failed to encode an integer parameter");
++		goto put_int_err;
++	}
++
++	if (raw_data_append(builder->params.raw_data, raw_data->data, raw_data->len) != 0) {
++		pr_err("failed to append a raw data");
++		goto put_int_err;
++	}
++
++	builder->params.total_cnt++;
++	ret = 0;
++
++put_int_err:
++	raw_data_destroy(raw_data);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(hisysevent_builder_put_integer);
++
++int hisysevent_builder_put_string(struct hisysevent_builder *builder, const char *key,
++				  const char *value)
++{
++	int ret;
++	struct hisysevent_raw_data *raw_data;
++
++	if (!is_valid_string(key, MAX_PARAM_NAME_LENGTH)) {
++		pr_err("try to put an invalid key");
++		return -EINVAL;
++	}
++	if (!value || strlen(value) > PARAM_STR_MAX_LEN) {
++		pr_err("string length exceeds limit");
++		return -EINVAL;
++	}
++	if (!hisysevent_check_params_validity(builder))
++		return -EINVAL;
++
++	raw_data = raw_data_create();
++	if (!raw_data) {
++		pr_err("failed to create raw data for a new string parameter");
++		return -ENOMEM;
++	}
++
++	ret = -EINVAL;
++	if ((str_length_delimited_encode(raw_data, key) != 0) ||
++	    (key_value_type_encode(raw_data, 0, (u8)STRING, 0) != 0) ||
++	    (str_length_delimited_encode(raw_data, value) != 0)) {
++		pr_err("failed to encode a string parameter");
++		goto put_str_err;
++	}
++
++	if (raw_data_append(builder->params.raw_data, raw_data->data, raw_data->len) != 0) {
++		pr_err("failed to append a raw data");
++		goto put_str_err;
++	}
++
++	builder->params.total_cnt++;
++	ret = 0;
++
++put_str_err:
++	raw_data_destroy(raw_data);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(hisysevent_builder_put_string);
++
++int hisysevent_builder_build(struct hisysevent_builder *builder,
++			     struct hisysevent_raw_data *raw_data)
++{
++	s32 blockSize;
++	struct hisysevent_raw_data *params_raw_data;
++
++	if (!hisysevent_check_params_validity(builder))
++		return -EINVAL;
++
++	blockSize = 0;
++	// copy block size at first
++	if (raw_data_append(raw_data, (u8 *)(&blockSize), sizeof(s32)) != 0) {
++		pr_err("fialed to append block size");
++		return -ENOMEM;
++	}
++	// copy header
++	if (raw_data_append(raw_data, (u8 *)(&builder->header),
++			    sizeof(struct hisysevent_header)) != 0) {
++		pr_err("fialed to append sys event header");
++		return -ENOMEM;
++	}
++	// copy total count of parameter
++	if (raw_data_append(raw_data, (u8 *)(&builder->params.total_cnt),
++			    sizeof(s32)) != 0) {
++		pr_err("fialed to append total count of parameters");
++		return -ENOMEM;
++	}
++	// copy customized parameters
++	params_raw_data = builder->params.raw_data;
++	if (!params_raw_data) {
++		pr_err("this sys event doesn't have any parameter");
++		return -EINVAL;
++	}
++	if (raw_data_append(raw_data, params_raw_data->data, params_raw_data->len) != 0) {
++		pr_err("fialed to append encoded raw data of parameters");
++		return -ENOMEM;
++	}
++	// update block size
++	blockSize = raw_data->len;
++	if (raw_data_update(raw_data, (u8 *)(&blockSize), sizeof(s32), 0) != 0) {
++		pr_err("fialed to update block size");
++		return -ENOMEM;
++	}
++	return 0;
++}
++EXPORT_SYMBOL_GPL(hisysevent_builder_build);
+diff --git a/drivers/staging/hisysevent/hisysevent_builder.h b/drivers/staging/hisysevent/hisysevent_builder.h
+new file mode 100644
+index 000000000..6570b8499
+--- /dev/null
++++ b/drivers/staging/hisysevent/hisysevent_builder.h
+@@ -0,0 +1,87 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2023 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef HISYSEVENT_BUILDER_H
++#define HISYSEVENT_BUILDER_H
++
++#include <dfx/hiview_hisysevent.h>
++
++#include <linux/ctype.h>
++#include <linux/types.h>
++
++#include "hisysevent_raw_data_encoder.h"
++#include "hisysevent_raw_data.h"
++
++#define MAX_DOMAIN_LENGTH 16
++#define MAX_EVENT_NAME_LENGTH 32
++
++#pragma pack(1)
++
++struct hisysevent_header {
++	/* event domain */
++	char domain[MAX_DOMAIN_LENGTH + 1];
++
++	/* event name */
++	char name[MAX_EVENT_NAME_LENGTH + 1];
++
++	/* event timestamp */
++	u64 timestamp;
++
++	/* time zone */
++	u8 time_zone;
++
++	/* user id */
++	u32 uid;
++
++	/* process id */
++	u32 pid;
++
++	/* thread id */
++	u32 tid;
++
++	/* event hash code*/
++	u64 id;
++
++	/* event type */
++	u8 type: 2; // enum hisysevent_type.
++
++	/* trace info flag*/
++	u8 is_open_trace: 1;
++};
++
++#pragma pack()
++
++struct hisysevent_params {
++	/* total count of parameters */
++	s32 total_cnt;
++
++	/* content of parameters */
++	struct hisysevent_raw_data *raw_data;
++};
++
++/* hisysevent builder struct */
++struct hisysevent_builder {
++	/* common header */
++	struct hisysevent_header header;
++
++	/* customized parameters*/
++	struct hisysevent_params params;
++};
++
++struct hisysevent_builder *
++hisysevent_builder_create(const char *domain, const char *name, enum hisysevent_type type);
++
++void hisysevent_builder_destroy(struct hisysevent_builder *builder);
++
++int hisysevent_builder_put_integer(struct hisysevent_builder *builder, const char *key,
++				   s64 value);
++
++int hisysevent_builder_put_string(struct hisysevent_builder *builder, const char *key,
++				  const char *value);
++
++int hisysevent_builder_build(struct hisysevent_builder *builder,
++			     struct hisysevent_raw_data *raw_data);
++
++#endif /* HISYSEVENT_BUILDER_H */
+diff --git a/drivers/staging/hisysevent/hisysevent_raw_data.c b/drivers/staging/hisysevent/hisysevent_raw_data.c
+new file mode 100644
+index 000000000..5e37ad726
+--- /dev/null
++++ b/drivers/staging/hisysevent/hisysevent_raw_data.c
+@@ -0,0 +1,117 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2023 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#include "hisysevent_raw_data.h"
++
++#include <linux/cred.h>
++#include <linux/ctype.h>
++#include <linux/fs.h>
++#include <linux/module.h>
++#include <linux/sched.h>
++#include <linux/slab.h>
++#include <linux/types.h>
++#include <linux/vmalloc.h>
++
++#define EXPAND_BUF_SIZE 100
++
++static int raw_data_init(struct hisysevent_raw_data *raw_data)
++{
++	if (!raw_data) {
++		pr_err("raw data is null");
++		return -EINVAL;
++	}
++
++	raw_data->data = kzalloc(EXPAND_BUF_SIZE, GFP_KERNEL);
++	if (!(raw_data->data)) {
++		pr_err("failed to allocate memory for raw data");
++		return -ENOMEM;
++	}
++
++	raw_data->capacity = EXPAND_BUF_SIZE;
++	raw_data->len = 0;
++
++	return 0;
++}
++
++int raw_data_update(struct hisysevent_raw_data *dest, u8 *src, unsigned int len,
++		    unsigned int pos)
++{
++	if (!dest) {
++		pr_err("try to update a data which is null");
++		return -EINVAL;
++	}
++	if (!src || len == 0) {
++		pr_info("do nothing");
++		return 0;
++	}
++	if (dest->len < pos) {
++		pr_err("try to update on an invalid position");
++		return -EINVAL;
++	}
++	if ((pos + len) > dest->capacity) {
++		unsigned int expanded_size;
++		u8 *resize_data;
++
++		expanded_size = (len > EXPAND_BUF_SIZE) ? len : EXPAND_BUF_SIZE;
++		resize_data = kmalloc(dest->capacity + expanded_size, GFP_KERNEL);
++		if (!resize_data) {
++			pr_err("failed to expand memory for raw data");
++			return -ENOMEM;
++		}
++		if (dest->data) {
++			memcpy(resize_data, dest->data, dest->len);
++			dest->capacity += expanded_size;
++			kfree(dest->data);
++		}
++		dest->data = resize_data;
++	}
++
++	// append new data
++	memcpy(dest->data + pos, src, len);
++	if ((pos + len) > dest->len)
++		dest->len = pos + len;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(raw_data_update);
++
++int raw_data_append(struct hisysevent_raw_data *dest, u8 *src, unsigned int len)
++{
++	return raw_data_update(dest, src, len, dest->len);
++}
++EXPORT_SYMBOL_GPL(raw_data_append);
++
++struct hisysevent_raw_data*
++raw_data_create(void)
++{
++	struct hisysevent_raw_data *raw_data;
++
++	raw_data = kzalloc(sizeof(*raw_data), GFP_KERNEL);
++	if (!raw_data)
++		return NULL;
++
++	if (raw_data_init(raw_data) != 0)
++		goto create_err;
++
++	return raw_data;
++
++create_err:
++	raw_data_destroy(raw_data);
++	return NULL;
++}
++EXPORT_SYMBOL_GPL(raw_data_create);
++
++void raw_data_destroy(struct hisysevent_raw_data *raw_data)
++{
++	if (!raw_data) {
++		pr_err("try to destroy an invalid raw data");
++		return;
++	}
++
++	if (raw_data->data)
++		kfree(raw_data->data);
++
++	kfree(raw_data);
++}
++EXPORT_SYMBOL_GPL(raw_data_destroy);
+diff --git a/drivers/staging/hisysevent/hisysevent_raw_data.h b/drivers/staging/hisysevent/hisysevent_raw_data.h
+new file mode 100644
+index 000000000..93a9b9706
+--- /dev/null
++++ b/drivers/staging/hisysevent/hisysevent_raw_data.h
+@@ -0,0 +1,33 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2023 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef HISYSEVENT_RAW_DATA_H
++#define HISYSEVENT_RAW_DATA_H
++
++#include <linux/ctype.h>
++#include <linux/types.h>
++
++struct hisysevent_raw_data {
++	/* pointer to raw data */
++	u8 *data;
++
++	/* length of data wrote */
++	int len;
++
++	/* total allocated memory */
++	int capacity;
++};
++
++struct hisysevent_raw_data *
++raw_data_create(void);
++
++int raw_data_append(struct hisysevent_raw_data *dest, u8 *src, unsigned int len);
++
++int raw_data_update(struct hisysevent_raw_data *dest, u8 *src, unsigned int len,
++		    unsigned int offset);
++
++void raw_data_destroy(struct hisysevent_raw_data *raw_data);
++
++#endif /* HISYSEVENT_RAW_DATA_H */
+diff --git a/drivers/staging/hisysevent/hisysevent_raw_data_encoder.c b/drivers/staging/hisysevent/hisysevent_raw_data_encoder.c
+new file mode 100644
+index 000000000..a206950aa
+--- /dev/null
++++ b/drivers/staging/hisysevent/hisysevent_raw_data_encoder.c
+@@ -0,0 +1,123 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2023 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#include "hisysevent_raw_data_encoder.h"
++
++#include <linux/cred.h>
++#include <linux/ctype.h>
++#include <linux/fs.h>
++#include <linux/module.h>
++#include <linux/sched.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/types.h>
++#include <linux/uio.h>
++#include <linux/vmalloc.h>
++
++#define TAG_BYTE_OFFSET 5
++#define TAG_BYTE_BOUND (BIT(TAG_BYTE_OFFSET))
++#define TAG_BYTE_MASK (TAG_BYTE_BOUND - 1)
++
++#define NON_TAG_BYTE_OFFSET 7
++#define NON_TAG_BYTE_BOUND (BIT(NON_TAG_BYTE_OFFSET))
++#define NON_TAG_BYTE_MASK (NON_TAG_BYTE_BOUND - 1)
++
++enum hisysevent_encode_type {
++	// zigzag varint
++	VARINT = 0,
++
++	// length delimited
++	LENGTH_DELIMITED = 1,
++};
++
++#pragma pack(1)
++
++struct param_value_type {
++	/* array flag */
++	u8 is_array: 1;
++
++	/* type of parameter value */
++	u8 value_type: 4;
++
++	/* byte count of parameter value */
++	u8 value_byte_cnt: 3;
++};
++
++#pragma pack()
++
++static u8 encode_tag(u8 type)
++{
++	return type << (TAG_BYTE_OFFSET + 1);
++}
++
++static int unsigned_varint_code(struct hisysevent_raw_data *data,
++				enum hisysevent_encode_type type, u64 val)
++{
++	u8 cpy_val;
++
++	cpy_val = encode_tag((u8)type) |
++			     ((val < TAG_BYTE_BOUND) ? 0 : TAG_BYTE_BOUND) |
++			     (u8)(val & TAG_BYTE_MASK);
++	if (raw_data_append(data, (u8 *)(&cpy_val), sizeof(u8)) != 0)
++		return -EINVAL;
++
++	val >>= TAG_BYTE_OFFSET;
++	while (val > 0) {
++		cpy_val = ((val < NON_TAG_BYTE_BOUND) ? 0 : NON_TAG_BYTE_BOUND) |
++			   (u8)(val & NON_TAG_BYTE_MASK);
++		if (raw_data_append(data, (u8 *)(&cpy_val), sizeof(u8)) != 0)
++			return -EINVAL;
++
++		val >>= NON_TAG_BYTE_OFFSET;
++	}
++	return 0;
++}
++
++static int signed_varint_encode(struct hisysevent_raw_data *data,
++				enum hisysevent_encode_type type, s64 val)
++{
++	u64 uval;
++
++	uval = (val << 1) ^ (val >> ((sizeof(val) << 3) - 1)); // zigzag encode
++	return unsigned_varint_code(data, type, uval);
++}
++
++int key_value_type_encode(struct hisysevent_raw_data *data, u8 is_array, u8 type,
++			  u8 count)
++{
++	struct param_value_type value_type;
++
++	value_type.is_array = is_array;
++	value_type.value_type = type;
++	value_type.value_byte_cnt = count;
++
++	if (raw_data_append(data, (u8 *)(&value_type),
++			    sizeof(struct param_value_type)) != 0)
++		return -EINVAL;
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(key_value_type_encode);
++
++int str_length_delimited_encode(struct hisysevent_raw_data *data, const char *str)
++{
++	u64 length;
++
++	length = (u64)strlen(str);
++	if (unsigned_varint_code(data, LENGTH_DELIMITED, length) != 0)
++		return -EINVAL;
++
++	if (raw_data_append(data, (u8 *)(str), length) != 0)
++		return -EINVAL;
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(str_length_delimited_encode);
++
++int int64_t_varint_encode(struct hisysevent_raw_data *raw_data, s64 val)
++{
++	return signed_varint_encode(raw_data, VARINT, val);
++}
++EXPORT_SYMBOL_GPL(int64_t_varint_encode);
+diff --git a/drivers/staging/hisysevent/hisysevent_raw_data_encoder.h b/drivers/staging/hisysevent/hisysevent_raw_data_encoder.h
+new file mode 100644
+index 000000000..75cb7c327
+--- /dev/null
++++ b/drivers/staging/hisysevent/hisysevent_raw_data_encoder.h
+@@ -0,0 +1,21 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2023 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef HISYSEVENT_RAW_DATA_ENCODER_H
++#define HISYSEVENT_RAW_DATA_ENCODER_H
++
++#include <linux/ctype.h>
++#include <linux/types.h>
++
++#include "hisysevent_raw_data.h"
++
++int key_value_type_encode(struct hisysevent_raw_data *data, u8 is_array, u8 type,
++			  u8 count);
++
++int str_length_delimited_encode(struct hisysevent_raw_data *data, const char *str);
++
++int int64_t_varint_encode(struct hisysevent_raw_data *data, s64 val);
++
++#endif /* HISYSEVENT_RAW_DATA_ENCODER_H */
+diff --git a/drivers/staging/hisysevent/hiview_hisysevent.c b/drivers/staging/hisysevent/hiview_hisysevent.c
+new file mode 100644
+index 000000000..80d798141
+--- /dev/null
++++ b/drivers/staging/hisysevent/hiview_hisysevent.c
+@@ -0,0 +1,161 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2022-2023 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
 +#include <dfx/hiview_hisysevent.h>
 +
 +#ifdef CONFIG_HISYSEVENT
@@ -3518,340 +4586,34 @@ index 000000000..515b0a748
 +#include <linux/vmalloc.h>
 +#include <asm/current.h>
 +
-+#define PARAM_INT_MAX_LEN	21   // 21 = 20 (max len) + 1 ('\0')
-+#define PARAM_STR_MAX_LEN	1536 // 1.5KB
-+
-+#define MAX_DOMAIN_LENGTH 16
-+#define MAX_EVENT_NAME_LENGTH 32
-+#define MAX_PARAM_NAME_LENGTH 48
-+#define MAX_PARAM_NUMBER 128
++#include "hisysevent_builder.h"
++#include "hisysevent_raw_data.h"
 +
 +#define HISYSEVENT_WRITER_DEV "/dev/bbox"
-+#define HISYSEVENT_INFO_BUF_LEN (2048 - 6)  // 2KB - 6 (read_gap)
-+
-+#define MINUTE_TO_SECS 60
-+#define SEC_TO_MILLISEC 1000
-+#define MILLISEC_TO_NANOSEC (1000 * 1000)
-+#define TIME_ZONE_LEN 6
-+
-+#define BUF_POINTER_FORWARD	\
-+	do {	\
-+		if (tmp_len >= 0 && tmp_len < len) {	\
-+			tmp += tmp_len;	\
-+			len -= tmp_len;	\
-+		} else {	\
-+			pr_err("string over length");	\
-+			tmp += len;	\
-+			len = 0;	\
-+		}	\
-+	} while (0)
 +
 +static int CHECK_CODE = 0x7BCDABCD;
 +
-+struct hisysevent_payload {
-+	/* key of the event param */
-+	char *key;
-+
-+	/* value of the event param */
-+	char *value;
-+
-+	/* next param */
-+	struct hisysevent_payload *next;
-+};
++#define HISYSEVENT_INFO_BUF_LEN (2048 - 6)  // 2KB - 6 (read_gap)
 +
 +/* hisysevent struct */
 +struct hiview_hisysevent {
-+	/* event domain */
-+	char *domain;
-+
-+	/* event name */
-+	char *name;
-+
-+	/* event type */
-+	int type;
-+
-+	/* event time */
-+	long long time;
-+
-+	/* time zone */
-+	char *tz;
-+
-+	/* process id */
-+	int pid;
-+
-+	/* thread id */
-+	int tid;
-+
-+	/* user id */
-+	int uid;
-+
-+	/* payload linked list */
-+	struct hisysevent_payload *head;
-+
-+	/* length of payload */
-+	int payload_cnt;
++	/* hisysevent builder */
++	struct hisysevent_builder *builder;
 +};
-+
-+static struct hisysevent_payload *hisysevent_payload_create(void)
-+{
-+	struct hisysevent_payload *payload = NULL;
-+
-+	payload = kmalloc(sizeof(*payload), GFP_KERNEL);
-+	if (!payload)
-+		return NULL;
-+
-+	payload->key = NULL;
-+	payload->value = NULL;
-+	payload->next = NULL;
-+	return payload;
-+}
-+
-+static void hisysevent_payload_destroy(struct hisysevent_payload *p)
-+{
-+	if (!p)
-+		return;
-+
-+	kfree(p->value);
-+	kfree(p->key);
-+	kfree(p);
-+}
-+
-+static void
-+hisysevent_add_payload(struct hiview_hisysevent *event, struct hisysevent_payload *payload)
-+{
-+	if (!event->head) {
-+		event->head = payload;
-+	} else {
-+		struct hisysevent_payload *temp = event->head;
-+
-+		while (temp->next)
-+			temp = temp->next;
-+		temp->next = payload;
-+	}
-+}
-+
-+static struct hisysevent_payload *
-+hisysevent_get_payload(struct hiview_hisysevent *event, const char *key)
-+{
-+	struct hisysevent_payload *p = event->head;
-+
-+	if (!key)
-+		return NULL;
-+
-+	while (p) {
-+		if (p->key && strcmp(p->key, key) == 0)
-+			return p;
-+		p = p->next;
-+	}
-+
-+	return NULL;
-+}
-+
-+static struct hisysevent_payload *
-+hisysevent_get_or_create_payload(struct hiview_hisysevent *event, const char *key)
-+{
-+	struct hisysevent_payload *payload = hisysevent_get_payload(event, key);
-+
-+	if (payload) {
-+		kfree(payload->value);
-+		return payload;
-+	}
-+
-+	payload = hisysevent_payload_create();
-+	if (!payload)
-+		return NULL;
-+
-+	payload->key = kstrdup(key, GFP_ATOMIC);
-+	if (!payload->key) {
-+		hisysevent_payload_destroy(payload);
-+		return NULL;
-+	}
-+
-+	hisysevent_add_payload(event, payload);
-+	return payload;
-+}
-+
-+static int json_add_number(char *json, size_t len, const char *key, long long num)
-+{
-+	return snprintf(json, len, "\"%s\":%lld,", key, num);
-+}
-+
-+static int json_add_string(char *json, size_t len, const char *key, const char *str)
-+{
-+	return snprintf(json, len, "\"%s\":%s,", key, str);
-+}
-+
-+static int json_add_string2(char *json, size_t len, const char *key, const char *str)
-+{
-+	return snprintf(json, len, "\"%s\":\"%s\",", key, str);
-+}
-+
-+static int hisysevent_convert_base(const struct hiview_hisysevent *event, char **buf, int len)
-+{
-+	int tmp_len = 0;
-+	char *tmp = *buf;
-+
-+	tmp_len = json_add_string2(tmp, len, "domain_", event->domain);
-+	BUF_POINTER_FORWARD;
-+	tmp_len = json_add_string2(tmp, len, "name_", event->name);
-+	BUF_POINTER_FORWARD;
-+	tmp_len = json_add_number(tmp, len, "type_", event->type);
-+	BUF_POINTER_FORWARD;
-+	tmp_len = json_add_number(tmp, len, "time_", event->time);
-+	BUF_POINTER_FORWARD;
-+	tmp_len = json_add_string2(tmp, len, "tz_", event->tz);
-+	BUF_POINTER_FORWARD;
-+	tmp_len = json_add_number(tmp, len, "pid_", event->pid);
-+	BUF_POINTER_FORWARD;
-+	tmp_len = json_add_number(tmp, len, "tid_", event->tid);
-+	BUF_POINTER_FORWARD;
-+	tmp_len = json_add_number(tmp, len, "uid_", event->uid);
-+	BUF_POINTER_FORWARD;
-+	*buf = tmp;
-+	return len;
-+}
-+
-+static int hisysevent_convert_payload(struct hisysevent_payload *payload, char **buf, int len)
-+{
-+	int tmp_len = 0;
-+	char *tmp = *buf;
-+	struct hisysevent_payload *tmp_payload = payload;
-+
-+	while (tmp_payload) {
-+		if (!tmp_payload->key || !tmp_payload->value) {
-+			pr_err("drop invalid payload");
-+			tmp_payload = tmp_payload->next;
-+			continue;
-+		}
-+		tmp_len = json_add_string(tmp, len, tmp_payload->key, tmp_payload->value);
-+		BUF_POINTER_FORWARD;
-+		tmp_payload = tmp_payload->next;
-+	}
-+	*buf = tmp;
-+	return len;
-+}
-+
-+static int hisysevent_convert_json(const struct hiview_hisysevent *event, char **buf_ptr)
-+{
-+	char *tmp;
-+	int tmp_len = 0;
-+	int buf_len = HISYSEVENT_INFO_BUF_LEN;
-+	int len = buf_len;
-+	char *buf = vmalloc(buf_len + 1);
-+
-+	if (!buf)
-+		return -ENOMEM;
-+	memset(buf, 0, buf_len + 1);
-+
-+	tmp = buf;
-+	tmp_len = snprintf(tmp, len, "%c", '{');
-+	BUF_POINTER_FORWARD;
-+
-+	len = hisysevent_convert_base(event, &tmp, len);
-+	if (!event->head)
-+		goto convert_end;
-+	len = hisysevent_convert_payload(event->head, &tmp, len);
-+
-+convert_end:
-+	if (len <= 1) { // remaining len must > 1, for '}' and '\0'
-+		vfree(buf);
-+		return -EINVAL;
-+	}
-+
-+	tmp_len = snprintf(tmp - 1, len, "%c", '}');
-+	BUF_POINTER_FORWARD;
-+	*buf_ptr = buf;
-+	return 0;
-+}
-+
-+static void hisysevent_set_time(struct hiview_hisysevent *event)
-+{
-+	struct timespec64 ts;
-+	struct timezone tz = sys_tz;
-+	int tz_index = 0;
-+	char time_zone[TIME_ZONE_LEN];
-+	int tz_hour;
-+	int tz_min;
-+	long long millisecs = 0;
-+
-+	ktime_get_real_ts64(&ts);
-+	millisecs = ts.tv_sec * SEC_TO_MILLISEC + ts.tv_nsec / MILLISEC_TO_NANOSEC;
-+	event->time = millisecs;
-+
-+	tz_hour = (-tz.tz_minuteswest) / MINUTE_TO_SECS;
-+	time_zone[tz_index++] = tz_hour >= 0 ? '+' : '-';
-+	tz_min = (-tz.tz_minuteswest) % MINUTE_TO_SECS;
-+	sprintf(&time_zone[tz_index], "%02u%02u", abs(tz_hour), abs(tz_min));
-+	time_zone[TIME_ZONE_LEN - 1] = '\0';
-+	event->tz = kstrdup(time_zone, GFP_ATOMIC);
-+}
-+
-+static bool is_valid_string(const char *str, unsigned int max_len)
-+{
-+	unsigned int len = 0;
-+	unsigned int i;
-+
-+	if (!str)
-+		return false;
-+
-+	len = strlen(str);
-+	if (len == 0 || len > max_len)
-+		return false;
-+
-+	for (i = 0; i < len; i++) {
-+		if (!isalpha(str[i]) && str[i] != '_')
-+			return false;
-+	}
-+	return true;
-+}
-+
-+static bool is_valid_num_of_param(struct hiview_hisysevent *event)
-+{
-+	if (!event)
-+		return false;
-+
-+	return (event->payload_cnt) < MAX_PARAM_NUMBER;
-+}
 +
 +struct hiview_hisysevent *
 +hisysevent_create(const char *domain, const char *name, enum hisysevent_type type)
 +{
-+	struct hiview_hisysevent *event = NULL;
++	struct hiview_hisysevent *event;
 +
-+	if (!is_valid_string(domain, MAX_DOMAIN_LENGTH)) {
-+		pr_err("invalid event domain");
-+		return NULL;
-+	}
-+	if (!is_valid_string(name, MAX_EVENT_NAME_LENGTH)) {
-+		pr_err("invalid event name");
-+		return NULL;
-+	}
-+
-+	event = kmalloc(sizeof(*event), GFP_KERNEL);
++	event = kzalloc(sizeof(*event), GFP_KERNEL);
 +	if (!event)
 +		return NULL;
-+	memset(event, 0, sizeof(*event));
 +
-+	event->domain = kstrdup(domain, GFP_ATOMIC);
-+	if (!(event->domain))
++	event->builder = hisysevent_builder_create(domain, name, type);
++	if (!event->builder)
 +		goto create_err;
-+
-+	event->name = kstrdup(name, GFP_ATOMIC);
-+	if (!(event->name))
-+		goto create_err;
-+
-+	event->type = type;
-+	event->pid = current->pid;
-+	event->tid = current->tgid;
-+	event->uid = current_uid().val;
-+	hisysevent_set_time(event);
-+	if (!(event->tz))
-+		goto create_err;
-+
-+	event->payload_cnt = 0;
-+	pr_info("create hisysevent succ, domain=%s, name=%s, type=%d",
-+		event->domain, event->name, event->type);
-+	return (void *)event;
++	return event;
 +
 +create_err:
 +	hisysevent_destroy(&event);
@@ -3861,21 +4623,13 @@ index 000000000..515b0a748
 +
 +void hisysevent_destroy(struct hiview_hisysevent **event)
 +{
-+	struct hisysevent_payload *payload = NULL;
-+
-+	if (!event || !*event)
++	if (!event || !*event) {
++		pr_err("invalid event");
 +		return;
-+
-+	kfree((*event)->domain);
-+	kfree((*event)->name);
-+	kfree((*event)->tz);
-+	payload = (*event)->head;
-+	while (payload) {
-+		struct hisysevent_payload *temp = payload;
-+
-+		payload = payload->next;
-+		hisysevent_payload_destroy(temp);
 +	}
++
++	hisysevent_builder_destroy((*event)->builder);
++
 +	kfree(*event);
 +	*event = NULL;
 +}
@@ -3883,122 +4637,75 @@ index 000000000..515b0a748
 +
 +int hisysevent_put_integer(struct hiview_hisysevent *event, const char *key, long long value)
 +{
-+	struct hisysevent_payload *payload = NULL;
-+
 +	if (!event) {
 +		pr_err("invalid event");
 +		return -EINVAL;
 +	}
-+	if (!is_valid_num_of_param(event)) {
-+		pr_err("invalid num of param");
-+		return -EINVAL;
-+	}
-+	if (!is_valid_string(key, MAX_PARAM_NAME_LENGTH)) {
-+		pr_err("invalid key");
-+		return -EINVAL;
-+	}
-+
-+	payload = hisysevent_get_or_create_payload(event, key);
-+	if (!payload) {
-+		pr_err("failed to get or create payload");
-+		return -ENOMEM;
-+	}
-+
-+	payload->value = kmalloc(PARAM_INT_MAX_LEN, GFP_KERNEL);
-+	if (!payload->value)
-+		return -ENOMEM;
-+
-+	memset(payload->value, 0, PARAM_INT_MAX_LEN);
-+	snprintf(payload->value, PARAM_INT_MAX_LEN, "%lld", value);
-+	event->payload_cnt++;
-+	return 0;
++	return hisysevent_builder_put_integer(event->builder, key, value);
 +}
 +EXPORT_SYMBOL_GPL(hisysevent_put_integer);
 +
 +int hisysevent_put_string(struct hiview_hisysevent *event, const char *key, const char *value)
 +{
-+	struct hisysevent_payload *payload = NULL;
-+	int len = 0;
-+	int tmp_len = 0;
-+	char *tmp_value = NULL;
-+
 +	if (!event) {
 +		pr_err("invalid event");
 +		return -EINVAL;
 +	}
-+	if (!is_valid_num_of_param(event)) {
-+		pr_err("invalid num of param");
-+		return -EINVAL;
-+	}
-+	if (!is_valid_string(key, MAX_PARAM_NAME_LENGTH)) {
-+		pr_err("invalid key");
-+		return -EINVAL;
-+	}
-+	if (!value) {
-+		pr_err("invalid value");
-+		return -EINVAL;
-+	}
-+
-+	payload = hisysevent_get_or_create_payload(event, key);
-+	if (!payload) {
-+		pr_err("failed to get or create payload");
-+		return -ENOMEM;
-+	}
-+
-+	len = strlen(value);
-+	if (len > PARAM_STR_MAX_LEN) {
-+		pr_warn("string cannot exceed 1536 Byte, len=%d", len);
-+		len = PARAM_STR_MAX_LEN;
-+	}
-+
-+	tmp_len = len + 3; // 3 for \", \", \0
-+	payload->value = kmalloc(tmp_len, GFP_KERNEL);
-+	if (!payload->value)
-+		return -ENOMEM;
-+	memset(payload->value, 0, tmp_len);
-+
-+	tmp_value = payload->value;
-+	snprintf(tmp_value++, tmp_len--, "%c", '\"');
-+	memcpy(tmp_value, value, len);
-+	snprintf(tmp_value + len, tmp_len - len, "%c", '\"');
-+	event->payload_cnt++;
-+	return 0;
++	return hisysevent_builder_put_string(event->builder, key, value);
 +}
 +EXPORT_SYMBOL_GPL(hisysevent_put_string);
 +
 +int hisysevent_write(struct hiview_hisysevent *event)
 +{
-+	struct iov_iter iter;
-+	mm_segment_t oldfs;
-+	char *data = NULL;
-+	struct file *filp = NULL;
-+	struct iovec vec[3];
-+	unsigned long vcount = 0;
++	struct hisysevent_raw_data *raw_data;
 +	int ret;
++	struct file *filp;
++	unsigned long vcount;
++	struct iovec vec[3];
++	mm_segment_t oldfs;
++	struct iov_iter iter;
 +
-+	if (!event)
-+		return -EINVAL;
-+
-+	ret = hisysevent_convert_json(event, &data);
-+	if (ret != 0 || !data) {
-+		pr_err("failed to convert event to string");
++	if (!event) {
++		pr_err("invalid event");
 +		return -EINVAL;
 +	}
-+	pr_info("write hisysevent data=%s", data);
++
++	raw_data = raw_data_create();
++	if (!raw_data) {
++		pr_err("failed to create a new raw data");
++		return -EINVAL;
++	}
++
++	ret = hisysevent_builder_build(event->builder, raw_data);
++	if (ret != 0) {
++		pr_err("hisysevent builder build failed");
++		goto event_wrote_err;
++	}
++	pr_info("total block size of hisysevent data is %d", raw_data->len);
++
++	if (raw_data->len > HISYSEVENT_INFO_BUF_LEN) {
++		pr_err("content of sysevent exceeds limit");
++		goto event_wrote_err;
++	}
++
++	if (!current->fs) {
++		pr_err("file system is null");
++		goto event_wrote_err;
++	}
 +
 +	filp = filp_open(HISYSEVENT_WRITER_DEV, O_WRONLY, 0);
 +
 +	if (!filp || IS_ERR(filp)) {
 +		ret = PTR_ERR(filp);
 +		pr_err("failed to access '%s', res=%d", HISYSEVENT_WRITER_DEV, ret);
-+		vfree(data);
-+		return -ENODEV;
++		goto event_wrote_err;
 +	}
 +
++	vcount = 0;
 +	vec[vcount].iov_base = &CHECK_CODE;
 +	vec[vcount++].iov_len = sizeof(CHECK_CODE);
-+	vec[vcount].iov_base = data;
-+	vec[vcount++].iov_len = strlen(data) + 1;
++	vec[vcount].iov_base = raw_data->data;
++	vec[vcount++].iov_len = raw_data->len + 1;
 +
 +	oldfs = get_fs();
 +	set_fs(KERNEL_DS);
@@ -4010,7 +4717,9 @@ index 000000000..515b0a748
 +		pr_err("failed to write hisysevent, ret=%d", ret);
 +
 +	filp_close(filp, NULL);
-+	vfree(data);
++
++event_wrote_err:
++	raw_data_destroy(raw_data);
 +	return ret;
 +}
 +EXPORT_SYMBOL_GPL(hisysevent_write);
@@ -6251,5 +6960,5 @@ index f73e3e694..b3d5d3fc7 100644
  	 * arch_dup_task_struct() clobbers the stack-related fields.  Make
  	 * sure they're properly initialized before using any stack-related
 -- 
-2.25.1
+2.43.0
 

@@ -1,0 +1,29 @@
+From ec095d6470e75cb4039282df58c36f5815338ce8 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham@huawei.com>
+Date: Tue, 4 Feb 2025 15:01:13 +0100
+Subject: [PATCH] deviceinfo: add openharmony kernel config fragment and set
+ kernel cmdline
+
+Signed-off-by: Francesco Pham <francesco.pham@huawei.com>
+---
+ deviceinfo | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/deviceinfo b/deviceinfo
+index cee3792..6a0e8b0 100644
+--- a/deviceinfo
++++ b/deviceinfo
+@@ -4,8 +4,8 @@ deviceinfo_codename="vidofnir"
+ deviceinfo_arch="aarch64"
+ deviceinfo_kernel_source="https://gitlab.com/ubports/porting/reference-device-ports/halium12/volla-x23/kernel-volla-mt6789.git"
+ deviceinfo_kernel_source_branch="halium-12.0-gx4pro"
+-deviceinfo_kernel_defconfig="gki_defconfig gx4.config entry_level.config halium.config"
+-deviceinfo_kernel_cmdline="bootopt=64S3,32N2,64N2 systempart=/dev/mapper/system"
++deviceinfo_kernel_defconfig="gki_defconfig gx4.config entry_level.config halium.config openharmony.config"
++deviceinfo_kernel_cmdline="bootopt=64S3,32N2,64N2 systempart=/dev/mapper/system hardware=x23 ohos.boot.sn=0a20230726rpi"
+ deviceinfo_kernel_clang_compile="true"
+ deviceinfo_kernel_llvm_compile="true"
+ deviceinfo_ramdisk_compression="lz4"
+-- 
+2.43.0
+
