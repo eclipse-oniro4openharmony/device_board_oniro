@@ -1,0 +1,35 @@
+From 7879f6711b1c06e4cbdb118e3536302989ba564a Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham@huawei.com>
+Date: Tue, 4 Feb 2025 14:22:53 +0100
+Subject: [PATCH 2/3] Makefile: adapting KBUILD_CFLAGS for OpenHarmony patches
+ and HDF build
+
+Signed-off-by: Francesco Pham <francesco.pham@huawei.com>
+---
+ Makefile | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index e9d3b9771..a8a4fefbe 100644
+--- a/Makefile
++++ b/Makefile
+@@ -510,11 +510,13 @@ LINUXINCLUDE    := \
+ 		$(USERINCLUDE)
+ 
+ KBUILD_AFLAGS   := -D__ASSEMBLY__ -fno-PIE
+-KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
++KBUILD_CFLAGS   := -Wall -Wundef -Wno-trigraphs \
+ 		   -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE \
+-		   -Werror=implicit-function-declaration -Werror=implicit-int \
++		   -Werror=implicit-function-declaration \
+ 		   -Werror=return-type -Wno-format-security \
+-		   -std=gnu89 -Werror
++		   -Wno-implicit-int -Wno-unused-function -Wno-int-to-void-pointer-cast \
++		   -Wno-void-pointer-to-int-cast \
++		   -std=gnu99 -Werror
+ KBUILD_CPPFLAGS := -D__KERNEL__
+ KBUILD_AFLAGS_KERNEL :=
+ KBUILD_CFLAGS_KERNEL :=
+-- 
+2.43.0
+
