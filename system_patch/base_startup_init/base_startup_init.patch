@@ -1,5 +1,5 @@
 diff --git a/services/etc/init.without_two_stages.cfg b/services/etc/init.without_two_stages.cfg
-index dfa415fb..6812e536 100755
+index dfa415fb..25d1df92 100755
 --- a/services/etc/init.without_two_stages.cfg
 +++ b/services/etc/init.without_two_stages.cfg
 @@ -7,6 +7,9 @@
@@ -12,7 +12,18 @@ index dfa415fb..6812e536 100755
                  "write /proc/sys/kernel/sysrq 0",
                  "start ueventd",
                  "start watchdog_service",
-@@ -80,7 +83,7 @@
+@@ -17,7 +20,9 @@
+                 "mkdir /data/service 0711 root root",
+                 "mkdir /data/service/el0 0711 root root",
+                 "mkdir /data/vendor/log 0755 system log",
+-                "load_persist_params "
++                "load_persist_params ",
++                "chown access_token access_token /dev/access_token_id",
++                "chmod 0666 /dev/access_token_id"
+             ]
+         }, {
+             "name" : "init",
+@@ -80,7 +85,7 @@
          }, {
              "name" : "post-fs",
              "cmds" : [
@@ -21,7 +32,7 @@ index dfa415fb..6812e536 100755
                  "chown root log /proc/vmallocinfo",
                  "chmod 0440 /proc/vmallocinfo",
                  "chown root log /proc/slabinfo",
-@@ -107,8 +110,11 @@
+@@ -107,8 +112,11 @@
                  "mkdir /data/app/el4 0711 root root",
                  "mkdir /data/service/el1 0711 root root",
                  "mkdir /data/service/el1/public 0711 root root",
@@ -33,7 +44,7 @@ index dfa415fb..6812e536 100755
                  "mkdir /data/chipset 0711 root root",
                  "mkdir /data/chipset/el1 0711 root root",
                  "mkdir /data/chipset/el1/public 0711 root root",
-@@ -130,17 +136,21 @@
+@@ -130,17 +138,21 @@
                  "mkdir /data/service/el2/0/hmdfs 0711 system system",
                  "mkdir /data/chipset/el1/0 0711 root root",
                  "mkdir /data/chipset/el2/0 0711 root root",
@@ -55,13 +66,14 @@ index dfa415fb..6812e536 100755
                  "mkdir /data/local/traces 0777 shell shell",
                  "mkdir /data/data 0771 system system",
                  "mkdir /data/app-private 0771 system system",
-@@ -199,7 +209,9 @@
+@@ -199,7 +211,10 @@
                  "chown system system /sys/class/leds/green/brightness",
                  "chown system system /sys/class/leds/blue/brightness",
                  "chown root radio /proc/cmdline",
 -                "setparam net.tcp.default_init_rwnd 60"
 +                "setparam net.tcp.default_init_rwnd 60",
 +                "chmod 666 /dev/dri/card0",
++                "rm /dev/dri/renderD128",
 +                "chmod 666 /dev/ashmem"
              ]
          }, {
