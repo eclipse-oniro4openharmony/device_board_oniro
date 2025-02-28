@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-soc_company = "broadcom"
-soc_name = "bcm2711"
+soc_company = "oniro"
+soc_name = "mt6789"
 
 import("//device/soc/${soc_company}/${soc_name}/soc.gni")
 
