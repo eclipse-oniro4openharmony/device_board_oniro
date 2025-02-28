@@ -15,7 +15,7 @@
 board_arch = "armv8-a"
 
 # Board CPU type, e.g. "cortex-a7", "riscv32".
-board_cpu = "cortex-a72"
+board_cpu = "cortex-a57"
 
 board_toolchain_type = "clang"
 
