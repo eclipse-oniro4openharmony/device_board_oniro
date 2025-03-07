@@ -18,6 +18,17 @@ group("qemu_group") {
   deps = [
     "cfg:init_configs",
     "distributedhardware:distributedhardware",
-    "//device/soc/oniro/qemu/hardware:hardware_group"
+    "//device/soc/oniro/qemu/hardware:hardware_group",
+  ]
+}
+
+action("rootfs_pkg") {
+  script = "make_rootfs_pkg.sh"
+  outputs = [ "$root_build_dir/packages/phone/images/ohos-rootfs.tar" ]
+  args = [
+    "--output",
+    rebase_path("$root_build_dir/packages/phone/images/ohos-rootfs.tar"),
+    "--input",
+    rebase_path("$root_build_dir/packages/phone"),
   ]
 }
