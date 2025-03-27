@@ -23,9 +23,9 @@ if [[ ! -d "${input}/root" || ! -d "${input}/system" || ! -d "${input}/vendor" ]
 fi
 
 # Execute the required commands
-rm -rf ${input}/ohos-rootfs*
-cp -r ${input}/root/ ohos-rootfs/
-cp -r ${input}/system ohos-rootfs/
-cp -r ${input}/vendor/ ohos-rootfs/
-tar -cvf ${output} -C ohos-rootfs .
-rm -rf ${input}/ohos-rootfs*
+rm -rf ${output}/ohos-rootfs*
+cp -r ${input}/root/ ${output}/ohos-rootfs/
+cp -r ${input}/system ${output}/ohos-rootfs/
+cp -r ${input}/vendor/ ${output}/ohos-rootfs/
+tar -cvf ${output}/ohos-rootfs.tar -C ${output}/ohos-rootfs .
+rm -rf ${output}/ohos-rootfs
