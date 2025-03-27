@@ -25,9 +25,12 @@ group("qemu_group") {
 action("rootfs_pkg") {
   script = "make_rootfs_pkg.sh"
   outputs = [ "$root_build_dir/packages/phone/images/ohos-rootfs.tar" ]
+  deps = [ 
+    "//build/core/gn:images",
+  ]
   args = [
     "--output",
-    rebase_path("$root_build_dir/packages/phone/images/ohos-rootfs.tar"),
+    rebase_path("$root_build_dir/packages/phone/images"),
     "--input",
     rebase_path("$root_build_dir/packages/phone"),
   ]
