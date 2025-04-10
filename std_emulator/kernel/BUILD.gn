@@ -1,0 +1,33 @@
+# Copyright (c) 2024 Institute of Software, Chinese Academy of Sciences .
+
+import("//build/config/clang/clang.gni")
+import("//build/ohos.gni")
+import("//build/ohos/kernel/kernel.gni")
+
+kernel_build_script_dir = "//device/board/$product_company/std_emulator/kernel"
+kernel_source_dir = "//kernel/linux/linux-6.6"
+
+kernel_image = ""
+if (target_cpu == "arm") {
+  kernel_image = "zImage"
+} else if (target_cpu == "arm64") {
+  kernel_image = "Image"
+} else if (target_cpu == "riscv64") {
+  kernel_image = "Image"
+} else if (target_cpu == "x86_64") {
+  kernel_image = "bzImage"
+}
+
+action("kernel") {
+  script = "build_kernel.sh"
+  sources = [ kernel_source_dir ]
+  outputs = [ "$root_build_dir/packages/phone/images/$kernel_image" ]
+  args = [
+      rebase_path(kernel_build_script_dir,root_build_dir),
+      rebase_path("$root_build_dir/../.."),
+      rebase_path("$root_build_dir/packages/phone/images"),
+      rebase_path(kernel_source_dir),
+      rebase_path(kernel_build_script_dir),
+      target_cpu,
+  ]  
+}
