@@ -1,0 +1,75 @@
+diff --git a/arch/arm64/kernel/vmlinux.lds.S b/arch/arm64/kernel/vmlinux.lds.S
+index 30c102978..1d8b8de34 100644
+--- a/arch/arm64/kernel/vmlinux.lds.S
++++ b/arch/arm64/kernel/vmlinux.lds.S
+@@ -201,6 +201,15 @@ SECTIONS
+ 		INIT_RAM_FS
+ 		*(.init.rodata.* .init.bss)	/* from the EFI stub */
+ 	}
++
++#ifdef CONFIG_DRIVERS_HDF
++	.init.hdf_table : {
++		_hdf_drivers_start = .;
++		*(.hdf.driver)
++		_hdf_drivers_end = .;
++	}
++#endif
++
+ 	.exit.data : {
+ 		EXIT_DATA
+ 	}
+diff --git a/drivers/Kconfig b/drivers/Kconfig
+index 826b2b19d..9a887e91b 100644
+--- a/drivers/Kconfig
++++ b/drivers/Kconfig
+@@ -236,6 +236,8 @@ source "drivers/interconnect/Kconfig"
+ 
+ source "drivers/counter/Kconfig"
+ 
++source "drivers/hdf/khdf/Kconfig"
++
+ source "drivers/most/Kconfig"
+ 
+ source "drivers/accesstokenid/Kconfig"
+diff --git a/drivers/Makefile b/drivers/Makefile
+index ecc494918..79507aef0 100644
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -191,5 +191,6 @@ obj-$(CONFIG_SIOX)		+= siox/
+ obj-$(CONFIG_GNSS)		+= gnss/
+ obj-$(CONFIG_INTERCONNECT)	+= interconnect/
+ obj-$(CONFIG_COUNTER)		+= counter/
++obj-$(CONFIG_DRIVERS_HDF)	+= hdf/
+ obj-$(CONFIG_MOST)		+= most/
+ obj-$(CONFIG_ACCESS_TOKENID)	+= accesstokenid/
+diff --git a/drivers/hdf/Makefile b/drivers/hdf/Makefile
+new file mode 100644
+index 000000000..5c5e1911c
+--- /dev/null
++++ b/drivers/hdf/Makefile
+@@ -0,0 +1,2 @@
++export PROJECT_ROOT := ../../../../../
++obj-$(CONFIG_DRIVERS_HDF) += khdf/
+diff --git a/drivers/hid/Makefile b/drivers/hid/Makefile
+index 4acb583c9..ddcaf4cdc 100644
+--- a/drivers/hid/Makefile
++++ b/drivers/hid/Makefile
+@@ -2,6 +2,19 @@
+ #
+ # Makefile for the HID driver
+ #
++HDF_ROOT_DIR = -I$(srctree)/drivers/hdf
++ccflags-$(CONFIG_DRIVERS_HDF_INPUT) += $(HDF_ROOT_DIR)/framework/model/input/driver \
++             $(HDF_ROOT_DIR)/framework/include/core \
++             $(HDF_ROOT_DIR)/framework/core/common/include/host \
++             $(HDF_ROOT_DIR)/framework/include/utils \
++             $(HDF_ROOT_DIR)/framework/include/osal \
++             $(HDF_ROOT_DIR)/framework/ability/sbuf/include \
++             $(HDF_ROOT_DIR)/inner_api/utils \
++             $(HDF_ROOT_DIR)/inner_api/osal/shared \
++             $(HDF_ROOT_DIR)/inner_api/host/shared \
++             $(HDF_ROOT_DIR)/inner_api/core \
++             $(HDF_ROOT_DIR)/khdf/osal/include \
++             $(HDF_ROOT_DIR)/evdev
+ hid-y			:= hid-core.o hid-input.o hid-quirks.o
+ hid-$(CONFIG_DEBUG_FS)		+= hid-debug.o

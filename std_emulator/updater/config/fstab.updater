@@ -1,0 +1,6 @@
+#<src> <mnt_point> <type> <mnt_flags and options> <fs_mgr_flags>
+/dev/block/platform/fe310000.sdhci/by-name/system /system ext4 ro,barrier=1 wait
+/dev/block/platform/fe310000.sdhci/by-name/vendor /vendor ext4 ro,barrier=1 wait
+/dev/block/platform/fe310000.sdhci/by-name/userdata /data f2fs discard,noatime,nosuid,nodev wait,check,fileencryption=software,quota
+/dev/block/platform/fe310000.sdhci/by-name/misc /misc none none wait
+/dev/block/mmcblk1p1 /sdcard ext4 rw wait
