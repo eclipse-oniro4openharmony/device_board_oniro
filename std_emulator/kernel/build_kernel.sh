@@ -143,6 +143,7 @@ mkdir -p ${OUT_PKG_DIR}
 
 cp -f ${KERNEL_OBJ_TMP_PATH}/arch/x86/boot/bzImage ${OUT_PKG_DIR}
 cp -f ${BUILD_SCRIPT_PATH}/kernel/run.bat ${OUT_PKG_DIR}
+cp -f ${BUILD_SCRIPT_PATH}/kernel/run.sh ${OUT_PKG_DIR}
 
 popd
 
