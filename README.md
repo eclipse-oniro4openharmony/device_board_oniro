@@ -8,7 +8,7 @@ This guide provides step-by-step instructions to **build and run the Oniro Emula
 
 ### 📦 Prerequisites
 
-Before proceeding, make sure you have followed the [Quick Build Setup](https://docs.oniroproject.org/quick-build.html) guide to prepare your build environment.
+Before proceeding, make sure you have followed the [Quick Build Setup](https://docs.oniroproject.org/device-development/building-oniro.html) guide to prepare your build environment.
 
 ### ⬇️ Download Oniro Source Code
 
