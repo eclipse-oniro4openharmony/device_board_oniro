@@ -1,9 +1,9 @@
-# Copyright (C) 2024 Open OpenHarmony Book Organization .
+# Copyright (C) 2025 Huawei Inc.
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-# http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -11,20 +11,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import("//base/startup/init/services/etc/param/param_fixer.gni")
 import("//build/ohos.gni")
 
 ohos_prebuilt_etc("init.virt.cfg") {
   source = "init.virt.cfg"
   part_name = "device_std_emulator"
-  install_images = [ chipset_base_dir ]
+  install_images = [ vendor_base_dir ]
   install_enable = true
 }
 
 ohos_prebuilt_etc("init.virt.usb.cfg") {
   source = "init.virt.usb.cfg"
   part_name = "device_std_emulator"
-  install_images = [ chipset_base_dir ]
+  install_images = [ vendor_base_dir ]
   install_enable = true
 }
 
@@ -35,19 +34,10 @@ ohos_prebuilt_etc("fstab.virt") {
   install_enable = true
 }
 
-ohos_prebuilt_para("default_param") {
-  source = "default.para"
-  install_images = [ vendor_base_dir ]
-  module_install_dir = "etc/param"
-  part_name = "device_std_emulator"
-}
-
 group("init_configs") {
   deps = [
-    ":default_param",
     ":fstab.virt",
     ":init.virt.cfg",
     ":init.virt.usb.cfg",
-    #":ohos.para",
   ]
 }
