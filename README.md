@@ -4,7 +4,7 @@ This repository contains Board Support Packages (BSPs) for devices supported by 
 
 ## Oniro Emulator (std_emulator target)
 
-This guide provides step-by-step instructions to **build and run the Oniro Emulator** using the `OpenHarmony-5.0.2-Release` source. 
+This guide provides step-by-step instructions to **build and run the Oniro Emulator** using the `OpenHarmony-5.1.0-Release` source. 
 
 ### 📦 Prerequisites
 
@@ -15,18 +15,9 @@ Before proceeding, make sure you have followed the [Quick Build Setup](https://d
 Use the following commands to fetch the Oniro source:
 
 ```bash
-repo init -u https://github.com/eclipse-oniro4openharmony/manifest.git -b OpenHarmony-5.0.2-Release -m oniro.xml --no-repo-verify
+repo init -u https://github.com/eclipse-oniro4openharmony/manifest.git -b OpenHarmony-5.1.0-Release -m oniro.xml --no-repo-verify
 repo sync -c
 repo forall -c 'git lfs pull'
-```
-
-### 🧰 Switch to Required Kernel Version
-
-Replace the default kernel with the required version:
-
-```bash
-rm -rf kernel/linux/linux-6.6
-git clone -b weekly_20241216 https://gitee.com/openharmony/kernel_linux_6.6.git kernel/linux/linux-6.6 --depth=1
 ```
 
 ### 🩹 Apply source patches
@@ -34,7 +25,7 @@ git clone -b weekly_20241216 https://gitee.com/openharmony/kernel_linux_6.6.git 
 Run the patching script:
 
 ```bash
-bash vendor/oniro/std_emulator/hook/hook_start.sh
+bash vendor/oniro/std_emulator/hook/do_patch.sh
 ```
 
 ### 🛠️ Build the images
@@ -42,7 +33,7 @@ bash vendor/oniro/std_emulator/hook/hook_start.sh
 Start the build with ccache enabled:
 
 ```bash
-./build.sh --product-name std_emulator --ccache
+./build.sh --product-name std_emulator --ccache --gn-args allow_sanitize_debug=true
 ```
 
 ### 🔄 (Optional) Revert patches
@@ -50,7 +41,7 @@ Start the build with ccache enabled:
 If needed, you can undo the applied patches:
 
 ```bash
-bash vendor/oobemulator/std_emulator/hook/hook_end.sh
+bash vendor/oniro/std_emulator/hook/undo_patch.sh
 ```
 
 ### ▶️ Run the emulator
