@@ -42,9 +42,7 @@ KERNEL_SRC_TMP_PATH=${ROOT_DIR}/out/kernel/src_tmp/${KERNEL_VERSION}
 KERNEL_OBJ_TMP_PATH=${ROOT_DIR}/out/kernel/OBJ/${KERNEL_VERSION}
 KERNEL_SOURCE=${ROOT_DIR}/kernel/linux/${KERNEL_VERSION}
 KERNEL_PATCH_PATH=${ROOT_DIR}/device/board/oniro/std_emulator/kernel/patch/${KERNEL_VERSION}
-KERNEL_PATCH=${ROOT_DIR}/device/board/oniro/std_emulator/kernel/patch/${KERNEL_VERSION}/kernel.patch
-KERNEL_HDF_PATCH=${ROOT_DIR}/device/board/oniro/std_emulator/kernel/patch/drivers.patch
-HDF_PATCH=${ROOT_DIR}/device/board/oniro/std_emulator/kernel/kernel_patch${KERNEL_VERSION}/std_emulator_patch/hdf.patch
+HDF_PATCH=${KERNEL_PATCH_PATH}/common_patch/hdf.patch
 KERNEL_CONFIG_FILE=${ROOT_DIR}/device/board/oniro/std_emulator/kernel/std_emulator_linux_defconfig
 
 rm -rf ${KERNEL_SRC_TMP_PATH}
@@ -62,7 +60,7 @@ cd ${KERNEL_SRC_TMP_PATH}
 
 # hdf
 echo "HDF patch"
-bash ${ROOT_DIR}/drivers/hdf_core/adapter/khdf/linux/patch_hdf.sh ${ROOT_DIR} ${KERNEL_SRC_TMP_PATH} ${KERNEL_PATCH_PATH} ${DEVICE_NAME}
+bash ${KERNEL_PATCH_PATH}/common_patch/hdf_patch.sh ${ROOT_DIR} ${KERNEL_SRC_TMP_PATH} ${HDF_PATCH}
 
 #kernel patch
 # Iterate over all .diff files in the DIFF_DIR directory and its subdirectories
