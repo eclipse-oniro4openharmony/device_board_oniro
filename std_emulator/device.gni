@@ -15,8 +15,6 @@
 soc_company = "oniro"
 soc_name = "virt"
 
-import("//device/soc/${soc_company}/${soc_name}/soc.gni")
-
 import("//build/ohos.gni")
 if (!defined(defines)) {
   defines = []
