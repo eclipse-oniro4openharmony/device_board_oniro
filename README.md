@@ -4,7 +4,7 @@ This repository contains Board Support Packages (BSPs) for devices supported by 
 
 ## Oniro Emulator (std_emulator target)
 
-This guide provides step-by-step instructions to **build and run the Oniro Emulator** using the `OpenHarmony-5.1.0-Release` source. 
+This guide provides step-by-step instructions to **build and run the Oniro Emulator** using the `OpenHarmony-6.0-Release` source. 
 
 ### 📦 Prerequisites
 
@@ -15,7 +15,7 @@ Before proceeding, make sure you have followed the [Quick Build Setup](https://d
 Use the following commands to fetch the Oniro source:
 
 ```bash
-repo init -u https://github.com/eclipse-oniro4openharmony/manifest.git -b OpenHarmony-5.1.0-Release -m oniro.xml --no-repo-verify
+repo init -u https://github.com/eclipse-oniro4openharmony/manifest.git -b OpenHarmony-6.0-Release -m oniro.xml --no-repo-verify
 repo sync -c
 repo forall -c 'git lfs pull'
 ```
