@@ -1,0 +1,23 @@
+From c8d36a4c813f2a1f70dd565546b8185f7a51e5b2 Mon Sep 17 00:00:00 2001
+From: xuyuanshen <xuyuanshen@talkweb.com.cn>
+Date: Thu, 10 Oct 2024 11:42:08 +0800
+Subject: [PATCH 3/3] fix hyperhold
+
+---
+ drivers/hyperhold/Makefile | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/hyperhold/Makefile b/drivers/hyperhold/Makefile
+index b45a1a678466..592e9cda30f9 100644
+--- a/drivers/hyperhold/Makefile
++++ b/drivers/hyperhold/Makefile
+@@ -1,4 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
+ hyperhold-y := hp_core.o hp_device.o hp_space.o hp_iotab.o
+ 
++ccflags-y += -I$(src) -Wno-int-conversion
++
+ obj-$(CONFIG_HYPERHOLD)		+= hyperhold.o
+-- 
+2.25.1
+

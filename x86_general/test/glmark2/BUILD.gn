@@ -1,0 +1,43 @@
+# Copyright (c) 2023 Diemit <598757652@qq.com>
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build/ohos.gni")
+import("res_path.gni")
+
+res_deps = []
+
+foreach(item, res_files) {
+    name = item
+    path = get_path_info(name, "dir")
+    ohos_prebuilt_etc("$name") {
+        source = "$name"
+        install_enable = true
+        install_images = [ system_base_dir ]
+        module_install_dir = "lib/glmark2/$path"
+        part_name = "device_x86_general"
+    }
+    res_deps += [ ":$name" ]
+}
+
+ohos_prebuilt_executable("glmark2") {
+  source = "glmark2-es2-ohos"
+  part_name = "device_x86_general"
+  install_images = [ "system" ]
+  install_enable = true
+}
+
+
+group("glmark2_group") {
+  deps = res_deps
+  deps += [":glmark2"]
+}

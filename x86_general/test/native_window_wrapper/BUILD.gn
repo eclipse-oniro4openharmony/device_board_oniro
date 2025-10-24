@@ -1,0 +1,30 @@
+# Copyright (c) Hisilicon Technologies Co., Ltd. 2021-2021. All rights reserved
+import("//build/ohos.gni")
+
+ohos_shared_library("native_window_wrapper") {
+  sources = ["native_window_wrapper.cpp"]
+  include_dirs = [
+      "."
+  ]
+
+  cflags = [
+    "-Wall",
+    "-Werror",
+    "-Wno-cast-qual",
+    "-Wno-pointer-arith",
+    "-Wno-unused-parameter",
+    "-Wno-unused-variable",
+    "-Wno-delete-incomplete",
+  ]
+
+  external_deps = [
+    "window_manager:libwm",
+    "graphic_surface:surface",
+    "graphic_2d:librender_service_base",
+    "graphic_2d:librender_service_client",
+    "c_utils:utils",
+  ]
+
+  part_name = "device_x86_general"
+  install_images = [ system_base_dir ]
+}

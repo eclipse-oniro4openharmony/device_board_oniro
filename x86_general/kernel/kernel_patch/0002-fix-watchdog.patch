@@ -1,0 +1,24 @@
+From 8547e8c062ea429c67fdd2d05a3fe9e68b1e9be8 Mon Sep 17 00:00:00 2001
+From: xuyuanshen <xuyuanshen@talkweb.com.cn>
+Date: Thu, 10 Oct 2024 11:41:59 +0800
+Subject: [PATCH 2/3] fix watchdog
+
+---
+ kernel/watchdog.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/watchdog.c b/kernel/watchdog.c
+index c904872be06c..31fafa0f29d5 100644
+--- a/kernel/watchdog.c
++++ b/kernel/watchdog.c
+@@ -281,6 +281,7 @@ static DEFINE_PER_CPU(unsigned long, watchdog_touch_ts);
+ /* Timestamp of the last softlockup report. */
+ static DEFINE_PER_CPU(unsigned long, watchdog_report_ts);
+ static DEFINE_PER_CPU(struct hrtimer, watchdog_hrtimer);
++static DEFINE_PER_CPU(unsigned int, watchdog_en);
+ static DEFINE_PER_CPU(bool, softlockup_touch_sync);
+ static unsigned long soft_lockup_nmi_warn;
+ 
+-- 
+2.25.1
+
