@@ -1,0 +1,73 @@
+#
+
+import("//build/ohos.gni")
+import("//build/ohos/ndk/ndk.gni")
+
+config("bt_warnings") {
+  cflags = [
+    "-Wall",
+    "-Werror",
+    "-Wno-switch",
+    "-Wno-unused-function",
+    "-Wno-unused-parameter",
+    "-Wno-unused-variable",
+    "-Wno-unused-but-set-variable",
+    "-Wno-implicit-function-declaration",
+    "-Wno-incompatible-pointer-types",
+  ]
+}
+
+ohos_shared_library("libbt_vendor") {
+  output_name = "libbt_vendor"
+  sources = [
+    "src/bt_vendor_brcm.c",
+    "src/conf.c",
+    "src/hardware.c",
+    "src/upio.c",
+    "src/userial_vendor.c",
+  ]
+
+  include_dirs = [
+    "include",
+    "//base/hiviewdfx/hilog/interfaces/native/innerkits/include",
+    "//foundation/communication/bluetooth/services/bluetooth/hardware/include",
+  ]
+
+  cflags = [
+    "-DUSE_CONTROLLER_BDADDR=TRUE",
+    "-DFW_AUTO_DETECTION=TRUE",
+    "-DBT_WAKE_VIA_PROC=FALSE",
+    "-DSCO_PCM_ROUTING=0",
+    "-DSCO_PCM_IF_CLOCK_RATE=1",
+    "-DSCO_PCM_IF_FRAME_TYPE=0",
+    "-DSCO_PCM_IF_SYNC_MODE=0",
+    "-DSCO_PCM_IF_CLOCK_MODE=0",
+    "-DPCM_DATA_FMT_SHIFT_MODE=0",
+    "-DPCM_DATA_FMT_FILL_BITS=0x03",
+    "-DPCM_DATA_FMT_FILL_METHOD=0",
+    "-DPCM_DATA_FMT_FILL_NUM=0",
+    "-DPCM_DATA_FMT_JUSTIFY_MODE=0",
+  ]
+
+  configs = [ ":bt_warnings" ]
+
+  deps = [":bt_vendor.conf"]
+
+  external_deps = [
+    "c_utils:utils",
+    "hilog:libhilog",
+  ]
+
+  install_enable = true
+  install_images = [ chipset_base_dir ]
+
+  part_name = "device_x86_general"
+}
+
+ohos_prebuilt_etc("bt_vendor.conf") {
+  source = "bt_vendor.conf"
+  part_name = "device_x86_general"
+  install_images = [ vendor_base_dir ]
+  module_install_dir = "etc/bluetooth/"
+  install_enable = true
+}

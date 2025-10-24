@@ -1,0 +1,88 @@
+# Copyright (c) 2023 Huawei Device Co., Ltd.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+import("//build/ohos.gni")
+import("//foundation/graphic/graphic_2d/graphic_config.gni")
+
+## Build vulkan_triangle {{{
+ohos_executable("vulkan_triangle") {
+  install_enable = true
+
+  sources = [ "triangle.cpp",
+              "VulkanDevice.cpp",
+              "vulkanexamplebase.cpp",
+              "VulkanSwapChain.cpp",
+              "VulkanBuffer.cpp",
+              "VulkanTools.cpp",
+              "VulkanUtils.cpp",
+              "VulkanInitializers.hpp",
+             ]
+
+  include_dirs = [
+    "$graphic_2d_root/frameworks/surface/include",
+    "$graphic_2d_root/interfaces/inner_api/surface",
+    "$graphic_2d_root/interfaces/inner_api/common",
+    "$graphic_2d_root/rosen/modules/render_service_client",
+    "//foundation/window/window_manager/interfaces/innerkits",
+    "//foundation/graphic/graphic_surface/interfaces/inner_api/surface"
+  ]
+
+  defines = [
+    "VK_USE_PLATFORM_OHOS",
+    "VK_NO_PROTOTYPES"
+    ]
+
+
+  deps = [
+    "//third_party/vulkan-headers:vulkan_headers",
+    "//third_party/zlib:libz",
+  ]
+
+  external_deps = [
+    "c_utils:utils",
+    "hilog:libhilog",
+    "ipc:ipc_core",
+    "window_manager:libwm",
+    "safwk:system_ability_fwk",
+    "graphic_surface:surface",
+    "graphic_2d:librender_service_base",
+    "graphic_2d:librender_service_client",
+    "graphic_2d:2d_graphics",
+  ]
+
+  part_name = "device_x86_general"
+}
+## Build vulkan_triangle }}}
+
+ohos_prebuilt_etc("triangle.frag.spv") {
+    source = "shader/triangle.frag.spv"
+    install_enable = true
+    install_images = [ system_base_dir ]
+    module_install_dir = "lib/triangle"
+    part_name = "device_x86_general"
+}
+
+ohos_prebuilt_etc("triangle.vert.spv") {
+    source = "shader/triangle.vert.spv"
+    install_enable = true
+    install_images = [ system_base_dir ]
+    module_install_dir = "lib/triangle"
+    part_name = "device_x86_general"
+}
+
+group("vulkan_triangle_group") {
+  deps = [
+    ":vulkan_triangle",
+    ":triangle.frag.spv",
+    ":triangle.vert.spv"
+  ]
+}

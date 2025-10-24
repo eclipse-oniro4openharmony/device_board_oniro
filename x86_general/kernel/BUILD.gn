@@ -1,0 +1,42 @@
+# Copyright (c) 2024 Diemit <598757652@qq.com>
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build/config/clang/clang.gni")
+import("//build/ohos.gni")
+import("//build/ohos/kernel/kernel.gni")
+import("../modules/modules_path.gni")
+
+linux_kernel_version = "linux-6.6"
+kernel_source_dir = "//kernel/linux/$linux_kernel_version"
+
+action("x86_kernel") {
+  script = "build_kernel.sh"
+  sources = [ kernel_source_dir ]
+
+  product_path = "vendor/$product_company/$product_name"
+  outputs = [ "$root_build_dir/kernel/src_tmp/$linux_kernel_version/boot_linux" ]
+  outputs += modules_files
+  args = [
+    rebase_path(kernel_source_dir, root_build_dir),
+    rebase_path("$root_build_dir/packages/phone/images"),
+    rebase_path("//device/board/$product_company/$product_name"),
+    product_path,
+    rebase_path("$root_build_dir/../.."),
+    device_company,
+    device_name,
+    product_company,
+  ]
+  if (enable_ramdisk) {
+    args += [ "enable_ramdisk" ]
+  }
+}
