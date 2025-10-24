@@ -1,0 +1,108 @@
+# Copyright (c) 2023 Huawei Device Co., Ltd.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build/test.gni")
+import("//device/board/${product_company}/${device_name}/device.gni")
+import("//drivers/hdf_core/adapter/uhdf2/uhdf.gni")
+import("//drivers/peripheral/camera/camera.gni")
+ut_root_path = "$camera_path/../../test/ut"
+
+module_output_path = "$root_out_dir/test/unittest/hdf"
+
+config("camera_ut_test_config") {
+  visibility = [ ":*" ]
+
+  cflags_cc = []
+
+  ldflags = [ "--coverage" ]
+}
+ohos_unittest("camera_pipeline_core_test_ut") {
+  testonly = true
+  module_out_path = module_output_path
+  sources = [
+    # pipeline core test
+    "$ut_root_path/pipeline_core/pipeline_core_test.cpp",
+    "$ut_root_path/pipeline_core/stream_pipeline_builder_test.cpp",
+    "$ut_root_path/pipeline_core/stream_pipeline_dispatcher_test.cpp",
+    "$ut_root_path/pipeline_core/stream_pipeline_strategy_test.cpp",
+  ]
+
+  include_dirs = [
+    # camera common includes
+    "$camera_path/include",
+    "$camera_path/../interfaces",
+    "$camera_path/../../interfaces/include",
+    "$camera_path/../../interfaces/hdi_passthrough",
+    "$camera_path/../../test/common/callback/include",
+    "$camera_path/utils/event",
+
+    # device manager includes
+    "$camera_path/device_manager/include",
+
+    # buffer manager includes
+    "$camera_path/buffer_manager/include",
+    "$camera_path/buffer_manager/src/buffer_adapter/lite",
+    "//third_party/googletest/googletest/include",
+    "$camera_path/../../base",
+    "$camera_path/../../display/interfaces/include",
+
+    # pipeline core includes
+    "$camera_path/pipeline_core",
+    "$camera_path/pipeline_core/host_stream/include",
+    "$camera_path/pipeline_core/utils",
+    "$camera_path/pipeline_core/nodes/include",
+    "$camera_path/pipeline_core/nodes/src/node_base",
+    "$camera_path/pipeline_core/nodes/src/sink_node",
+    "$camera_path/pipeline_core/nodes/src/sensor_node",
+    "$camera_path/pipeline_core/nodes/src/merge_node",
+    "$camera_path/pipeline_core/nodes/src/dummy_node",
+    "$camera_path/pipeline_core/pipeline_impl/include",
+    "$camera_path/pipeline_core/pipeline_impl/src",
+    "$camera_path/pipeline_core/include",
+    "$camera_path/pipeline_core/pipeline_impl/src/builder",
+    "$camera_path/pipeline_core/pipeline_impl/src/dispatcher",
+    "$camera_path/pipeline_core/pipeline_impl/src/parser",
+    "$camera_path/pipeline_core/pipeline_impl/src/strategy",
+    "$camera_path/pipeline_core/pipeline_impl/src/strategy/config",
+    "$camera_path/pipeline_core/ipp/include",
+  ]
+
+  deps = [
+    "$board_camera_path/device_manager:camera_device_manager",
+    "$board_camera_path/pipeline_core:camera_pipeline_core",
+    "$camera_path/buffer_manager:camera_buffer_manager",
+    "//third_party/googletest:gmock_main",
+    "//third_party/googletest:gtest",
+    "//third_party/googletest:gtest_main",
+  ]
+
+  if (is_standard_system) {
+    external_deps = [
+      "c_utils:utils",
+      "drivers_interface_camera:libbuffer_producer_sequenceable_1.0",
+      "graphic_chipsetsdk:surface",
+      "hdf_core:libhdf_utils",
+      "hilog:libhilog",
+      "samgr:samgr_proxy",
+    ]
+  } else {
+    external_deps = [ "hilog:libhilog" ]
+  }
+
+  external_deps += [
+    "drivers_interface_camera:metadata",
+    "ipc:ipc_single",
+    "samgr:samgr_proxy",
+  ]
+  public_configs = [ ":camera_ut_test_config" ]
+}

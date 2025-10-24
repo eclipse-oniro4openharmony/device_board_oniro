@@ -1,0 +1,63 @@
+# Copyright (c) 2021 - 2023 Huawei Device Co., Ltd.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build/test.gni")
+import("//device/board/${product_company}/${device_name}/device.gni")
+import("//drivers/hdf_core/adapter/uhdf2/uhdf.gni")
+import("//drivers/peripheral/camera/camera.gni")
+
+module_output_path = "$root_out_dir/test/unittest/hdf"
+config("v4l2_device_config") {
+  visibility = [ ":*" ]
+  cflags_cc = [
+    "-DGST_DISABLE_DEPRECATED",
+    "-DHAVE_CONFIG_H",
+    "-DCOLORSPACE=\"videoconvert\"",
+  ]
+}
+ohos_unittest("camera_board_device_manager_unittest") {
+  testonly = true
+  module_out_path = module_output_path
+  sources = [ "$camera_path/device_manager/test/unittest/v4l2/utest_v4l2_device_manager.cpp" ]
+  include_dirs = [
+    "$camera_path/device_manager",
+    "$camera_path/device_manager/include",
+    "$camera_path/device_manager/include/v4l2",
+    "$camera_path/device_manager/src",
+    "$camera_path/device_manager/src/v4l2",
+    "$camera_path/driver_adapter/include",
+    "$camera_path/include",
+    "$camera_path/device_manager/test/unittest/v4l2",
+    "$camera_path/utils/event",
+    "$camera_path/adapter/platform/v4l2/src/device_manager/include",
+    "$board_camera_path/device_manager/include",
+    "$camera_path/adapter/platform/v4l2/src/driver_adapter/include",
+  ]
+  deps = [
+    "$board_camera_path/device_manager:camera_device_manager",
+    "//third_party/googletest:gmock_main",
+    "//third_party/googletest:gtest_main",
+  ]
+  if (is_standard_system) {
+    external_deps = [
+      "c_utils:utils",
+      "graphic_chipsetsdk:surface",
+      "hdf_core:libhdf_utils",
+      "hilog:libhilog",
+    ]
+  } else {
+    external_deps = [ "hilog:libhilog" ]
+  }
+  external_deps += [ "drivers_interface_camera:metadata" ]
+  public_configs = [ ":v4l2_device_config" ]
+}
