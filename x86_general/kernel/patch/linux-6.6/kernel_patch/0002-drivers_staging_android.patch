@@ -1,91 +1,25 @@
-From 99c7d174389c4813773955f480888a4d15255d06 Mon Sep 17 00:00:00 2001
-From: diemit <598757652@qq.com>
-Date: Sat, 17 May 2025 11:11:08 +0800
-Subject: [PATCH] ashmem
-
-Change-Id: I535b373f75c04d3f6fb56e65d89d51dd90f8642f
----
- drivers/staging/Kconfig                       |    2 +
- drivers/staging/Makefile                      |    1 +
- drivers/staging/android/Kconfig               |   21 +
- drivers/staging/android/Makefile              |    6 +
- drivers/staging/android/TODO                  |   13 +
- drivers/staging/android/ashmem.c              | 1192 +++++++++++++++++
- drivers/staging/android/ashmem.h              |   47 +
- drivers/staging/android/ion/Kconfig           |   14 +
- drivers/staging/android/ion/Makefile          |    4 +
- drivers/staging/android/ion/heaps/Kconfig     |   15 +
- drivers/staging/android/ion/heaps/Makefile    |    5 +
- .../staging/android/ion/heaps/ion_cma_heap.c  |  151 +++
- .../staging/android/ion/heaps/ion_page_pool.c |  172 +++
- .../staging/android/ion/heaps/ion_page_pool.h |   67 +
- .../android/ion/heaps/ion_system_heap.c       |  344 +++++
- drivers/staging/android/ion/ion.c             |  518 +++++++
- drivers/staging/android/ion/ion_buffer.c      |  278 ++++
- drivers/staging/android/ion/ion_dma_buf.c     |  359 +++++
- drivers/staging/android/ion/ion_heap.c        |  291 ++++
- drivers/staging/android/ion/ion_private.h     |   58 +
- .../staging/android/ion/ion_protected_heap.c  |  526 ++++++++
- drivers/staging/android/ion/ion_trace.h       |   55 +
- drivers/staging/android/ion/rockchip/Makefile |    3 +
- .../android/ion/rockchip/rockchip_ion.c       |  224 ++++
- .../ion/rockchip/rockchip_ion_snapshot.c      |  145 ++
- drivers/staging/android/uapi/ashmem.h         |   54 +
- drivers/staging/android/uapi/ion.h            |  127 ++
- include/linux/memcheck.h                      |   22 +
- 28 files changed, 4714 insertions(+)
- create mode 100644 drivers/staging/android/Kconfig
- create mode 100644 drivers/staging/android/Makefile
- create mode 100644 drivers/staging/android/TODO
- create mode 100644 drivers/staging/android/ashmem.c
- create mode 100644 drivers/staging/android/ashmem.h
- create mode 100644 drivers/staging/android/ion/Kconfig
- create mode 100644 drivers/staging/android/ion/Makefile
- create mode 100644 drivers/staging/android/ion/heaps/Kconfig
- create mode 100644 drivers/staging/android/ion/heaps/Makefile
- create mode 100644 drivers/staging/android/ion/heaps/ion_cma_heap.c
- create mode 100644 drivers/staging/android/ion/heaps/ion_page_pool.c
- create mode 100644 drivers/staging/android/ion/heaps/ion_page_pool.h
- create mode 100644 drivers/staging/android/ion/heaps/ion_system_heap.c
- create mode 100644 drivers/staging/android/ion/ion.c
- create mode 100644 drivers/staging/android/ion/ion_buffer.c
- create mode 100644 drivers/staging/android/ion/ion_dma_buf.c
- create mode 100644 drivers/staging/android/ion/ion_heap.c
- create mode 100644 drivers/staging/android/ion/ion_private.h
- create mode 100644 drivers/staging/android/ion/ion_protected_heap.c
- create mode 100644 drivers/staging/android/ion/ion_trace.h
- create mode 100644 drivers/staging/android/ion/rockchip/Makefile
- create mode 100644 drivers/staging/android/ion/rockchip/rockchip_ion.c
- create mode 100644 drivers/staging/android/ion/rockchip/rockchip_ion_snapshot.c
- create mode 100644 drivers/staging/android/uapi/ashmem.h
- create mode 100644 drivers/staging/android/uapi/ion.h
- create mode 100644 include/linux/memcheck.h
-
 diff --git a/drivers/staging/Kconfig b/drivers/staging/Kconfig
-index 5dc634897..7dc75c540 100644
+index 5dc634897b48..37c72a658c08 100644
 --- a/drivers/staging/Kconfig
 +++ b/drivers/staging/Kconfig
-@@ -54,6 +54,8 @@ source "drivers/staging/nvec/Kconfig"
+@@ -86,5 +86,7 @@ source "drivers/staging/hisysevent/Kconfig"
  
- source "drivers/staging/media/Kconfig"
+ source "drivers/staging/zerohung/Kconfig"
  
 +source "drivers/staging/android/Kconfig"
 +
- source "drivers/staging/board/Kconfig"
- 
- source "drivers/staging/gdm724x/Kconfig"
+ source "drivers/staging/hungtask/Kconfig"
+ endif # STAGING
 diff --git a/drivers/staging/Makefile b/drivers/staging/Makefile
-index aec6e94a3..a842711b1 100644
+index aec6e94a3c69..eedf45376138 100644
 --- a/drivers/staging/Makefile
 +++ b/drivers/staging/Makefile
-@@ -17,6 +17,7 @@ obj-$(CONFIG_IIO)		+= iio/
- obj-$(CONFIG_FB_SM750)		+= sm750fb/
- obj-$(CONFIG_USB_EMXX)		+= emxx_udc/
- obj-$(CONFIG_MFD_NVEC)		+= nvec/
+@@ -32,4 +32,5 @@ obj-$(CONFIG_HILOG) 		+= hilog/
+ obj-$(CONFIG_HIEVENT) 		+= hievent/
+ obj-$(CONFIG_HISYSEVENT) 	+= hisysevent/
+ obj-$(CONFIG_DFX_ZEROHUNG)	+= zerohung/
 +obj-$(CONFIG_ANDROID)		+= android/
- obj-$(CONFIG_STAGING_BOARD)	+= board/
- obj-$(CONFIG_LTE_GDM724X)	+= gdm724x/
- obj-$(CONFIG_FB_TFT)		+= fbtft/
+ obj-$(CONFIG_DFX_HUNGTASK)      += hungtask/
 diff --git a/drivers/staging/android/Kconfig b/drivers/staging/android/Kconfig
 new file mode 100644
 index 000000000..8d8fd5c29
@@ -4925,34 +4859,3 @@ index 000000000..46c93fcb4
 +					struct ion_heap_query)
 +
 +#endif /* _UAPI_LINUX_ION_H */
-diff --git a/include/linux/memcheck.h b/include/linux/memcheck.h
-new file mode 100644
-index 000000000..087cd760e
---- /dev/null
-+++ b/include/linux/memcheck.h
-@@ -0,0 +1,22 @@
-+/* SPDX-License-Identifier: GPL-2.0 */
-+/*
-+ *  include/linux/memcheck.h
-+ *
-+ *  Copyright (c) 2022 Huawei Technologies Co., Ltd.
-+ */
-+#ifndef _MEMCHECK_H
-+#define _MEMCHECK_H
-+
-+#ifdef CONFIG_MEMTRACE_ASHMEM
-+void init_ashmem_process_info(void);
-+#else
-+static inline void init_ashmem_process_info(void) {}
-+#endif
-+
-+#ifdef CONFIG_PURGEABLE_ASHMEM
-+void init_purgeable_ashmem_trigger(void);
-+#else
-+static inline void init_purgeable_ashmem_trigger(void) {}
-+#endif
-+#endif /* _MEMCHECK_H */
-+
--- 
-2.25.1
-

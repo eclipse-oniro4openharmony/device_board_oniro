@@ -19,7 +19,7 @@ group("x86_group") {
   deps = [
     "cfg:init_configs",
     "distributedhardware:distributedhardware",
-    "kernel:x86_kernel",
+    "kernel:kernel",
     "firmware:firmware",
     # "bluetooth:libbt_vendor",
     # "modules:modules_group",
