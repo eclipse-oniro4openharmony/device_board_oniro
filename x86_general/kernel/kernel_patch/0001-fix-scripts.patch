@@ -1,0 +1,136 @@
+From aa1a1627773dec65c539c50d2a2aa51cfba74f09 Mon Sep 17 00:00:00 2001
+From: diemit <598757652@qq.com>
+Date: Sat, 17 May 2025 11:19:58 +0800
+Subject: [PATCH] fix scripts
+
+Change-Id: I03736e5c73041c4a8e59b124ff3d8e866a3d3ea0
+---
+ scripts/Makefile.clang     |  2 +-
+ scripts/Makefile.extrawarn |  3 ++
+ scripts/gen_autoksyms.sh   | 72 ++++++++++++++++++++++++++++++++++++++
+ scripts/ohos-check-dir.sh  |  8 +++++
+ 4 files changed, 84 insertions(+), 1 deletion(-)
+ create mode 100755 scripts/gen_autoksyms.sh
+ create mode 100755 scripts/ohos-check-dir.sh
+
+diff --git a/scripts/Makefile.clang b/scripts/Makefile.clang
+index 6c23c6af7..355b10611 100644
+--- a/scripts/Makefile.clang
++++ b/scripts/Makefile.clang
+@@ -34,6 +34,6 @@ endif
+ CLANG_FLAGS	+= -Werror=unknown-warning-option
+ CLANG_FLAGS	+= -Werror=ignored-optimization-argument
+ CLANG_FLAGS	+= -Werror=option-ignored
+-CLANG_FLAGS	+= -Werror=unused-command-line-argument
++CLANG_FLAGS	+= -Wno-unused-command-line-argument
+ KBUILD_CPPFLAGS	+= $(CLANG_FLAGS)
+ export CLANG_FLAGS
+diff --git a/scripts/Makefile.extrawarn b/scripts/Makefile.extrawarn
+index 0ea3281a9..ad400cd10 100644
+--- a/scripts/Makefile.extrawarn
++++ b/scripts/Makefile.extrawarn
+@@ -176,6 +176,9 @@ KBUILD_CFLAGS += -Wno-shift-negative-value
+ 
+ ifdef CONFIG_CC_IS_CLANG
+ KBUILD_CFLAGS += -Wno-enum-enum-conversion
++KBUILD_CFLAGS += -Wno-declaration-after-statement
++KBUILD_CFLAGS += -Wno-strict-prototypes
++KBUILD_CFLAGS += -Wno-int-conversion
+ endif
+ 
+ ifdef CONFIG_CC_IS_CLANG
+diff --git a/scripts/gen_autoksyms.sh b/scripts/gen_autoksyms.sh
+new file mode 100755
+index 000000000..da320151e
+--- /dev/null
++++ b/scripts/gen_autoksyms.sh
+@@ -0,0 +1,72 @@
++#!/bin/sh
++# SPDX-License-Identifier: GPL-2.0-only
++
++# Create an autoksyms.h header file from the list of all module's needed symbols
++# as recorded on the second line of *.mod files and the user-provided symbol
++# whitelist.
++
++set -e
++
++output_file="$1"
++
++# Use "make V=1" to debug this script.
++case "$KBUILD_VERBOSE" in
++*1*)
++	set -x
++	;;
++esac
++
++# We need access to CONFIG_ symbols
++. include/config/auto.conf
++
++needed_symbols=
++
++# Special case for modversions (see modpost.c)
++if [ -n "$CONFIG_MODVERSIONS" ]; then
++	needed_symbols="$needed_symbols module_layout"
++fi
++
++# With CONFIG_LTO_CLANG, LLVM bitcode has not yet been compiled into a binary
++# when the .mod files are generated, which means they don't yet contain
++# references to certain symbols that will be present in the final binaries.
++if [ -n "$CONFIG_LTO_CLANG" ]; then
++	# intrinsic functions
++	needed_symbols="$needed_symbols memcpy memmove memset"
++	# ftrace
++	needed_symbols="$needed_symbols _mcount"
++	# stack protector symbols
++	needed_symbols="$needed_symbols __stack_chk_fail __stack_chk_guard"
++fi
++
++ksym_wl=
++if [ -n "$CONFIG_UNUSED_KSYMS_WHITELIST" ]; then
++	# Use 'eval' to expand the whitelist path and check if it is relative
++	eval ksym_wl="$CONFIG_UNUSED_KSYMS_WHITELIST"
++	[ "${ksym_wl}" != "${ksym_wl#/}" ] || ksym_wl="$abs_srctree/$ksym_wl"
++	if [ ! -f "$ksym_wl" ] || [ ! -r "$ksym_wl" ]; then
++		echo "ERROR: '$ksym_wl' whitelist file not found" >&2
++		exit 1
++	fi
++fi
++
++# Generate a new ksym list file with symbols needed by the current
++# set of modules.
++cat > "$output_file" << EOT
++/*
++ * Automatically generated file; DO NOT EDIT.
++ */
++
++EOT
++
++[ -f modules.order ] && modlist=modules.order || modlist=/dev/null
++
++{
++	sed 's/ko$/mod/' $modlist | xargs -n1 sed -n -e '2p'
++	echo "$needed_symbols"
++	[ -n "$ksym_wl" ] && cat "$ksym_wl"
++} | sed -e 's/ /\n/g' | sed -n -e '/^$/!p' |
++# Remove the dot prefix for ppc64; symbol names with a dot (.) hold entry
++# point addresses.
++sed -e 's/^\.//' |
++sort -u |
++sed -e 's/\(.*\)/#define __KSYM_\1 1/' >> "$output_file"
+diff --git a/scripts/ohos-check-dir.sh b/scripts/ohos-check-dir.sh
+new file mode 100755
+index 000000000..2833618f9
+--- /dev/null
++++ b/scripts/ohos-check-dir.sh
+@@ -0,0 +1,8 @@
++#! /bin/bash
++# SPDX-License-Identifier: GPL-2.0
++
++if [ -d "$1" ]; then
++    exit 0
++fi
++
++exit 1
+-- 
+2.25.1
+

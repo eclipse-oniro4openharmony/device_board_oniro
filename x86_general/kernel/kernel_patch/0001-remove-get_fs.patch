@@ -1,0 +1,115 @@
+From eceb87b7d6a4d9213371f34efec0e35a135cfd67 Mon Sep 17 00:00:00 2001
+From: Diemit <598757652@qq.com>
+Date: Wed, 10 Jul 2024 22:31:50 +0800
+Subject: [PATCH] remove-get_fs
+
+Change-Id: I74bac0a9d54ca3afab761afb13cb2cb9ce213f78
+---
+ drivers/staging/blackbox/blackbox_common.c    | 24 +++++++++----------
+ .../staging/hisysevent/hiview_hisysevent.c    |  8 +++----
+ 2 files changed, 16 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/staging/blackbox/blackbox_common.c b/drivers/staging/blackbox/blackbox_common.c
+index 44bc2aa18..8a38613cb 100644
+--- a/drivers/staging/blackbox/blackbox_common.c
++++ b/drivers/staging/blackbox/blackbox_common.c
+@@ -23,7 +23,7 @@ void sys_reset(void)
+ 
+ void change_own(char *path, int uid, int gid)
+ {
+-	mm_segment_t old_fs;
++	// mm_segment_t old_fs;
+ 	int ret = -1;
+ 
+ 	if (unlikely(!path || uid == -1 || gid == -1)) {
+@@ -31,13 +31,13 @@ void change_own(char *path, int uid, int gid)
+ 		return;
+ 	}
+ 
+-	old_fs = get_fs();
+-	set_fs(KERNEL_DS);
++	// old_fs = get_fs();
++	// set_fs(KERNEL_DS);
+ 	ret = ksys_chown(path, uid, gid);
+ 	if (ret != 0)
+ 		bbox_print_err("ksys_chown [%s] failed, ret: %d\n", path, ret);
+ 
+-	set_fs(old_fs);
++	// set_fs(old_fs);
+ }
+ 
+ int full_write_file(const char *pfile_path, char *buf,
+@@ -45,7 +45,7 @@ int full_write_file(const char *pfile_path, char *buf,
+ {
+ 	struct file *filp = NULL;
+ 	char *pathname = NULL;
+-	mm_segment_t old_fs;
++	// mm_segment_t old_fs;
+ 	loff_t pos = 0;
+ 	int ret = -1;
+ 
+@@ -61,12 +61,12 @@ int full_write_file(const char *pfile_path, char *buf,
+ 		return -EBADF;
+ 	}
+ 
+-	old_fs = get_fs();
+-	set_fs(KERNEL_DS);
++	// old_fs = get_fs();
++	// set_fs(KERNEL_DS);
+ 
+ 	ret = vfs_write(filp, buf, buf_size, &pos);
+ 
+-	set_fs(old_fs);
++	// set_fs(old_fs);
+ 
+ 	file_close(filp);
+ 
+@@ -207,13 +207,13 @@ static inline void unlock_dir(struct dentry *dentry)
+ struct file *file_open(const char *filename, int open_mode, int mode)
+ {
+ 	struct file *filp = NULL;
+-	mm_segment_t old_fs;
++	// mm_segment_t old_fs;
+ 
+-	old_fs = get_fs();
+-	set_fs(KERNEL_DS);
++	// old_fs = get_fs();
++	// set_fs(KERNEL_DS);
+ 
+ 	filp = filp_open(filename, open_mode, mode);
+-	set_fs(old_fs);
++	// set_fs(old_fs);
+ 
+ 	return filp;
+ }
+diff --git a/drivers/staging/hisysevent/hiview_hisysevent.c b/drivers/staging/hisysevent/hiview_hisysevent.c
+index 80d798141..7a4e36577 100644
+--- a/drivers/staging/hisysevent/hiview_hisysevent.c
++++ b/drivers/staging/hisysevent/hiview_hisysevent.c
+@@ -96,7 +96,7 @@ int hisysevent_write(struct hiview_hisysevent *event)
+ 	struct file *filp;
+ 	unsigned long vcount;
+ 	struct iovec vec[3];
+-	mm_segment_t oldfs;
++	// mm_segment_t oldfs;
+ 	struct iov_iter iter;
+ 
+ 	if (!event) {
+@@ -141,11 +141,11 @@ int hisysevent_write(struct hiview_hisysevent *event)
+ 	vec[vcount].iov_base = raw_data->data;
+ 	vec[vcount++].iov_len = raw_data->len + 1;
+ 
+-	oldfs = get_fs();
+-	set_fs(KERNEL_DS);
++	// oldfs = get_fs();
++	// set_fs(KERNEL_DS);
+ 	iov_iter_init(&iter, WRITE, vec, vcount, iov_length(vec, vcount));
+ 	ret = vfs_iter_write(filp, &iter, &filp->f_pos, 0);
+-	set_fs(oldfs);
++	// set_fs(oldfs);
+ 
+ 	if (ret < 0)
+ 		pr_err("failed to write hisysevent, ret=%d", ret);
+-- 
+2.25.1
+

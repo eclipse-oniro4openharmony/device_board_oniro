@@ -1,0 +1,70 @@
+From beeddb234f70eb40d272f6f0826f50ff1ddcb763 Mon Sep 17 00:00:00 2001
+From: diemit <598757652@qq.com>
+Date: Sat, 17 May 2025 12:03:12 +0800
+Subject: [PATCH] fix build
+
+Change-Id: I4273f4df9671572e7464b0d70cad22d6377324b8
+---
+ include/linux/dma-buf.h    | 16 ++++++++++++++++
+ include/linux/page-flags.h |  6 +++---
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/include/linux/dma-buf.h b/include/linux/dma-buf.h
+index 3f31baa32..0f1845e7b 100644
+--- a/include/linux/dma-buf.h
++++ b/include/linux/dma-buf.h
+@@ -422,6 +422,10 @@ struct dma_buf {
+ 	 * obeying fences. See enum dma_resv_usage for further descriptions.
+ 	 */
+ 	struct dma_resv *resv;
++#ifdef CONFIG_DMABUF_PROCESS_INFO
++	pid_t exp_pid;
++	char exp_task_comm[TASK_COMM_LEN];
++#endif
+ 
+ 	/** @poll: for userspace poll support */
+ 	wait_queue_head_t poll;
+@@ -631,4 +635,16 @@ int dma_buf_vmap(struct dma_buf *dmabuf, struct iosys_map *map);
+ void dma_buf_vunmap(struct dma_buf *dmabuf, struct iosys_map *map);
+ int dma_buf_vmap_unlocked(struct dma_buf *dmabuf, struct iosys_map *map);
+ void dma_buf_vunmap_unlocked(struct dma_buf *dmabuf, struct iosys_map *map);
++#ifdef CONFIG_DMABUF_PROCESS_INFO
++/**
++ * get_dma_buf_from_file - Get struct dma_buf* from struct file*
++ * @f:	[in]	pointer to struct file, which is associated with a
++ *		dma_buf object.
++ *
++ * If @f IS_ERR_OR_NULL, return NULL.
++ * If @f is not a file associated with dma_buf, return NULL.
++ */
++struct dma_buf *get_dma_buf_from_file(struct file *f);
++#endif /* CONFIG_DMABUF_PROCESS_INFO */
++
+ #endif /* __DMA_BUF_H__ */
+diff --git a/include/linux/page-flags.h b/include/linux/page-flags.h
+index 3ed1e637e..ff8f35ab7 100644
+--- a/include/linux/page-flags.h
++++ b/include/linux/page-flags.h
+@@ -512,8 +512,8 @@ PAGEFLAG(Checked, checked, PF_NO_COMPOUND)	   /* Used by some filesystems */
+ PAGEFLAG(XPMReadonly, xpm_readonly, PF_HEAD)
+ PAGEFLAG(XPMWritetainted, xpm_writetainted, PF_HEAD)
+ #else
+-PAGEFLAG_FALSE(XPMReadonly)
+-PAGEFLAG_FALSE(XPMWritetainted)
++PAGEFLAG_FALSE(XPMReadonly, xpm_readonly)
++PAGEFLAG_FALSE(XPMWritetainted, xpm_writetainted)
+ #endif
+ 
+ /* Xen */
+@@ -641,7 +641,7 @@ PAGEFLAG_FALSE(VmemmapSelfHosted, vmemmap_self_hosted)
+ #ifdef CONFIG_MEM_PURGEABLE
+ PAGEFLAG(Purgeable, purgeable, PF_ANY)
+ #else
+-PAGEFLAG_FALSE(Purgeable)
++PAGEFLAG_FALSE(Purgeable, purgeable)
+ #endif
+ 
+ /*
+-- 
+2.25.1
+

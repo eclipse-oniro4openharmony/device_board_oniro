@@ -1,0 +1,291 @@
+# Copyright (c) 2021 - 2023 Huawei Device Co., Ltd.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+import("//build/ohos.gni")
+import("//device/board/${product_company}/${device_name}/device.gni")
+import("//drivers/hdf_core/adapter/uhdf2/uhdf.gni")
+import("//drivers/peripheral/camera/camera.gni")
+import("$hdf_framework_path/tools/hc-gen/hc_gen.gni")
+
+hc_gen("build_camera_host_config") {
+  sources = [ rebase_path(
+          "$product_config_path/hdf_config/uhdf/camera/hdi_impl/camera_host_config.hcs") ]
+}
+
+ohos_prebuilt_etc("camera_host_config.hcb") {
+  deps = [ ":build_camera_host_config" ]
+  hcs_outputs = get_target_outputs(":build_camera_host_config")
+  source = hcs_outputs[0]
+  relative_install_dir = "hdfconfig"
+  install_images = [ chipset_base_dir ]
+  subsystem_name = "device_x86_general"
+  part_name = "device_x86_general"
+}
+
+hc_gen_c("generate_source") {
+  sources = [
+    "$product_config_path/hdf_config/uhdf/camera/pipeline_core/config.hcs",
+    "$product_config_path/hdf_config/uhdf/camera/pipeline_core/params.hcs",
+  ]
+}
+
+action("copy_source") {
+  script = "/usr/bin/env"
+  outputs = [ "$target_out_dir/tmp.c" ]  # no use, just for gn complains
+  args = [
+    "cp",
+    "-f",
+  ]
+  args += rebase_path(get_target_outputs(":generate_source"))
+  args += [ rebase_path(
+          "$camera_path/pipeline_core/pipeline_impl/src/strategy/config/") ]
+  deps = [ ":generate_source" ]
+}
+
+ohos_prebuilt_etc("config.c") {
+  deps = [ ":copy_source" ]
+  source =
+      "$camera_path/pipeline_core/pipeline_impl/src/strategy/config/config.c"
+  exec_script(
+      "/usr/bin/env",
+      [
+        "touch",
+        rebase_path(
+            "$camera_path/pipeline_core/pipeline_impl/src/strategy/config/config.c"),
+      ])
+}
+
+ohos_prebuilt_etc("params.c") {
+  deps = [ ":copy_source" ]
+  source =
+      "$camera_path/pipeline_core/pipeline_impl/src/strategy/config/params.c"
+  exec_script(
+      "/usr/bin/env",
+      [
+        "touch",
+        rebase_path(
+            "$camera_path/pipeline_core/pipeline_impl/src/strategy/config/params.c"),
+      ])
+}
+
+hc_gen("build_ipp_algo_config") {
+  sources = [ rebase_path(
+          "$product_config_path/hdf_config/uhdf/camera/pipeline_core/ipp_algo_config.hcs") ]
+}
+
+ohos_prebuilt_etc("ipp_algo_config.hcb") {
+  deps = [ ":build_ipp_algo_config" ]
+  hcs_outputs = get_target_outputs(":build_ipp_algo_config")
+  source = hcs_outputs[0]
+  relative_install_dir = "hdfconfig"
+  install_images = [ chipset_base_dir ]
+  subsystem_name = "device_x86_general"
+  part_name = "device_x86_general"
+}
+
+config("example_config") {
+  visibility = [ ":*" ]
+
+  cflags = [
+    "-Wno-error",
+    "-Wno-unused-function",
+    "-Wno-unused-parameter",
+  ]
+}
+
+group("chipset_build") {
+  public_deps = [
+    ":camera_host_config.hcb",
+    ":config.c",
+    ":ipp_algo_config.hcb",
+    ":params.c",
+    "$board_camera_path/pipeline_core:camera_ipp_algo_example",
+  ]
+}
+
+config("camhdi_impl_config") {
+  visibility = [ ":*" ]
+  cflags = [
+    "-DGST_DISABLE_DEPRECATED",
+    "-DHAVE_CONFIG_H",
+  ]
+
+  ldflags = [ "-Wl" ]
+
+  if (enable_camera_device_utest) {
+    cflags += [
+      "-fprofile-arcs",
+      "-ftest-coverage",
+    ]
+
+    ldflags += [ "--coverage" ]
+  }
+}
+
+host_sources = [
+  "$camera_path/../v4l2/src/camera_device/camera_device_vdi_impl.cpp",
+  "$camera_path/../v4l2/src/camera_dump.cpp",
+  "$camera_path/../v4l2/src/camera_host/camera_host_config.cpp",
+  "$camera_path/../v4l2/src/camera_host/camera_host_vdi_impl.cpp",
+  "$camera_path/../v4l2/src/camera_host/hcs_deal.cpp",
+  "$camera_path/../v4l2/src/offline_stream_operator/offline_stream.cpp",
+  "$camera_path/../v4l2/src/offline_stream_operator/offline_stream_operator_vdi_impl.cpp",
+  "$camera_path/../v4l2/src/stream_operator/capture_message.cpp",
+  "$camera_path/../v4l2/src/stream_operator/capture_request.cpp",
+  "$camera_path/../v4l2/src/stream_operator/stream_base.cpp",
+  "$camera_path/../v4l2/src/stream_operator/stream_operator_vdi_impl.cpp",
+  "$camera_path/../v4l2/src/stream_operator/stream_post_view.cpp",
+  "$camera_path/../v4l2/src/stream_operator/stream_preview.cpp",
+  "$camera_path/../v4l2/src/stream_operator/stream_statistics.cpp",
+  "$camera_path/../v4l2/src/stream_operator/stream_still_capture.cpp",
+  "$camera_path/../v4l2/src/stream_operator/stream_tunnel/standard/stream_tunnel.cpp",
+  "$camera_path/../v4l2/src/stream_operator/stream_video.cpp",
+]
+
+host_includes = [
+  "$camera_path/../../interfaces/include",
+  "$camera_path/include",
+  "$camera_path/metadata_manager/include",
+  "$camera_path/utils/watchdog",
+  "$camera_path/../interfaces",
+  "$camera_path/../v4l2/include",
+  "$camera_path/../v4l2/include/camera_host",
+  "$camera_path/../v4l2/include/camera_device",
+  "$camera_path/../v4l2/include/stream_operator",
+  "$camera_path/../v4l2/src/stream_operator/stream_tunnel/standard",
+  "$camera_path/../v4l2/include/offline_stream_operator",
+  "$camera_path/device_manager/include/",
+  "$camera_path/buffer_manager/src/buffer_adapter/standard",
+  "$camera_path/utils/event",
+  "$camera_path/../../display/interfaces/include",
+
+  #producer
+  "$camera_path/pipeline_core/utils",
+  "$camera_path/pipeline_core/include",
+  "$camera_path/pipeline_core/host_stream/include",
+  "$camera_path/pipeline_core/nodes/include",
+  "$camera_path/pipeline_core/nodes/src/node_base",
+  "$camera_path/pipeline_core/nodes/src/dummy_node",
+  "$camera_path/pipeline_core/pipeline_impl/include",
+  "$camera_path/pipeline_core/pipeline_impl/src",
+  "$camera_path/pipeline_core/pipeline_impl/src/builder",
+  "$camera_path/pipeline_core/pipeline_impl/src/dispatcher",
+  "$camera_path/pipeline_core/pipeline_impl/src/parser",
+  "$camera_path/pipeline_core/pipeline_impl/src/strategy",
+  "$camera_path/pipeline_core/ipp/include",
+]
+
+ohos_shared_library("camera_host_vdi_impl_1.0") {
+  sources = host_sources
+  include_dirs = host_includes
+
+  deps = [
+    "$board_camera_path/device_manager:camera_device_manager",
+    "$board_camera_path/metadata_manager:camera_metadata_manager",
+    "$board_camera_path/pipeline_core:camera_pipeline_core",
+    "$camera_path/buffer_manager:camera_buffer_manager",
+    "$camera_path/utils:camera_utils",
+  ]
+
+  defines = []
+  if (enable_camera_device_utest) {
+    defines += [ "CAMERA_DEVICE_UTEST" ]
+  }
+  if (use_hitrace) {
+    defines += [ "HITRACE_LOG_ENABLED" ]
+  }
+
+  if (is_standard_system) {
+    external_deps = [
+      "c_utils:utils",
+      "graphic_chipsetsdk:surface",
+      "hdf_core:libhdf_host",
+      "hdf_core:libhdf_ipc_adapter",
+      "hdf_core:libhdf_utils",
+      "hdf_core:libhdi",
+      "hilog:libhilog",
+      "ipc:ipc_single",
+    ]
+    if (use_hitrace) {
+      external_deps += [ "hitrace:libhitracechain" ]
+    }
+  } else {
+    external_deps = [ "hilog:libhilog" ]
+  }
+  external_deps += [
+    "drivers_interface_camera:libbuffer_producer_sequenceable_1.0",
+    "drivers_interface_camera:metadata",
+    "hitrace:hitrace_meter",
+    "ipc:ipc_single",
+  ]
+  public_configs = [ ":camhdi_impl_config" ]
+  install_images = [ chipset_base_dir ]
+  subsystem_name = "device_x86_general"
+  part_name = "device_x86_general"
+}
+
+ohos_static_library("camera_host_vdi_impl_1.0_static") {
+  sources = host_sources
+  include_dirs = host_includes
+
+  deps = [
+    "$board_camera_path/device_manager:camera_device_manager",
+    "$board_camera_path/metadata_manager:camera_metadata_manager",
+    "$board_camera_path/pipeline_core:camera_pipeline_core",
+    "$camera_path/buffer_manager:camera_buffer_manager",
+    "$camera_path/utils:camera_utils",
+  ]
+
+  defines = []
+  if (enable_camera_device_utest) {
+    defines += [ "CAMERA_DEVICE_UTEST" ]
+  }
+  if (use_hitrace) {
+    defines += [ "HITRACE_LOG_ENABLED" ]
+  }
+
+  if (is_standard_system) {
+    external_deps = [
+      "c_utils:utils",
+      "graphic_chipsetsdk:surface",
+      "hdf_core:libhdf_host",
+      "hdf_core:libhdf_ipc_adapter",
+      "hdf_core:libhdf_utils",
+      "hdf_core:libhdi",
+      "hilog:libhilog",
+      "hitrace:hitrace_meter",
+      "ipc:ipc_single",
+    ]
+    if (use_hitrace) {
+      external_deps += [ "hitrace:libhitracechain" ]
+    }
+  } else {
+    external_deps = [ "hilog:libhilog" ]
+  }
+  external_deps += [
+    "drivers_interface_camera:libbuffer_producer_sequenceable_1.0",
+    "drivers_interface_camera:metadata",
+    "hitrace:hitrace_meter",
+    "ipc:ipc_single",
+  ]
+
+  public_configs = [ ":camhdi_impl_config" ]
+  subsystem_name = "device_x86_general"
+  part_name = "device_x86_general"
+}
+
+group("camera_board_vdi_impl") {
+  deps = [
+    ":camera_host_vdi_impl_1.0",
+    ":chipset_build",
+  ]
+}
