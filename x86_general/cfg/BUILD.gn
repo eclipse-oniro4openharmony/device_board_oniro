@@ -29,9 +29,6 @@ ohos_prebuilt_etc("init.x86_general.usb.cfg") {
 
 ohos_prebuilt_etc("fstab.x86_general") {
   source = "fstab.x86_general"
-  if (is_qemu) {
-    source = "fstab.x86_general.qemu"
-  }
   output = "fstab.x86_general"
 
   part_name = "device_x86_general"
