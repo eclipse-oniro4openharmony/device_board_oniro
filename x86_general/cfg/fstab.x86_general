@@ -1,3 +1,3 @@
 # fstab file.
 #<src>                                                  <mnt_point> <type>    <mnt_flags and options>                              <fs_mgr_flags>
-/dev/block/sda4               /data       ext4     discard,noatime,nosuid,nodev,usrquota  wait,check,fileencryption=software,quota
+/dev/block/vdd               /data       ext4     discard,noatime,nosuid,nodev,usrquota  wait,check,fileencryption=software,quota
