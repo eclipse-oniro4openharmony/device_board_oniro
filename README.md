@@ -67,7 +67,6 @@ out/std_emulator/packages/phone/images
 ## Additional targets
 
 - **x23**: target for Volla X23 device. Oniro can be run on the Volla X23 using a layered approach, with Ubuntu Touch as the base OS and Oniro running in an LXC container. Detailed instructions are available in the [Volla X23 documentation](./docs/volla_x23.md).
-- **qemu**: this target facilitates the generation of rootfs that can be used by [meta-openharmony](https://github.com/eclipse-oniro4openharmony/meta-openharmony) for a Yocto based build. 
 
 ## Graphics Stack
 
