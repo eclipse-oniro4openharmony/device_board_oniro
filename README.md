@@ -2,7 +2,7 @@
 
 This repository contains Board Support Packages (BSPs) for devices supported by the Oniro Project, including the Volla X23 phone and the QEMU virtual device. These BSPs enable developers to build and deploy Oniro on supported hardware.
 
-## Oniro Emulator (std_emulator target)
+## Oniro Emulator (x86_general target)
 
 This guide provides step-by-step instructions to **build and run the Oniro Emulator** using the `OpenHarmony-6.0-Release` source. 
 
@@ -25,7 +25,7 @@ repo forall -c 'git lfs pull'
 Run the patching script:
 
 ```bash
-bash vendor/oniro/std_emulator/hook/do_patch.sh
+bash vendor/oniro/x86_general/hook/do_patch.sh
 ```
 
 ### 🛠️ Build the images
@@ -33,7 +33,7 @@ bash vendor/oniro/std_emulator/hook/do_patch.sh
 Start the build with ccache enabled:
 
 ```bash
-./build.sh --product-name std_emulator --ccache --gn-args allow_sanitize_debug=true
+./build.sh --product-name x86_general --ccache --gn-args allow_sanitize_debug=true
 ```
 
 ### 🔄 (Optional) Revert patches
@@ -41,7 +41,7 @@ Start the build with ccache enabled:
 If needed, you can undo the applied patches:
 
 ```bash
-bash vendor/oniro/std_emulator/hook/undo_patch.sh
+bash vendor/oniro/x86_general/hook/undo_patch.sh
 ```
 
 ### ▶️ Run the emulator
@@ -49,7 +49,7 @@ bash vendor/oniro/std_emulator/hook/undo_patch.sh
 After a successful build, emulator image files can be found at:
 
 ```
-out/std_emulator/packages/phone/images
+out/x86_general/packages/phone/images
 ```
 
 #### On Windows
