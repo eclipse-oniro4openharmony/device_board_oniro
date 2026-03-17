@@ -1,0 +1,772 @@
+diff --git a/Makefile b/Makefile
+index f775128fa..9cfa76bcf 100644
+--- a/Makefile
++++ b/Makefile
+@@ -517,11 +517,13 @@ LINUXINCLUDE    := \
+ 		$(USERINCLUDE)
+ 
+ KBUILD_AFLAGS   := -D__ASSEMBLY__ -fno-PIE
+-KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
++KBUILD_CFLAGS   := -Wall -Wno-trigraphs \
+ 		   -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE \
+-		   -Werror=implicit-function-declaration -Werror=implicit-int \
++		   -Werror=implicit-function-declaration \
+ 		   -Werror=return-type -Wno-format-security \
+-		   -std=gnu89 -Werror
++		   -Wno-implicit-int -Wno-unused-function -Wno-int-to-void-pointer-cast \
++		   -Wno-void-pointer-to-int-cast \
++		   -std=gnu99 -Werror
+ KBUILD_CPPFLAGS := -D__KERNEL__
+ KBUILD_AFLAGS_KERNEL :=
+ KBUILD_CFLAGS_KERNEL :=
+diff --git a/drivers/Kconfig b/drivers/Kconfig
+index 8d416451c..8cf076eed 100644
+--- a/drivers/Kconfig
++++ b/drivers/Kconfig
+@@ -234,6 +234,12 @@ source "drivers/interconnect/Kconfig"
+ 
+ source "drivers/counter/Kconfig"
+ 
++source "drivers/hdf/khdf/Kconfig"
++
+ source "drivers/most/Kconfig"
++source "drivers/accesstokenid/Kconfig"
++source "drivers/auth_ctl/Kconfig"
++source "drivers/hooks/Kconfig"
++source "drivers/hck/Kconfig"
+ source "drivers/weibu/Kconfig"
+ endmenu
+diff --git a/drivers/Makefile b/drivers/Makefile
+index 576228037..c5e12e6ab 100644
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -188,4 +188,6 @@ obj-$(CONFIG_SIOX)		+= siox/
+ obj-$(CONFIG_GNSS)		+= gnss/
+ obj-$(CONFIG_INTERCONNECT)	+= interconnect/
+ obj-$(CONFIG_COUNTER)		+= counter/
++obj-$(CONFIG_DRIVERS_HDF)	+= hdf/
+ obj-$(CONFIG_MOST)		+= most/
++obj-$(CONFIG_ACCESS_TOKENID)    += accesstokenid/
+diff --git a/drivers/android/binder.c b/drivers/android/binder.c
+index 1ff6d0dbd..418052e5e 100644
+--- a/drivers/android/binder.c
++++ b/drivers/android/binder.c
+@@ -66,6 +66,10 @@
+ #include <linux/syscalls.h>
+ #include <linux/task_work.h>
+ #include <linux/sizes.h>
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++#include <linux/trace_clock.h>
++#include <linux/proc_fs.h>
++#endif
+ #include <linux/android_vendor.h>
+ 
+ #include <uapi/linux/sched/types.h>
+@@ -94,8 +98,22 @@ static atomic_t binder_last_id;
+ static int proc_show(struct seq_file *m, void *unused);
+ DEFINE_SHOW_ATTRIBUTE(proc);
+ 
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++static int binder_transaction_proc_show(struct seq_file *m, void *unused);
++DEFINE_PROC_SHOW_ATTRIBUTE(binder_transaction_proc);
++#endif
++
+ #define FORBIDDEN_MMAP_FLAGS                (VM_WRITE)
+ 
++#ifdef CONFIG_ACCESS_TOKENID
++#define ENABLE_ACCESS_TOKENID 1
++#else
++#define ENABLE_ACCESS_TOKENID 0
++#endif /* CONFIG_ACCESS_TOKENID */
++
++#define ACCESS_TOKENID_FEATURE_VALUE (ENABLE_ACCESS_TOKENID << 0)
++#define BINDER_CURRENT_FEATURE_SET ACCESS_TOKENID_FEATURE_VALUE
++
+ enum {
+ 	BINDER_DEBUG_USER_ERROR             = 1U << 0,
+ 	BINDER_DEBUG_FAILED_TRANSACTION     = 1U << 1,
+@@ -512,6 +530,16 @@ static void binder_free_thread(struct binder_thread *thread);
+ static void binder_free_proc(struct binder_proc *proc);
+ static void binder_inc_node_tmpref_ilocked(struct binder_node *node);
+ 
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++static inline u64 binder_clock(void)
++{
++#ifdef CONFIG_TRACE_CLOCK
++	return trace_clock_local();
++#endif
++	return 0;
++}
++#endif
++
+ static bool binder_has_work_ilocked(struct binder_thread *thread,
+ 				    bool do_proc_work)
+ {
+@@ -3249,11 +3277,24 @@ static void binder_transaction(struct binder_proc *proc,
+ 			     (u64)tr->data_size, (u64)tr->offsets_size,
+ 			     (u64)extra_buffers_size);
+ 
+-	if (!reply && !(tr->flags & TF_ONE_WAY))
++	if (!reply && !(tr->flags & TF_ONE_WAY)) {
+ 		t->from = thread;
+-	else
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->async_from_pid = -1;
++		t->async_from_tid = -1;
++#endif
++	} else {
+ 		t->from = NULL;
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->async_from_pid = thread->proc->pid;
++		t->async_from_tid = thread->pid;
++#endif
++	}
+ 	t->sender_euid = task_euid(proc->tsk);
++#ifdef CONFIG_ACCESS_TOKENID
++	t->sender_tokenid = current->token;
++	t->first_tokenid = current->ftoken;
++#endif /* CONFIG_ACCESS_TOKENID */
+ 	t->to_proc = target_proc;
+ 	t->to_thread = target_thread;
+ 	t->code = tr->code;
+@@ -3671,6 +3712,9 @@ static void binder_transaction(struct binder_proc *proc,
+ 			goto err_dead_proc_or_thread;
+ 		}
+ 		BUG_ON(t->buffer->async_transaction != 0);
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->timestamp = in_reply_to->timestamp;
++#endif
+ 		binder_pop_transaction_ilocked(target_thread, in_reply_to);
+ 		binder_enqueue_thread_work_ilocked(target_thread, &t->work);
+ 		target_proc->outstanding_txns++;
+@@ -3693,6 +3737,9 @@ static void binder_transaction(struct binder_proc *proc,
+ 		t->need_reply = 1;
+ 		t->from_parent = thread->transaction_stack;
+ 		thread->transaction_stack = t;
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->timestamp = binder_clock();
++#endif
+ 		binder_inner_proc_unlock(proc);
+ 		return_error = binder_proc_transaction(t,
+ 				target_proc, target_thread);
+@@ -3706,6 +3753,9 @@ static void binder_transaction(struct binder_proc *proc,
+ 		BUG_ON(target_node == NULL);
+ 		BUG_ON(t->buffer->async_transaction != 1);
+ 		binder_enqueue_thread_work(thread, tcomplete);
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		t->timestamp = binder_clock();
++#endif
+ 		return_error = binder_proc_transaction(t, target_proc, NULL);
+ 		if (return_error)
+ 			goto err_dead_proc_or_thread;
+@@ -4801,6 +4851,12 @@ static int binder_thread_read(struct binder_proc *proc,
+ 		if (t_from)
+ 			binder_thread_dec_tmpref(t_from);
+ 		t->buffer->allow_user_free = 1;
++#ifdef CONFIG_ACCESS_TOKENID
++		binder_inner_proc_lock(thread->proc);
++		thread->tokens.sender_tokenid = t->sender_tokenid;
++		thread->tokens.first_tokenid = t->first_tokenid;
++		binder_inner_proc_unlock(thread->proc);
++#endif /* CONFIG_ACCESS_TOKENID */
+ 		if (cmd != BR_REPLY && !(t->flags & TF_ONE_WAY)) {
+ 			binder_inner_proc_lock(thread->proc);
+ 			t->to_parent = thread->transaction_stack;
+@@ -5571,6 +5627,39 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ 		}
+ 		break;
+ 	}
++	case BINDER_FEATURE_SET: {
++		struct binder_feature_set features;
++
++		if (size != sizeof(struct binder_feature_set)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		features.feature_set = BINDER_CURRENT_FEATURE_SET;
++		if (copy_to_user(ubuf, &features, sizeof(struct binder_feature_set))) {
++			ret = -EFAULT;
++			goto err;
++		}
++		break;
++	}
++#ifdef CONFIG_ACCESS_TOKENID
++	case BINDER_GET_ACCESS_TOKEN: {
++		struct access_token tokens;
++
++		if (size != sizeof(struct access_token)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		binder_inner_proc_lock(proc);
++		tokens.sender_tokenid = thread->tokens.sender_tokenid;
++		tokens.first_tokenid = thread->tokens.first_tokenid;
++		binder_inner_proc_unlock(proc);
++		if (copy_to_user(ubuf, &tokens, sizeof(struct access_token))) {
++			ret = -EFAULT;
++			goto err;
++		}
++		break;
++	}
++#endif /* CONFIG_ACCESS_TOKENID */
+ 	case BINDER_ENABLE_ONEWAY_SPAM_DETECTION: {
+ 		uint32_t enable;
+ 
+@@ -6583,6 +6672,151 @@ const struct binder_debugfs_entry binder_debugfs_entries[] = {
+ 	{} /* terminator */
+ };
+ 
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++static void print_binder_transaction_brief_ilocked(
++				struct seq_file *m,
++				const char *prefix, struct binder_transaction *t,
++				u64 timestamp)
++{
++	struct binder_proc *to_proc = NULL;
++	int from_pid = 0;
++	int from_tid = 0;
++	int to_pid = 0;
++	u64 sec;
++	u32 nsec;
++
++	spin_lock(&t->lock);
++	to_proc = t->to_proc;
++	from_pid = t->from ? (t->from->proc ? t->from->proc->pid : 0) : t->async_from_pid;
++	from_tid = t->from ? t->from->pid : t->async_from_tid;
++	to_pid = to_proc ? to_proc->pid : 0;
++	sec = div_u64_rem((timestamp - t->timestamp), 1000000000, &nsec);
++
++	seq_printf(m,
++		   "%s%d:%d to %d:%d code %x wait:%llu.%u s\n",
++		   prefix,
++		   from_pid, from_tid,
++		   to_pid, t->to_thread ? t->to_thread->pid : 0,
++		   t->code,
++		   timestamp > t->timestamp ? sec : 0,
++		   timestamp > t->timestamp ? nsec : 0);
++	spin_unlock(&t->lock);
++}
++
++static void print_binder_work_transaction_nilocked(struct seq_file *m,
++				const char *prefix, struct binder_work *w,
++				u64 timestamp)
++{
++	struct binder_transaction *t = NULL;
++
++	switch (w->type) {
++	case BINDER_WORK_TRANSACTION:
++		t = container_of(w, struct binder_transaction, work);
++		print_binder_transaction_brief_ilocked(m, prefix, t, timestamp);
++		break;
++
++	default:
++		break;
++	}
++}
++
++static void print_binder_transaction_brief(struct seq_file *m,
++				struct binder_proc *proc,
++				u64 timestamp)
++{
++	struct binder_work *w = NULL;
++	struct rb_node *n = NULL;
++	struct binder_node *last_node = NULL;
++	size_t start_pos = m->count;
++	size_t header_pos = m->count;
++
++	/* sync binder / not one way */
++	binder_inner_proc_lock(proc);
++	for (n = rb_first(&proc->threads); n != NULL; n = rb_next(n)) {
++		struct binder_thread *thread = rb_entry(n, struct binder_thread, rb_node);
++		struct binder_transaction *t = thread->transaction_stack;
++		while (t) {
++			if (t->from == thread) {
++				print_binder_transaction_brief_ilocked(m, "\t", t, timestamp);
++				t = t->from_parent;
++			} else if (t->to_thread == thread) {
++				t = t->to_parent;
++			} else {
++				t = NULL;
++			}
++		}
++	}
++
++	/* async binder / one way */
++	for (n = rb_first(&proc->nodes); n != NULL; n = rb_next(n)) {
++		struct binder_node *node = rb_entry(n, struct binder_node, rb_node);
++		/*
++		 * take a temporary reference on the node so it
++		 * survives and isn't removed from the tree
++		 * while we print it.
++		 */
++		binder_inc_node_tmpref_ilocked(node);
++		/* Need to drop inner lock to take node lock */
++		binder_inner_proc_unlock(proc);
++		if (last_node)
++			binder_put_node(last_node);
++		binder_node_inner_lock(node);
++		list_for_each_entry(w, &node->async_todo, entry)
++			print_binder_work_transaction_nilocked(m, "async\t", w, timestamp);
++		binder_node_inner_unlock(node);
++		last_node = node;
++		binder_inner_proc_lock(proc);
++	}
++	binder_inner_proc_unlock(proc);
++
++	if (last_node)
++		binder_put_node(last_node);
++
++	if (m->count == header_pos)
++		m->count = start_pos;
++}
++
++static void print_binder_proc_brief(struct seq_file *m,
++				struct binder_proc *proc)
++{
++	struct binder_thread *thread = NULL;
++	int ready_threads = 0;
++	size_t free_async_space = binder_alloc_get_free_async_space(&proc->alloc);
++
++	seq_printf(m, "%d\t", proc->pid);
++	seq_printf(m, "%s\t", proc->context->name);
++
++	binder_inner_proc_lock(proc);
++	list_for_each_entry(thread, &proc->waiting_threads, waiting_thread_node)
++		ready_threads++;
++
++	seq_printf(m, "%d\t%d\t%d\t%d"
++			"\t%zd\n", proc->requested_threads,
++			proc->requested_threads_started, proc->max_threads,
++			ready_threads,
++			free_async_space);
++	binder_inner_proc_unlock(proc);
++}
++
++static int binder_transaction_proc_show(struct seq_file *m, void *unused)
++{
++	struct binder_proc *proc = NULL;
++	u64 now = 0;
++
++	mutex_lock(&binder_procs_lock);
++	now = binder_clock();
++	hlist_for_each_entry(proc, &binder_procs, proc_node)
++		print_binder_transaction_brief(m, proc, now);
++
++	seq_printf(m, "\npid\tcontext\t\trequest\tstarted\tmax\tready\tfree_async_space\n");
++	hlist_for_each_entry(proc, &binder_procs, proc_node)
++		print_binder_proc_brief(m, proc);
++	mutex_unlock(&binder_procs_lock);
++
++	return 0;
++}
++#endif
++
+ static int __init init_binder_device(const char *name)
+ {
+ 	int ret;
+@@ -6640,6 +6874,14 @@ static int __init binder_init(void)
+ 
+ 		binder_debugfs_dir_entry_proc = debugfs_create_dir("proc",
+ 						 binder_debugfs_dir_entry_root);
++
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++		proc_create_data("transaction_proc",
++				 0444,
++				 NULL,
++				 &binder_transaction_proc_proc_ops,
++				 NULL);
++#endif
+ 	}
+ 
+ 	if (!IS_ENABLED(CONFIG_ANDROID_BINDERFS) &&
+diff --git a/drivers/android/binder_internal.h b/drivers/android/binder_internal.h
+index 00010c2e3..65f45c8d6 100644
+--- a/drivers/android/binder_internal.h
++++ b/drivers/android/binder_internal.h
+@@ -528,6 +528,9 @@ struct binder_thread {
+ 	atomic_t tmp_ref;
+ 	bool is_dead;
+ 	struct task_struct *task;
++#ifdef CONFIG_ACCESS_TOKENID
++	struct access_token tokens;
++#endif /* CONFIG_ACCESS_TOKENID */
+ };
+ 
+ /**
+@@ -551,6 +554,11 @@ struct binder_transaction {
+ 	int debug_id;
+ 	struct binder_work work;
+ 	struct binder_thread *from;
++#ifdef CONFIG_BINDER_TRANSACTION_PROC_BRIEF
++	int async_from_pid;
++	int async_from_tid;
++	u64 timestamp;
++#endif
+ 	struct binder_transaction *from_parent;
+ 	struct binder_proc *to_proc;
+ 	struct binder_thread *to_thread;
+@@ -574,6 +582,10 @@ struct binder_transaction {
+ 	 * during thread teardown
+ 	 */
+ 	spinlock_t lock;
++#ifdef CONFIG_ACCESS_TOKENID
++	u64 sender_tokenid;
++	u64 first_tokenid;
++#endif /* CONFIG_ACCESS_TOKENID */
+ 	ANDROID_VENDOR_DATA(1);
+ 	ANDROID_OEM_DATA_ARRAY(1, 2);
+ };
+diff --git a/drivers/hid/hid-core.c b/drivers/hid/hid-core.c
+index b007074a3..70b028feb 100644
+--- a/drivers/hid/hid-core.c
++++ b/drivers/hid/hid-core.c
+@@ -34,6 +34,9 @@
+ #include <linux/hidraw.h>
+ #include <linux/uhid.h>
+ 
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++#include "hdf_hid_adapter.h"
++#endif
+ #include "hid-ids.h"
+ 
+ /*
+@@ -1533,6 +1536,11 @@ static void hid_process_event(struct hid_device *hid, struct hid_field *field,
+ 		hidinput_hid_event(hid, field, usage, value);
+ 	if (hid->claimed & HID_CLAIMED_HIDDEV && interrupt && hid->hiddev_hid_event)
+ 		hid->hiddev_hid_event(hid, field, usage, value);
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++	if (hid->input_dev) {
++		HidReportEvent(hid->input_dev, usage->type, usage->code, value);
++	}
++#endif
+ }
+ 
+ /*
+@@ -1943,6 +1951,81 @@ static const struct device_attribute dev_attr_country = {
+ 	.show = show_country,
+ };
+ 
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++static bool check_mouse(char *name)
++{
++	static char *option[]={"Mouse", "mouse", "MOUSE", "Razer"};
++	for (int i = 0; i < 4; i++) {
++		if (strstr(name, option[i]))
++			return true;
++	}
++	return false;
++}
++static bool check_kbd(char *name)
++{
++	static char *option[]={"Keyboard", "keyboard"};
++	for (int i = 0; i < 2; i++) {
++		if (strstr(name, option[i]))
++			return true;
++	}
++	return false;
++}
++static bool check_rocker(char *name)
++{
++	static char *option[]={"Thrustmaster"};
++	for (int i = 0; i < 1; i++) {
++		if (strstr(name, option[i]))
++			return true;
++	}
++	return false;
++}
++static bool check_encoder(char *name)
++{
++	if (strcmp(name, "Wired KeyBoard") == 0) {
++		return true;
++	}
++	return false;
++}
++static bool check_trackball(char *name)
++{
++	static char *option[]={"Trackball"};
++	for (int i = 0; i < 1; i++) {
++		if (strstr(name, option[i]))
++			return true;
++	}
++	return false;
++}
++static void notify_connect_event(struct hid_device *hdev)
++{
++	bool check;
++	int type = -1;
++	HidInfo *dev = (HidInfo *)kmalloc(sizeof(HidInfo), GFP_KERNEL);
++	if (dev == NULL) {
++		printk("%s: malloc failed", __func__);
++		return;
++	}
++	type = check_mouse(hdev->name)?HID_TYPE_MOUSE:type;
++	type = check_kbd(hdev->name)?HID_TYPE_KEYBOARD:type;
++	type = check_rocker(hdev->name)?HID_TYPE_ROCKER:type;
++	type = check_encoder(hdev->name)?HID_TYPE_ENCODER:type;
++	type = check_trackball(hdev->name)?HID_TYPE_TRACKBALL:type;
++	if ( type < 0) {
++		kfree(dev);
++		dev = NULL;
++		return;
++	}
++
++	dev->devType = type;
++	dev->devName = hdev->name;
++	hdev->input_dev = HidRegisterHdfInputDev(dev);
++	if (hdev->input_dev == NULL) {
++		printk("%s: RegisterInputDevice failed\n", __func__);
++	}
++	kfree(dev);
++	dev = NULL;
++}
++#endif
++
+ int hid_connect(struct hid_device *hdev, unsigned int connect_mask)
+ {
+ 	static const char *types[] = { "Device", "Pointer", "Mouse", "Device",
+@@ -2035,6 +2118,9 @@ int hid_connect(struct hid_device *hdev, unsigned int connect_mask)
+ 	hid_info(hdev, "%s: %s HID v%x.%02x %s [%s] on %s\n",
+ 		 buf, bus, hdev->version >> 8, hdev->version & 0xff,
+ 		 type, hdev->name, hdev->phys);
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++	notify_connect_event(hdev);
++#endif
+ 
+ 	return 0;
+ }
+@@ -2050,6 +2136,10 @@ void hid_disconnect(struct hid_device *hdev)
+ 	if (hdev->claimed & HID_CLAIMED_HIDRAW)
+ 		hidraw_disconnect(hdev);
+ 	hdev->claimed = 0;
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++	if (hdev->input_dev)
++		HidUnregisterHdfInputDev(hdev->input_dev);
++#endif
+ }
+ EXPORT_SYMBOL_GPL(hid_disconnect);
+ 
+@@ -2134,6 +2224,11 @@ EXPORT_SYMBOL_GPL(hid_hw_open);
+  */
+ void hid_hw_close(struct hid_device *hdev)
+ {
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++	if (hdev->input_dev) {
++		return;
++	}
++#endif
+ 	mutex_lock(&hdev->ll_open_lock);
+ 	if (!--hdev->ll_open_count)
+ 		hdev->ll_driver->close(hdev);
+diff --git a/drivers/hid/hid-input.c b/drivers/hid/hid-input.c
+index 339995325..e3f27856f 100644
+--- a/drivers/hid/hid-input.c
++++ b/drivers/hid/hid-input.c
+@@ -20,6 +20,10 @@
+ #include <linux/hid.h>
+ #include <linux/hid-debug.h>
+ 
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++#include "hdf_hid_adapter.h"
++#endif
++
+ #include "hid-ids.h"
+ 
+ #define unk	KEY_UNKNOWN
+@@ -1437,7 +1441,15 @@ void hidinput_report_event(struct hid_device *hid, struct hid_report *report)
+ 		return;
+ 
+ 	list_for_each_entry(hidinput, &hid->inputs, list)
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++	{
++#endif
+ 		input_sync(hidinput->input);
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++		if(hid->input_dev)
++			HidReportEvent(hid->input_dev, EV_SYN, SYN_REPORT, 0);
++	}
++#endif
+ }
+ EXPORT_SYMBOL_GPL(hidinput_report_event);
+ 
+@@ -1888,6 +1900,41 @@ static inline void hidinput_configure_usages(struct hid_input *hidinput,
+ 						 report->field[i]->usage + j);
+ }
+ 
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++static void transfer_info(struct input_dev *dev)
++{
++	HidInfo *info = (HidInfo *)kmalloc(sizeof(HidInfo),GFP_KERNEL);
++	if (info == NULL) {
++		printk("%s: malloc failed\n",__func__);
++		return;
++	}
++	info->devName = dev->name;
++	memcpy(info->devProp, dev->propbit, sizeof(unsigned long) * BITS_TO_LONGS(INPUT_PROP_CNT));
++	memcpy(info->eventType, dev->evbit, sizeof(unsigned long) * BITS_TO_LONGS(EV_CNT));
++	memcpy(info->keyCode, dev->keybit, sizeof(unsigned long) * BITS_TO_LONGS(KEY_CNT));
++	memcpy(info->relCode, dev->relbit, sizeof(unsigned long) * BITS_TO_LONGS(REL_CNT));
++	memcpy(info->absCode, dev->absbit, sizeof(unsigned long) * BITS_TO_LONGS(ABS_CNT));
++	memcpy(info->miscCode, dev->mscbit, sizeof(unsigned long) * BITS_TO_LONGS(MSC_CNT));
++	memcpy(info->ledCode, dev->ledbit, sizeof(unsigned long) * BITS_TO_LONGS(LED_CNT));
++	memcpy(info->soundCode, dev->sndbit, sizeof(unsigned long) * BITS_TO_LONGS(SND_CNT));
++	memcpy(info->forceCode, dev->ffbit, sizeof(unsigned long) * BITS_TO_LONGS(FF_CNT));
++	memcpy(info->switchCode, dev->swbit, sizeof(unsigned long) * BITS_TO_LONGS(SW_CNT));
++	for (int i = 0; i < BITS_TO_LONGS(ABS_CNT); i++) {
++		if (dev->absbit[i] != 0) {
++			memcpy(info->axisInfo, dev->absinfo, sizeof(struct input_absinfo) * ABS_CNT);
++			break;
++		}
++	}
++	info->bustype = dev->id.bustype;
++	info->vendor = dev->id.vendor;
++	info->product = dev->id.product;
++	info->version = dev->id.version;
++	SendInfoToHdf(info);
++	kfree(info);
++	info = NULL;
++}
++#endif
++
+ /*
+  * Register the input device; print a message.
+  * Configure the input layer interface
+@@ -1973,6 +2020,9 @@ int hidinput_connect(struct hid_device *hid, unsigned int force)
+ 			continue;
+ 		}
+ 
++#if defined(CONFIG_DRIVERS_HDF_INPUT)
++		transfer_info(hidinput->input);
++#endif
+ 		if (input_register_device(hidinput->input))
+ 			goto out_unwind;
+ 		hidinput->registered = true;
+diff --git a/drivers/input/mousedev.c b/drivers/input/mousedev.c
+index 505c562a5..67d451beb 100644
+--- a/drivers/input/mousedev.c
++++ b/drivers/input/mousedev.c
+@@ -869,7 +869,7 @@ static struct mousedev *mousedev_create(struct input_dev *dev,
+ 
+ 	if (mixdev) {
+ 		dev_set_name(&mousedev->dev, "mice");
+-
++		mousedev->open = 1;
+ 		mousedev->open_device = mixdev_open_devices;
+ 		mousedev->close_device = mixdev_close_devices;
+ 	} else {
+diff --git a/drivers/staging/Kconfig b/drivers/staging/Kconfig
+index 2d0310448..aa1a875e8 100644
+--- a/drivers/staging/Kconfig
++++ b/drivers/staging/Kconfig
+@@ -29,6 +29,13 @@ source "drivers/staging/wlan-ng/Kconfig"
+ source "drivers/staging/comedi/Kconfig"
+ 
+ source "drivers/staging/olpc_dcon/Kconfig"
++source "drivers/staging/hilog/Kconfig"
++source "drivers/staging/hievent/Kconfig"
++source "drivers/staging/hisysevent/Kconfig"
++source "drivers/staging/hungtask/Kconfig"
++source "drivers/staging/blackbox/Kconfig"
++source "drivers/staging/zerohung/Kconfig"
++source "drivers/staging/ucollection/Kconfig"
+ 
+ source "drivers/staging/rtl8192u/Kconfig"
+ 
+diff --git a/drivers/staging/Makefile b/drivers/staging/Makefile
+index 757a892ab..b9a4579f2 100644
+--- a/drivers/staging/Makefile
++++ b/drivers/staging/Makefile
+@@ -49,3 +49,10 @@ obj-$(CONFIG_KPC2000)		+= kpc2000/
+ obj-$(CONFIG_QLGE)		+= qlge/
+ obj-$(CONFIG_WFX)		+= wfx/
+ obj-y				+= hikey9xx/
++
++obj-$(CONFIG_HILOG)             += hilog/
++obj-$(CONFIG_HIEVENT)           += hievent/
++obj-$(CONFIG_HISYSEVENT)        += hisysevent/
++obj-$(CONFIG_DFX_HUNGTASK)      += hungtask/
++obj-$(CONFIG_BLACKBOX)          += blackbox/
++obj-y                           += zerohung/
+diff --git a/include/linux/hid.h b/include/linux/hid.h
+index 2ba33d708..76793a036 100644
+--- a/include/linux/hid.h
++++ b/include/linux/hid.h
+@@ -624,6 +624,7 @@ struct hid_device {							/* device report descriptor */
+ 	struct list_head debug_list;
+ 	spinlock_t  debug_list_lock;
+ 	wait_queue_head_t debug_wait;
++	void *input_dev;
+ };
+ 
+ #define to_hid_device(pdev) \
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 41c38c2dc..e285bf280 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1208,6 +1208,9 @@ struct task_struct {
+ 
+ 	struct tlbflush_unmap_batch	tlb_ubc;
+ 
++	u64				token;
++	u64				ftoken;
++
+ 	union {
+ 		refcount_t		rcu_users;
+ 		struct rcu_head		rcu;
+diff --git a/include/linux/uidgid.h b/include/linux/uidgid.h
+index b0542cd11..c1f63c558 100644
+--- a/include/linux/uidgid.h
++++ b/include/linux/uidgid.h
+@@ -58,6 +58,9 @@ static inline gid_t __kgid_val(kgid_t gid)
+ #define INVALID_UID KUIDT_INIT(-1)
+ #define INVALID_GID KGIDT_INIT(-1)
+ 
++#define NWEBSPAWN_UID KUIDT_INIT(3081)
++#define GLOBAL_MEMMGR_UID KUIDT_INIT(1111)
++
+ static inline bool uid_eq(kuid_t left, kuid_t right)
+ {
+ 	return __kuid_val(left) == __kuid_val(right);
+diff --git a/include/uapi/linux/android/binder.h b/include/uapi/linux/android/binder.h
+index 7badb670f..a1be431fe 100644
+--- a/include/uapi/linux/android/binder.h
++++ b/include/uapi/linux/android/binder.h
+@@ -298,6 +298,25 @@ struct binder_frozen_status_info {
+ #define BINDER_GET_FROZEN_INFO		_IOWR('b', 15, struct binder_frozen_status_info)
+ #define BINDER_ENABLE_ONEWAY_SPAM_DETECTION	_IOW('b', 16, __u32)
+ 
++struct binder_feature_set {
++	__u64 feature_set;
++};
++
++struct access_token {
++	__u64 sender_tokenid;
++	__u64 first_tokenid;
++	__u64 reserved[2];
++};
++
++struct binder_sender_info {
++	struct access_token tokens;
++	__u64 sender_pid_nr;
++};
++
++#define BINDER_FEATURE_SET      _IOWR('b', 30, struct binder_feature_set)
++#define BINDER_GET_ACCESS_TOKEN _IOWR('b', 31, struct access_token)
++#define BINDER_GET_SENDER_INFO  _IOWR('b', 32, struct binder_sender_info)
++
+ /*
+  * NOTE: Two special error codes you should check for when calling
+  * in to the driver are:
+diff --git a/kernel/fork.c b/kernel/fork.c
+index c47ad81c6..e5d0f076b 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2100,6 +2100,9 @@ static __latent_entropy struct task_struct *copy_process(
+ 	task_io_accounting_init(&p->ioac);
+ 	acct_clear_integrals(p);
+ 
++	p->token = current->token;
++	p->ftoken = 0;
++
+ 	posix_cputimers_init(&p->posix_cputimers);
+ 
+ 	p->io_context = NULL;

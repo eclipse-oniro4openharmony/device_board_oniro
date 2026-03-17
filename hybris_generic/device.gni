@@ -1,0 +1,15 @@
+soc_company = "oniro"
+soc_name = "hybris_generic"
+
+import("//build/ohos.gni")
+if (!defined(defines)) {
+  defines = []
+}
+
+declare_args() {
+  is_support_boot_animation = false
+  is_support_graphic = false
+  is_support_codec = false
+}
+
+product_config_path = "//vendor/${product_company}/${product_name}"

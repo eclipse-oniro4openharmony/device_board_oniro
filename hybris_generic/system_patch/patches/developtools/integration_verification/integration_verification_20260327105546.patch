@@ -1,0 +1,69 @@
+diff --git a/tools/deps_guard/rules/Passthrough/passthrough_info.json b/tools/deps_guard/rules/Passthrough/passthrough_info.json
+index be6f7b5..6633297 100755
+--- a/tools/deps_guard/rules/Passthrough/passthrough_info.json
++++ b/tools/deps_guard/rules/Passthrough/passthrough_info.json
+@@ -59,6 +59,18 @@
+         "path": "//device/soc/rockchip/rk3568/hardware/display:libdisplay_buffer_vdi_impl",
+         "headers": []
+     },
++    {
++        "name": "hdf:libdisplay_buffer_vdi_impl",
++        "so_file_name": "libdisplay_buffer_vdi_impl.z.so",
++        "path": "//device/soc/oniro/hybris_generic/hardware/display:libdisplay_buffer_vdi_impl",
++        "headers": []
++    },
++    {
++        "name": "hdf:libdisplay_composer_vdi_impl",
++        "so_file_name": "libdisplay_composer_vdi_impl.z.so",
++        "path": "//device/soc/oniro/hybris_generic/hardware/display:libdisplay_composer_vdi_impl",
++        "headers": []
++    },
+     {
+         "name": "hdf:libusb_host_interface_service_2.0",
+         "so_file_name": "libusb_host_interface_service_2.0.z.so",
+diff --git a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+index 13306b3..483fa03 100644
+--- a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
++++ b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+@@ -4773,6 +4773,41 @@
+         "dep_file_path": "system/lib/chipset-sdk/libhilog.so",
+         "description": "lib libdisplay_buffer_vdi_impl.z.so with innerapi_tags [passthrough] deps wrong lib libhilog.so contains innerapi_tags [chipsetsdk]"
+     },
++    {
++        "so_file_name": "libdisplay_buffer_vdi_impl.z.so",
++        "so_file_path": "vendor/lib64/passthrough/libdisplay_buffer_vdi_impl.z.so",
++        "dep_file_name": "libgralloc.z.so",
++        "dep_file_path": "system/lib64/libhybris/libgralloc.z.so",
++        "description": "hybris_generic: libdisplay_buffer_vdi_impl.z.so (passthrough) depends on libhybris libgralloc (system-only)"
++    },
++    {
++        "so_file_name": "libdisplay_buffer_vdi_impl.z.so",
++        "so_file_path": "vendor/lib64/passthrough/libdisplay_buffer_vdi_impl.z.so",
++        "dep_file_name": "libhybris-common.z.so",
++        "dep_file_path": "system/lib64/libhybris/libhybris-common.z.so",
++        "description": "hybris_generic: libdisplay_buffer_vdi_impl.z.so (passthrough) depends on libhybris-common (system-only)"
++    },
++    {
++        "so_file_name": "libdisplay_composer_vdi_impl.z.so",
++        "so_file_path": "vendor/lib64/passthrough/libdisplay_composer_vdi_impl.z.so",
++        "dep_file_name": "libhwc2.z.so",
++        "dep_file_path": "system/lib64/libhybris/libhwc2.z.so",
++        "description": "hybris_generic: libdisplay_composer_vdi_impl.z.so (passthrough) depends on libhybris libhwc2 (system-only)"
++    },
++    {
++        "so_file_name": "libdisplay_composer_vdi_impl.z.so",
++        "so_file_path": "vendor/lib64/passthrough/libdisplay_composer_vdi_impl.z.so",
++        "dep_file_name": "libhybris-common.z.so",
++        "dep_file_path": "system/lib64/libhybris/libhybris-common.z.so",
++        "description": "hybris_generic: libdisplay_composer_vdi_impl.z.so (passthrough) depends on libhybris-common (system-only)"
++    },
++    {
++        "so_file_name": "libdisplay_composer_vdi_impl.z.so",
++        "so_file_path": "vendor/lib64/passthrough/libdisplay_composer_vdi_impl.z.so",
++        "dep_file_name": "libhilog.so",
++        "dep_file_path": "system/lib64/chipset-sdk/libhilog.so",
++        "description": "hybris_generic: libdisplay_composer_vdi_impl.z.so (passthrough) depends on libhilog (chipsetsdk)"
++    },
+     {
+         "so_file_name": "libmemory_tracker_interface_service_1.0.z.so",
+         "so_file_path": "vendor/lib/passthrough/libmemory_tracker_interface_service_1.0.z.so",
