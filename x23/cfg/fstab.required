@@ -1,6 +1,0 @@
-# fstab file.
-#<src>                                                  <mnt_point> <type>    <mnt_flags and options>                              <fs_mgr_flags>
-#/dev/block/mmcblk0p2               /usr       ext4     ro,barrier=1  wait,required
-#/dev/block/mmcblk0p3              /vendor        ext4     ro,barrier=1  wait,required
-#/dev/block/sda2               /usr       ext4     ro,barrier=1  wait,required
-#/dev/block/sda3              /vendor        ext4     ro,barrier=1  wait,required

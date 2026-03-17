@@ -1,0 +1,26 @@
+{
+    "name": "@ohos/device_hybris_generic",
+    "version": "3.1",
+    "license": "Apache License 2.0",
+    "private": false,
+    "scripts": {},
+    "dirs": [""],
+    "component": {
+      "name": "device_hybris_generic",
+      "subsystem": "device_hybris_generic",
+      "syscap": [],
+      "features": [],
+      "deps": {
+        "components": [
+          "hilog"
+        ],
+        "third_party": []
+      },
+      "build": {
+        "sub_component": [
+          "//device/board/oniro/hybris_generic:hybris_generic_group"
+        ],
+        "test": []
+      }
+    }
+  }

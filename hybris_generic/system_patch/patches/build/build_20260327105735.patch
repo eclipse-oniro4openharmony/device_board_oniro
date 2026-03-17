@@ -1,0 +1,14 @@
+diff --git a/subsystem_config.json b/subsystem_config.json
+index 578ac460..cb2f4a8b 100644
+--- a/subsystem_config.json
++++ b/subsystem_config.json
+@@ -230,5 +230,9 @@
+   "game": {
+     "path": "domains/game",
+     "name": "game"
++  },
++  "oniro_soc_products": {
++    "path": "device/soc/oniro",
++    "name": "oniro_soc_products"
+   }
+ }

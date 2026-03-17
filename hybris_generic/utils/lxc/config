@@ -1,0 +1,80 @@
+lxc.rootfs.path = /home/phablet/openharmony/rootfs
+lxc.uts.name = openharmony
+
+lxc.log.level = 3
+lxc.log.file = /home/phablet/openharmony/lxc.log
+
+lxc.init.cmd = /init
+
+lxc.environment = container=lxc
+lxc.environment = HOME=/
+lxc.environment = TERM=linux
+lxc.environment = OHOS_RUNTIME_CONFIG=1
+
+# IPC namespace: OHOS must share the Android container's IPC namespace so
+# composer_host can reach hwservicemanager + HWC2 HIDL composer on /dev/hwbinder.
+lxc.namespace.keep = net user
+lxc.namespace.share.ipc = android
+
+lxc.apparmor.profile = unconfined
+lxc.autodev = 1
+
+# PTY support: triggers LXC to mount a new devpts instance on /dev/pts and
+# set up /dev/ptmx inside the container. Without this, /dev/pts is an empty
+# directory and /dev/ptmx does not exist, so hdcd's interactive shell fails
+# with "shell.cpp:261 Cannot open ptmx" -> "[Fail]Shell initialize failed".
+lxc.pty.max = 1024
+
+# Use dedicated OHOS binder devices (NOT /dev/binder which is a symlink to /dev/binderfs/binder).
+# The host Android servicemanager registers as context manager on /dev/binderfs/binder first,
+# so OHOS samgr must use separate devices to avoid binder context collision.
+# These devices are created at boot by /home/phablet/openharmony/create_ohos_binder.py
+# (run by ohos-binder-setup.service before ohos.service).
+lxc.mount.entry = /dev/binderfs/ohos-binder dev/binder bind bind,create=file,optional 0 0
+# hwbinder and vndbinder use the shared host devices so OHOS HDF VDI can reach Android HIDL services
+# (registered on host hwservicemanager on /dev/hwbinder = /dev/binderfs/hwbinder).
+# Only /dev/binder needs to be isolated because Android servicemanager collides with OHOS samgr.
+lxc.mount.entry = /dev/binderfs/hwbinder dev/hwbinder bind bind,create=file,optional 0 0
+lxc.mount.entry = /dev/binderfs/vndbinder dev/vndbinder bind bind,create=file,optional 0 0
+lxc.mount.entry = /dev/ashmem dev/ashmem bind bind,create=file,optional 0 0
+lxc.mount.entry = /dev/kmsg dev/kmsg bind bind,create=file,optional 0 0
+# access_token_id: required for ATM (AccessTokenManager) to identify process tokens.
+# Without this device, GetSelfTokenID() returns 0, causing InitHapToken to fail with
+# ERR_PERMISSION_DENIED (201) and preventing all HAP pre-installation during first boot.
+lxc.mount.entry = /dev/access_token_id dev/access_token_id bind bind,create=file,optional 0 0
+lxc.mount.entry = proc proc proc nodev,noexec,nosuid 0 0
+lxc.mount.entry = sysfs sys sysfs nodev,noexec,nosuid 0 0
+
+lxc.mount.entry = /system  android/system  none bind,ro,create=dir,optional 0 0
+lxc.mount.entry = /vendor  android/vendor  none bind,ro,create=dir,optional 0 0
+lxc.mount.entry = /odm    android/odm     none bind,ro,create=dir,optional 0 0
+lxc.mount.entry = /apex   apex            none rbind,ro,create=dir,optional 0 0
+lxc.mount.entry = /dev/dma_heap  dev/dma_heap  none bind,create=dir,optional 0 0
+lxc.mount.entry = /dev/mali0    dev/mali0    none bind,create=file,optional 0 0
+lxc.mount.entry = /dev/dri      dev/dri      none rbind,create=dir,optional 0 0
+lxc.mount.entry = /dev/input   dev/input    none rbind,create=dir,optional 0 0
+lxc.mount.entry = /dev/rfkill  dev/rfkill   none bind,create=file,optional 0 0
+
+lxc.mount.entry = /dev/__properties__ dev/__properties__ none bind,create=dir,optional 0 0
+
+# Android EGL implementations at /vendor/lib64/egl/ (Android libEGL.so uses hardcoded /vendor/ paths)
+lxc.mount.entry = /vendor/lib64/egl  vendor/lib64/egl  none bind,ro,create=dir,optional 0 0
+
+# Android gralloc/HIDL mapper HAL implementations at /vendor/lib64/hw/
+# Required for GraphicBufferMapper (libui) to load the gralloc passthrough mapper via
+# android_load_sphal_library("/vendor/lib64/hw/android.hardware.graphics.mapper@4.0-impl*.so").
+# Both access() path-existence checks (in hw_get_module) and dlopen calls need the path to exist.
+lxc.mount.entry = /vendor/lib64/hw  vendor/lib64/hw  none bind,ro,create=dir,optional 0 0
+
+# NOTE: Android system EGL/GLES dispatch wrapper bind mounts intentionally absent.
+# These were present in phase 5.7a but removed (2026-03-20) because they caused a
+# critical namespace collision: OHOS's linker searches /system/lib64/ before
+# /system/lib64/platformsdk/, so Android's libEGL.so (which needs libbacktrace.so)
+# shadowed the OHOS opengl_wrapper's libEGL.so (in platformsdk/). Every OHOS service
+# that links against libEGL.so (libwms, libbms, libresschedsvc, etc.) would fail to
+# load with "Error loading shared library libbacktrace.so: (needed by libEGL.so)".
+# Android libs (libGLES_mali.so etc.) resolve their EGL/GLES deps via the hybris
+# Android linker, which remaps /system/lib64/ -> /android/system/lib64/ internally.
+
+lxc.cgroup.devices.allow = a
+lxc.cgroup2.devices.allow = a
