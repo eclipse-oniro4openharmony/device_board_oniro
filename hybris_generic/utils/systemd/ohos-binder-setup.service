@@ -1,0 +1,16 @@
+[Unit]
+Description=Create dedicated binder devices for OpenHarmony LXC container
+Documentation=device/board/oniro/docs/hybris_generic_notes.md
+# Must run before the OHOS container starts
+Before=ohos.service
+# Must run after udev has set up /dev/binderfs
+After=systemd-udevd.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /home/phablet/openharmony/create-ohos-binder-devices.py
+
+[Install]
+WantedBy=multi-user.target

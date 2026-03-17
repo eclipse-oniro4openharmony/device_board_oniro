@@ -1,0 +1,12 @@
+import("//build/ohos.gni")
+import("device.gni")
+
+group("hybris_generic_group") {
+  deps = [
+    "cfg:hybris_graphic_env_group",
+    "cfg:hybris_input_caps_group",
+    "cfg:hybris_hdcd_autostart_group",
+    "cfg:hybris_container_fixes_group",
+    "cfg:hybris_hdf_env_group",
+  ]
+}

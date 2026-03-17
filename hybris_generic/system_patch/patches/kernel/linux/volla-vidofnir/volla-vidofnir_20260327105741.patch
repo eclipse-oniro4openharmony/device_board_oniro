@@ -1,0 +1,15 @@
+diff --git a/deviceinfo b/deviceinfo
+index 84d1555..1766ce5 100644
+--- a/deviceinfo
++++ b/deviceinfo
+@@ -4,8 +4,8 @@ deviceinfo_codename="vidofnir"
+ deviceinfo_arch="aarch64"
+ deviceinfo_kernel_source="https://gitlab.com/ubports/porting/reference-device-ports/halium12/volla-x23/kernel-volla-mt6789.git"
+ deviceinfo_kernel_source_branch="halium-12.0"
+-deviceinfo_kernel_defconfig="gki_defconfig gx4.config entry_level.config halium.config"
+-deviceinfo_kernel_cmdline="bootopt=64S3,32N2,64N2 systempart=/dev/mapper/system"
++deviceinfo_kernel_defconfig="gki_defconfig gx4.config entry_level.config halium.config openharmony.config"
++deviceinfo_kernel_cmdline="bootopt=64S3,32N2,64N2 systempart=/dev/mapper/system hardware=x23 ohos.boot.sn=0a20230726rpi"
+ deviceinfo_kernel_clang_compile="true"
+ deviceinfo_kernel_llvm_compile="true"
+ deviceinfo_ramdisk_compression="lz4"

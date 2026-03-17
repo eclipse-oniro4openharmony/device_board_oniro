@@ -1,0 +1,40 @@
+diff --git a/utils/src/mkdtboimg.py b/utils/src/mkdtboimg.py
+index c2dbb08..2beaa52 100755
+--- a/utils/src/mkdtboimg.py
++++ b/utils/src/mkdtboimg.py
+@@ -212,7 +212,7 @@ class Dtbo(object):
+         Tree table entries and update the DTBO header.
+         """
+ 
+-        self.__metadata = array('c', ' ' * self.__metadata_size)
++        self.__metadata = bytearray(self.__metadata_size)
+         metadata_offset = self.header_size
+         for dt_entry in self.__dt_entries:
+             self._update_dt_entry_header(dt_entry, metadata_offset)
+@@ -258,7 +258,7 @@ class Dtbo(object):
+         if self.__dt_entries:
+             raise ValueError('DTBO DT entries can be added only once')
+ 
+-        offset = self.dt_entries_offset / 4
++        offset = self.dt_entries_offset // 4
+         params = {}
+         params['dt_file'] = None
+         for i in range(0, self.dt_entry_count):
+@@ -292,7 +292,7 @@ class Dtbo(object):
+         num_ints = (self._DT_TABLE_HEADER_INTS +
+                     self.dt_entry_count * self._DT_ENTRY_HEADER_INTS)
+         if self.dt_entries_offset > self._DT_TABLE_HEADER_SIZE:
+-            num_ints += (self.dt_entries_offset - self._DT_TABLE_HEADER_SIZE) / 4
++            num_ints += (self.dt_entries_offset - self._DT_TABLE_HEADER_SIZE) // 4
+         format_str = '>' + str(num_ints) + 'I'
+         self.__file.seek(0)
+         self.__metadata = struct.unpack(format_str,
+@@ -512,7 +512,7 @@ def parse_dt_entries(global_args, arg_list):
+         raise ValueError('Input DT images must be provided')
+ 
+     total_images = len(img_file_idx)
+-    for idx in xrange(total_images):
++    for idx in range(total_images):
+         start_idx = img_file_idx[idx]
+         if idx == total_images - 1:
+             argv = arg_list[start_idx:]

@@ -1,0 +1,87 @@
+# Copyright (c) 2026 Oniro Project
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import("//build/ohos.gni")
+
+# Install the hybris-specific render_service env var override into
+# /system/etc/init/. The init system loads all .cfg files from this directory
+# on normal boot (via ParseCfgByPriority("etc/init")). This file redefines
+# render_service with the same fields as foundation/graphic/graphic_2d/graphic.cfg
+# plus the libhybris env vars needed to load the Mali GPU via the Android HAL:
+#
+#   LIBEGL / LIBGLESV2: point libhybris at the vendor Mali EGL/GLES impl
+#   HYBRIS_LD_LIBRARY_PATH: Android bionic linker search path (for libhybris)
+#   LD_LIBRARY_PATH: OHOS musl linker search path (for libhybris platform plugins)
+#
+# On MUSL builds, init merges duplicate service definitions rather than
+# ignoring the second one (see init_service_manager.c), so this file
+# is safe even if loaded before graphic.cfg.
+ohos_prebuilt_etc("hybris_graphic_env") {
+  source = "hybris_graphic_env.cfg"
+  relative_install_dir = "init"
+  install_images = [ "system" ]
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
+group("hybris_graphic_env_group") {
+  deps = [ ":hybris_graphic_env" ]
+}
+
+ohos_prebuilt_etc("hybris_input_caps") {
+  source = "z_multimodalinput_caps.cfg"
+  relative_install_dir = "init"
+  install_images = [ "system" ]
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
+group("hybris_input_caps_group") {
+  deps = [ ":hybris_input_caps" ]
+}
+
+ohos_prebuilt_etc("hybris_hdcd_autostart") {
+  source = "z_hdcd_autostart.cfg"
+  relative_install_dir = "init"
+  install_images = [ "system" ]
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
+group("hybris_hdcd_autostart_group") {
+  deps = [ ":hybris_hdcd_autostart" ]
+}
+
+ohos_prebuilt_etc("hybris_container_fixes") {
+  source = "z_container_fixes.cfg"
+  relative_install_dir = "init"
+  install_images = [ "system" ]
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
+group("hybris_container_fixes_group") {
+  deps = [ ":hybris_container_fixes" ]
+}
+
+ohos_prebuilt_etc("hybris_hdf_env") {
+  source = "z_hybris_hdf_env.cfg"
+  relative_install_dir = "init"
+  install_images = [ "system" ]
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
+group("hybris_hdf_env_group") {
+  deps = [ ":hybris_hdf_env" ]
+}

@@ -1,0 +1,86 @@
+diff --git a/appdata-sandbox.json b/appdata-sandbox.json
+index b0df2499..72c9ae64 100644
+--- a/appdata-sandbox.json
++++ b/appdata-sandbox.json
+@@ -213,6 +213,21 @@
+                     "sandbox-path" : "/data/storage/el2/media",
+                     "sandbox-flags" : [ "bind", "rec" ],
+                     "check-action-status": "false"
++                }, {
++                    "src-path" : "/android",
++                    "sandbox-path" : "/android",
++                    "sandbox-flags" : [ "bind", "rec" ],
++                    "check-action-status": "false"
++                }, {
++                    "src-path" : "/apex",
++                    "sandbox-path" : "/apex",
++                    "sandbox-flags" : [ "bind", "rec" ],
++                    "check-action-status": "false"
++                }, {
++                    "src-path" : "/data/log/sanitizer",
++                    "sandbox-path" : "/data/log/sanitizer",
++                    "sandbox-flags" : [ "bind", "rec" ],
++                    "check-action-status": "false"
+                 }, {
+                     "src-path" : "/vendor/etc/passthrough",
+                     "sandbox-path" : "/vendor/etc/passthrough",
+diff --git a/appspawn.cfg b/appspawn.cfg
+index 4e139471..3a9faf9e 100644
+--- a/appspawn.cfg
++++ b/appspawn.cfg
+@@ -54,7 +54,14 @@
+             "sandbox" : 0,
+             "start-mode" : "boot",
+             "secon" : "u:r:appspawn:s0",
+-            "bootevents" : "bootevent.appspawn.started"
++            "bootevents" : "bootevent.appspawn.started",
++            "env" : [
++                {"name": "LIBEGL",                 "value": "/android/vendor/lib64/egl/libGLES_mali.so"},
++                {"name": "LIBGLESV2",              "value": "/android/vendor/lib64/egl/libGLES_mali.so"},
++                {"name": "HYBRIS_LD_LIBRARY_PATH", "value": "/android/vendor/lib64:/android/system/lib64"},
++                {"name": "LD_LIBRARY_PATH",        "value": "/system/lib64/libhybris:/system/lib64"},
++                {"name": "HYBRIS_EGLPLATFORM",     "value": "ohos"}
++            ]
+         }
+     ]
+ }
+diff --git a/modules/common/appspawn_adapter.cpp b/modules/common/appspawn_adapter.cpp
+index aa5504c8..f602d7f5 100644
+--- a/modules/common/appspawn_adapter.cpp
++++ b/modules/common/appspawn_adapter.cpp
+@@ -44,8 +44,10 @@ using GetPermissionFunc = int32_t (*)(void *, const char *);
+ using namespace OHOS::Security::AccessToken;
+ 
+ static const uint64_t TOKEN_ID_LOWMASK = 0xffffffff;
++#ifdef WITH_SELINUX
+ void CheckSpecialSpawnMode(const AppSpawnMgr *content, const AppSpawningCtx *property,
+     HapDomainInfo *hapDomainInfo);
++#endif
+ 
+ int SetAppAccessToken(const AppSpawnMgr *content, const AppSpawningCtx *property)
+ {
+@@ -278,7 +280,11 @@ int32_t SetEnvInfo(const AppSpawnMgr *content, const AppSpawningCtx *property)
+ 
+ int LoadSeLinuxConfig(void)
+ {
++#ifdef WITH_SELINUX
+     return HapContextLoadConfig();
++#else
++    return 0;
++#endif
+ }
+ 
+ uint32_t GetHostId(const AppSpawningCtx *property)
+@@ -299,6 +305,7 @@ uint32_t GetHostId(const AppSpawningCtx *property)
+     return hostId;
+ }
+ 
++#ifdef WITH_SELINUX
+ void CheckSpecialSpawnMode(const AppSpawnMgr *content, const AppSpawningCtx *property,
+     HapDomainInfo *hapDomainInfo)
+ {
+@@ -318,3 +325,4 @@ void CheckSpecialSpawnMode(const AppSpawnMgr *content, const AppSpawningCtx *pro
+         hapDomainInfo->hapFlags |= SELINUX_HAP_ISOLATED_RENDER;
+     }
+ }
++#endif
