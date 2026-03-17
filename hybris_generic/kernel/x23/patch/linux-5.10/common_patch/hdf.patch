@@ -1,0 +1,96 @@
+diff --git a/arch/arm/kernel/vmlinux.lds.S b/arch/arm/kernel/vmlinux.lds.S
+index f7f4620d5..fb0257db6 100644
+--- a/arch/arm/kernel/vmlinux.lds.S
++++ b/arch/arm/kernel/vmlinux.lds.S
+@@ -121,6 +121,14 @@ SECTIONS
+ 		__pv_table_end = .;
+ 	}
+ 
++#ifdef CONFIG_DRIVERS_HDF
++	.init.hdf_table : {
++		_hdf_drivers_start = .;
++		*(.hdf.driver)
++		_hdf_drivers_end = .;
++	}
++#endif
++
+ 	INIT_DATA_SECTION(16)
+ 
+ 	.exit.data : {
+diff --git a/arch/arm64/kernel/vmlinux.lds.S b/arch/arm64/kernel/vmlinux.lds.S
+index 786a635b3..90f5f6a95 100644
+--- a/arch/arm64/kernel/vmlinux.lds.S
++++ b/arch/arm64/kernel/vmlinux.lds.S
+@@ -229,6 +229,15 @@ SECTIONS
+ 		INIT_RAM_FS
+ 		*(.init.altinstructions .init.rodata.* .init.bss)	/* from the EFI stub */
+ 	}
++
++#ifdef CONFIG_DRIVERS_HDF
++	.init.hdf_table : {
++		_hdf_drivers_start = .;
++		*(.hdf.driver)
++		_hdf_drivers_end = .;
++	}
++#endif
++
+ 	.exit.data : {
+ 		EXIT_DATA
+ 	}
+diff --git a/drivers/Kconfig b/drivers/Kconfig
+index 666e65729..8f19b0f89 100755
+--- a/drivers/Kconfig
++++ b/drivers/Kconfig
+@@ -234,6 +234,8 @@ source "drivers/interconnect/Kconfig"
+ 
+ source "drivers/counter/Kconfig"
+ 
++source "drivers/hdf/khdf/Kconfig"
++
+ source "drivers/most/Kconfig"
+ # begin, prize-lifenfen-20180117, add for resmon
+ source "drivers/resmon/Kconfig"
+diff --git a/drivers/Makefile b/drivers/Makefile
+index 55e4ae9c7..9ca8f705f 100755
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -188,6 +188,7 @@ obj-$(CONFIG_SIOX)		+= siox/
+ obj-$(CONFIG_GNSS)		+= gnss/
+ obj-$(CONFIG_INTERCONNECT)	+= interconnect/
+ obj-$(CONFIG_COUNTER)		+= counter/
++obj-$(CONFIG_DRIVERS_HDF)	+= hdf/
+ obj-$(CONFIG_MOST)		+= most/
+ # begin, prize-lifenfen-20180117, add for resmon
+ obj-m             += resmon/
+diff --git a/drivers/hdf/Makefile b/drivers/hdf/Makefile
+new file mode 100644
+index 000000000..5c5e1911c
+--- /dev/null
++++ b/drivers/hdf/Makefile
+@@ -0,0 +1,2 @@
++export PROJECT_ROOT := ../../../../../
++obj-$(CONFIG_DRIVERS_HDF) += khdf/
+diff --git a/drivers/hid/Makefile b/drivers/hid/Makefile
+index 8a06d0f84..5e3382ccd 100644
+--- a/drivers/hid/Makefile
++++ b/drivers/hid/Makefile
+@@ -2,6 +2,19 @@
+ #
+ # Makefile for the HID driver
+ #
++ifeq ($(CONFIG_DRIVERS_HDF), y)
++HDF_KHDF_PATH := $(srctree)/drivers/hdf/khdf
++
++HDF_OSAL_INC := -I$(HDF_KHDF_PATH)/osal/include
++HDF_FRAMEWORK_INC := -I$(srctree)/drivers/hdf/framework/include \
++                     -I$(srctree)/drivers/hdf/framework/include/utils \
++                     -I$(srctree)/drivers/hdf/framework/include/core \
++                     -I$(srctree)/drivers/hdf/framework/include/osal \
++                     -I$(srctree)/drivers/hdf/framework/core/host/include \
++                     -I$(srctree)/drivers/hdf/framework/core/manager/include
++
++ccflags-y += $(HDF_OSAL_INC) $(HDF_FRAMEWORK_INC)
++endif
+ 
+ hid-y			:= hid-core.o hid-input.o hid-quirks.o
+ hid-$(CONFIG_DEBUG_FS)		+= hid-debug.o

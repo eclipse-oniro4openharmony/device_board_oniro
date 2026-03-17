@@ -1,0 +1,17 @@
+diff --git a/framework/policycoreutils/src/selinux_restorecon.c b/framework/policycoreutils/src/selinux_restorecon.c
+index 5e00d1895..3b1dada1b 100644
+--- a/framework/policycoreutils/src/selinux_restorecon.c
++++ b/framework/policycoreutils/src/selinux_restorecon.c
+@@ -51,6 +51,12 @@ static void SetFileContextsHandle(void)
+         options[index++] = vendorOption;
+     }
+ 
++    if (index == 0) {
++        // No file_contexts files found - skip selabel_open to avoid crash in container/SELinux-disabled environments
++        selinux_log(SELINUX_WARNING, "No file_contexts files found, skipping restorecon handle init\n");
++        return;
++    }
++
+     // default option of selabel_open
+     SelinuxOptions digestOption = {SELABEL_OPT_DIGEST, (char *)1};
+     options[index++] = digestOption;

@@ -1,0 +1,49 @@
+diff --git a/frameworks/libhilog/hilog_printf.cpp b/frameworks/libhilog/hilog_printf.cpp
+index 5ed9843..e16aec6 100644
+--- a/frameworks/libhilog/hilog_printf.cpp
++++ b/frameworks/libhilog/hilog_printf.cpp
+@@ -235,11 +235,7 @@ static int LogToKmsg(const LogLevel level, const char *tag, const char* info)
+ 
+ bool HiLogIsPrivacyOn()
+ {
+-    bool priv = true;
+-#if not (defined( __WINDOWS__ ) || defined( __MAC__ ) || defined( __LINUX__ ))
+-    priv = (!IsDebugOn()) && IsPrivateSwitchOn();
+-#endif
+-    return priv;
++    return false;
+ }
+ 
+ int HiLogPrintDictNew(const LogType type, const LogLevel level, const unsigned int domain, const char *tag,
+diff --git a/frameworks/libhilog/param/properties.cpp b/frameworks/libhilog/param/properties.cpp
+index 0c5d9b0..824d304 100644
+--- a/frameworks/libhilog/param/properties.cpp
++++ b/frameworks/libhilog/param/properties.cpp
+@@ -301,11 +301,7 @@ static uint16_t TextToLogLevel(const RawPropertyData& data, uint16_t defaultVal)
+ 
+ bool IsPrivateSwitchOn()
+ {
+-    static auto *switchCache = new SwitchCache(TextToBool, true, PropType::PROP_PRIVATE);
+-    if (switchCache == nullptr) {
+-        return false;
+-    }
+-    return switchCache->getValue();
++    return false;
+ }
+ 
+ bool IsOnceDebugOn()
+diff --git a/services/hilogd/main.cpp b/services/hilogd/main.cpp
+index 7daa6bf..bc1ad6c 100644
+--- a/services/hilogd/main.cpp
++++ b/services/hilogd/main.cpp
+@@ -189,6 +189,10 @@ int HilogdEntry()
+     }
+ 
+     ffrt::submit([]() {
++        char *container = getenv("container");
++        if (container != NULL) {
++            return;
++        }
+         string myPid = to_string(getprocpid());
+         (void)WriteStringToFile(myPid, SYSTEM_BG_STUNE);
+         (void)WriteStringToFile(myPid, SYSTEM_BG_CPUSET);

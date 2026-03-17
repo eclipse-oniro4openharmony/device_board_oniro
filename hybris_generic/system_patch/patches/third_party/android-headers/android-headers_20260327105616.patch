@@ -1,0 +1,13 @@
+diff --git a/android-version.h b/android-version.h
+index 9c6b6fb..e6abd00 100644
+--- a/android-version.h
++++ b/android-version.h
+@@ -1,7 +1,7 @@
+ #ifndef ANDROID_VERSION_H_
+ #define ANDROID_VERSION_H_
+ 
+-#define ANDROID_VERSION_MAJOR 11
++#define ANDROID_VERSION_MAJOR 12
+ #define ANDROID_VERSION_MINOR 0
+ #define ANDROID_VERSION_PATCH 0
+ #define ANDROID_VERSION_PATCH2 0
