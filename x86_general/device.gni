@@ -20,7 +20,7 @@ if (!defined(defines)) {
 }
 
 declare_args() {
-  is_support_boot_animation = true
+  is_support_boot_animation = false
   is_support_graphic = true
   is_support_codec = true
 }
