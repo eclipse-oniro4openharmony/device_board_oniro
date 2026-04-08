@@ -4,18 +4,18 @@ This repository contains Board Support Packages (BSPs) for devices supported by 
 
 ## Oniro Emulator (x86_general target)
 
-This guide provides step-by-step instructions to **build and run the Oniro Emulator** using the `OpenHarmony-6.0-Release` source. 
+This guide provides step-by-step instructions to **build and run the Oniro Emulator** using the `OpenHarmony-6.1-Release` source. 
 
 ### 📦 Prerequisites
 
-Before proceeding, make sure you have followed the [Quick Build Setup](https://docs.oniroproject.org/device-development/building-oniro.html) guide to prepare your build environment.
+Before proceeding, make sure you have followed the [Quick Build Setup](https://docs.oniroproject.org/device-development/building-oniro/) guide to prepare your build environment.
 
 ### ⬇️ Download Oniro Source Code
 
 Use the following commands to fetch the Oniro source:
 
 ```bash
-repo init -u https://github.com/eclipse-oniro4openharmony/manifest.git -b OpenHarmony-6.0-Release -m oniro.xml --no-repo-verify
+repo init -u https://github.com/eclipse-oniro4openharmony/manifest.git -b OpenHarmony-6.1-Release -m oniro.xml --no-repo-verify
 repo sync -c
 repo forall -c 'git lfs pull'
 ```
@@ -33,7 +33,7 @@ bash vendor/oniro/x86_general/hook/do_patch.sh
 Start the build with ccache enabled:
 
 ```bash
-./build.sh --product-name x86_general --ccache --gn-args allow_sanitize_debug=true
+./build.sh --product-name x86_general --ccache
 ```
 
 ### 🔄 (Optional) Revert patches
