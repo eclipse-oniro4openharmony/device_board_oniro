@@ -146,6 +146,7 @@ adb push $ROOTFS_TARBALL_PATH /home/phablet/openharmony/ && log "Root filesystem
 log "Pushing additional files to device..."
 adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/lxc/config /home/phablet/openharmony/ && log "Config file pushed."
 adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/start-ohos.sh /home/phablet/openharmony/ && log "Start script pushed."
+adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/ohos-post-stop.sh /home/phablet/openharmony/ && log "Post-stop hook script pushed."
 adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/systemd/ohos.service /home/phablet/openharmony/ && log "Service file pushed."
 adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/systemd/ohos-binder-setup.service /home/phablet/openharmony/ && log "Binder setup service file pushed."
 adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/create-ohos-binder-devices.py /home/phablet/openharmony/ && log "Binder device creation script pushed."
@@ -163,6 +164,7 @@ adb shell "echo $DEVICE_PASSWORD | sudo -S tar -xzf /home/phablet/openharmony/$(
 
 log "Setting permissions and moving service files..."
 adb shell chmod +x /home/phablet/openharmony/start-ohos.sh && log "Made start script executable."
+adb shell chmod +x /home/phablet/openharmony/ohos-post-stop.sh && log "Made post-stop hook executable."
 # Make sandbox configs world-readable so nwebspawn (uid 3081, not root) can
 # load them at preload time. Upstream appdata_sandbox_fixer.py installs these
 # with mode 0660 which umask trims to 0640; on a real OHOS image fs_config
