@@ -116,6 +116,21 @@ printf "[Login]\nHandlePowerKey=ignore\nHandlePowerKeyLongPress=ignore\n" \
 systemctl kill -s HUP systemd-logind
 echo "logind power key handling disabled." | tee -a $LOG_FILE
 
+# ── Fix perms on bind-mounted device nodes ──────────────────────────────
+# OHOS init's `chmod`/`chown` cfg commands are stubbed out in container mode
+# (base/startup/init/services/init/init_common_cmds.c DoChmod/DoChown), so the
+# `z_container_fixes.cfg` boot job is a no-op. Apply these on the host instead
+# so they take effect before container start. Without them, foundation fails
+# to open /dev/access_token_id (EACCES) and the system hangs at the last boot
+# animation frame; multimodalinput fails to open /dev/input/event* O_RDWR.
+echo "Fixing permissions on bind-mounted device nodes..." | tee -a $LOG_FILE
+if [ -e /dev/access_token_id ]; then
+    chmod 0666 /dev/access_token_id
+fi
+for ev in /dev/input/event*; do
+    [ -e "$ev" ] && chmod 0666 "$ev"
+done
+
 # ── Prepare container → host shutdown-request flag ──────────────────────
 # OHOS init writes "poweroff" / "reboot" to /ohos-host-action (a bind mount
 # of this file) before calling the reboot syscall. The ohos-post-stop.sh
