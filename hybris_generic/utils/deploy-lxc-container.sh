@@ -163,6 +163,14 @@ adb shell "echo $DEVICE_PASSWORD | sudo -S tar -xzf /home/phablet/openharmony/$(
 
 log "Setting permissions and moving service files..."
 adb shell chmod +x /home/phablet/openharmony/start-ohos.sh && log "Made start script executable."
+# Make sandbox configs world-readable so nwebspawn (uid 3081, not root) can
+# load them at preload time. Upstream appdata_sandbox_fixer.py installs these
+# with mode 0660 which umask trims to 0640; on a real OHOS image fs_config
+# rewrites them, but our LXC rootfs keeps the literal mode. Without this,
+# LoadAppSandboxConfigCJson silently fails inside nwebspawn, the render
+# sandbox mount-paths are skipped, and every webview renderer exits in
+# SetFileDescriptors trying to open /dev/null. See README.md Phase 8.18.
+adb shell "echo $DEVICE_PASSWORD | sudo -S chmod 0644 /home/phablet/openharmony/rootfs/system/etc/sandbox/appdata-sandbox.json /home/phablet/openharmony/rootfs/system/etc/sandbox/appdata-sandbox-isolated.json" && log "Made sandbox configs world-readable for nwebspawn."
 adb shell "echo $DEVICE_PASSWORD | sudo -S mv /home/phablet/openharmony/ohos.service /lib/systemd/system" && log "Moved ohos service file to systemd directory."
 adb shell "echo $DEVICE_PASSWORD | sudo -S mv /home/phablet/openharmony/ohos-binder-setup.service /lib/systemd/system" && log "Moved binder setup service file to systemd directory."
 adb shell "echo $DEVICE_PASSWORD | sudo -S systemctl enable ohos" && log "Enabled ohos systemd service."
