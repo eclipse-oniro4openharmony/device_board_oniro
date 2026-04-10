@@ -76,5 +76,14 @@ lxc.mount.entry = /vendor/lib64/hw  vendor/lib64/hw  none bind,ro,create=dir,opt
 # Android libs (libGLES_mali.so etc.) resolve their EGL/GLES deps via the hybris
 # Android linker, which remaps /system/lib64/ -> /android/system/lib64/ internally.
 
+# Container-to-host shutdown propagation: OHOS init writes "poweroff" or
+# "reboot" to /ohos-host-action before calling the reboot syscall (which the
+# kernel otherwise converts into plain PID-namespace termination inside LXC).
+# The host-side post-stop hook then invokes systemctl poweroff/reboot so the
+# user-requested power action reaches Ubuntu Touch. See
+# device/board/oniro/docs/hybris_generic/phase11_power_off_and_backlight_plan.md Fix 2.
+lxc.mount.entry = /run/ohos-host-action ohos-host-action none bind,create=file,optional 0 0
+lxc.hook.post-stop = /home/phablet/openharmony/ohos-post-stop.sh
+
 lxc.cgroup.devices.allow = a
 lxc.cgroup2.devices.allow = a
