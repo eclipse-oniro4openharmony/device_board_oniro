@@ -116,6 +116,16 @@ printf "[Login]\nHandlePowerKey=ignore\nHandlePowerKeyLongPress=ignore\n" \
 systemctl kill -s HUP systemd-logind
 echo "logind power key handling disabled." | tee -a $LOG_FILE
 
+# ── Prepare container → host shutdown-request flag ──────────────────────
+# OHOS init writes "poweroff" / "reboot" to /ohos-host-action (a bind mount
+# of this file) before calling the reboot syscall. The ohos-post-stop.sh
+# lxc hook reads the flag after the container exits and runs systemctl
+# poweroff/reboot so the shutdown request reaches Ubuntu Touch. /run is
+# tmpfs, so the file must be (re)created fresh on each container start.
+echo "Preparing host shutdown-request flag..." | tee -a $LOG_FILE
+: > /run/ohos-host-action
+chmod 0666 /run/ohos-host-action
+
 # ── Start the OpenHarmony container ──────────────────────────────────────
 echo "Starting OpenHarmony container..." | tee -a $LOG_FILE
 /usr/bin/lxc-start -n openharmony -F 2>&1 | tee -a $LOG_FILE
