@@ -686,3 +686,67 @@ EGLBoolean _my_eglSwapBuffersWithDamageEXT(...) {
 
 **Status:** FIXED (2026-04-09). Deployed and verified: 5 rapid dropdown open/close cycles with no crash. `com.ohos.systemui` PID remains stable throughout.
 
+---
+
+## 8.18 — Webview (ArkWeb / nweb render) Fails to Load in Any Webview App (FIXED)
+
+### Symptom
+
+Any app embedding an `@ohos/arkweb` webview (e.g. `io.ionic.starter`) launches but the webview area stays blank. hilog shows a tight loop of:
+
+```
+C04500/chromium: NWebId: 1 render process exit, reason = 4 reason info = process exit unknown
+C02c11/APPSPAWN: [appspawn_common.c:350]open dev_null error: 2
+C02c11/APPSPAWN: [appspawn_modulemgr.c:214]Execute hook [31] result -2
+```
+
+The main app process (`io.ionic.starter`, chromium browser-side) runs fine and even logs `[arkweb_child_process_launcher_helper_utils.cc:73] Initiate a request to AMS to create a child process, child type: renderer`. But the spawned `web_render` child exits with `result:-2` (`-ENOENT`) before running a single line of user code. Every subsequent relaunch attempt fails identically.
+
+### Root Cause
+
+`nwebspawn` runs as uid 3081, not root. Upstream `base/startup/appspawn/etc/sandbox/appdata_sandbox_fixer.py:276` generates the sandbox config file with `mode = S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP` (0660), and the build/install umask trims it to **0640, owner root:root**. On a real OHOS device the production image's fs_config rewrites these to world-readable, but our LXC rootfs copy path doesn't go through fs_config — it just preserves whatever mode the `packages/phone/` staging tree has.
+
+As a result, in `nwebspawn`:
+1. `LoadAppSandboxConfigCJson` → `GetJsonObjFromFile("/system/etc/sandbox/appdata-sandbox.json")` returns NULL (EACCES).
+2. The `APPSPAWN_CHECK` on the NULL result uses `continue`, not `return`, and the error log it emits is easy to miss.
+3. `appSandboxCJsonConfig_[SANDBOX_APP_JSON_CONFIG]` stays empty for the life of the nwebspawn process.
+4. Every render fork reaches `SetRenderSandboxPropertyNweb`, finds `GetCJsonConfig(type).size() == 0`, iterates zero configs, and returns 0 **without ever mounting anything**.
+5. `SetAppSandboxPropertyNweb` still proceeds to `pivot_root` into the freshly-created `/mnt/sandbox/com.ohos.render/<PackageName>/` directory, which is **empty** — no `/dev`, no `/proc`, no `/sys`.
+6. The next hook in the chain, `SpawnSetProperties` → `SetFileDescriptors` (`appspawn_common.c:344`), tries `open("/dev/null", O_RDWR)` to redirect stdin/stdout/stderr. It gets `ENOENT` and returns `-errno`, killing the render child.
+
+strace on nwebspawn made the diagnosis unambiguous: the render fork child runs `unshare(CLONE_NEWNS) → mount(/, MS_REC|MS_SLAVE) → self-bind sandbox root → chdir → pivot_root → umount2(., MNT_DETACH)` and immediately fails at `openat("/dev/null")`, with **zero** `/dev`/`/proc`/`/sys` bind mount syscalls in between. A debug printf in `SetRenderSandboxPropertyNweb` confirmed `cfgSize=0` in the nwebspawn fork child (while the normal appspawn fork child had `cfgSize=1` and mounted everything fine).
+
+The main `appspawn` (root) is unaffected and loads the config successfully, which is why regular apps sandbox correctly and only webview renders break.
+
+### Fix
+
+Added to `device/board/oniro/hybris_generic/utils/deploy-lxc-container.sh`, immediately after the rootfs tarball is extracted on-device:
+
+```bash
+# Make sandbox configs world-readable so nwebspawn (uid 3081, not root) can
+# load them at preload time. Upstream appdata_sandbox_fixer.py installs these
+# with mode 0660 which umask trims to 0640; on a real OHOS image fs_config
+# rewrites them, but our LXC rootfs keeps the literal mode.
+adb shell "echo $DEVICE_PASSWORD | sudo -S chmod 0644 \
+    /home/phablet/openharmony/rootfs/system/etc/sandbox/appdata-sandbox.json \
+    /home/phablet/openharmony/rootfs/system/etc/sandbox/appdata-sandbox-isolated.json"
+```
+
+No source patch is needed — the config file content is fine, only its mode was wrong.
+
+### Red Herrings Ruled Out During Debugging
+
+- **`OpenGLWrapper: Failed to load GLES library using dl open`** — upstream OHOS bug in `foundation/graphic/graphic_2d/frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp:304`: hardcoded `/system/lib64/libGLESv3.so` (real path is `platformsdk/libGLESv3.so`). The `FindBuiltinWrapper` fall-through uses `EglWrapperLoader::GetProcAddrFromDriver` which works regardless. Benign; unrelated to the webview failure.
+- **`MUSL-LDSO: load libGLESv1_CM.so.1 / libGLESv2.so.2 failed`** — chromium's GL binding loader in ArkWebCore tries standard Linux `.so.N` sonames as one of several fallbacks. The `libEGL.z.so → libEGL_impl.so → libhybris` dispatcher path succeeds, so these failed probes are cosmetic. Benign.
+- **Phase 3 `DoMkSandbox` / `IsEnableSandbox` / `SetServiceEnterSandbox` disable in container mode** — these are init-level switches and don't reach the appspawn fork-time sandbox code path that was actually broken. Initially suspected, ruled out.
+
+### Verification
+
+After `chmod 0644` + container restart:
+- `HYBRIS_DBG SetRenderSandboxPropertyNweb enter pid=... cfgSize=1` (was 0)
+- 19 `IsValidMountConfig PASS` entries covering `/dev`, `/proc`, `/sys`, `/system/fonts`, `/system/etc`, `/system/bin`, `/system/lib`, `/system/lib64`, `/vendor/lib`, `/vendor/lib64`, `/system/app/NWeb`, `/data/app/el1/bundle/public/<arkWebPackageName>`, etc.
+- No more `open dev_null error: 2`
+- `io.ionic.starter` webview renders its HTML content.
+
+**Status:** FIXED (2026-04-10). Deploy-script chmod committed; clean `libappspawn_sandbox.z.so` rebuilt and deployed (no residual debug prints). Webview confirmed working on Volla X23.
+
