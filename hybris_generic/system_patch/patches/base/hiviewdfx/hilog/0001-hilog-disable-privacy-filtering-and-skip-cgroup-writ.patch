@@ -1,3 +1,31 @@
+From 175c723975f80fe463377ccc6dc004f0de186a16 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:35:49 +0000
+Subject: [PATCH] hilog: disable privacy filtering and skip cgroup writes in
+ LXC container
+
+Three changes for hybris_generic LXC container operation:
+
+1. HiLogIsPrivacyOn() always returns false - privacy filtering relies on
+   system params that are unavailable in early container startup, causing
+   log output to be silently dropped. Disable unconditionally.
+
+2. IsPrivateSwitchOn() always returns false - eliminates the SwitchCache
+   static that triggers param reads during library init.
+
+3. hilogd: skip the cgroup write (SYSTEM_BG_STUNE/CPUSET) when running
+   inside a container (container env var set). Cgroup v1 paths are not
+   available in the LXC namespace, causing hilogd startup to fail.
+
+Part of Phase 3 (core service stability) for hybris_generic.
+
+Change-Id: Ic9ae887ea1d72115fb7a7fff46b24eeabbbccc23
+---
+ frameworks/libhilog/hilog_printf.cpp     | 6 +-----
+ frameworks/libhilog/param/properties.cpp | 6 +-----
+ services/hilogd/main.cpp                 | 4 ++++
+ 3 files changed, 6 insertions(+), 10 deletions(-)
+
 diff --git a/frameworks/libhilog/hilog_printf.cpp b/frameworks/libhilog/hilog_printf.cpp
 index 5ed9843..e16aec6 100644
 --- a/frameworks/libhilog/hilog_printf.cpp
@@ -47,3 +75,6 @@ index 7daa6bf..bc1ad6c 100644
          string myPid = to_string(getprocpid());
          (void)WriteStringToFile(myPid, SYSTEM_BG_STUNE);
          (void)WriteStringToFile(myPid, SYSTEM_BG_CPUSET);
+-- 
+2.50.1
+
