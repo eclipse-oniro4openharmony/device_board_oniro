@@ -78,6 +78,16 @@ if /usr/bin/lxc-info -n android -s 2>/dev/null | grep -q "RUNNING"; then
 fi
 echo "WiFi daemons stopped." | tee -a $LOG_FILE
 
+# Unblock rfkill on the wireless phy. Ubuntu Touch (URfkill / connectivity-api
+# state cache) and/or Android wlan_assistant can leave phy0 soft-blocked at
+# boot, which makes `ifconfig wlan0 up` fail with "Operation not possible due
+# to RF-kill" and OHOS scans return -ENETDOWN from nl80211. Observed on Volla
+# Tablet (mimir); harmless on X23 where phy0 is already unblocked.
+if command -v rfkill >/dev/null 2>&1; then
+    echo "Unblocking rfkill on all radios..." | tee -a $LOG_FILE
+    rfkill unblock all 2>&1 | tee -a $LOG_FILE || true
+fi
+
 # ── Ensure android composer is running ───────────────────────────────────
 # Auto-detect composer binary: prefer @2.3 (Halium 13), fall back to @2.1 (Halium 12)
 if [ -f /vendor/bin/hw/android.hardware.graphics.composer@2.3-service ]; then
