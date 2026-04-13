@@ -1,3 +1,30 @@
+From d1a0e18ce9b458d8617e7c93d43ca78c045c9b7a Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:36:12 +0000
+Subject: [PATCH] samgr: add container mode and UID-based fallback in
+ CanRequest()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When OHOS runs as an LXC container via libhybris, binder calls arriving
+from Android services carry the caller's raw UID as the token ID rather
+than a real OHOS AccessToken (which has type bits at bit 27-28, giving
+values >= 0x08000000). This caused CanRequest() to deny all Android→OHOS
+IPC, blocking samgr service registration.
+
+Two fallbacks added:
+1. If OHOS_RUNTIME_CONFIG=1 (container env var), allow all requests.
+2. If tokenType != TOKEN_NATIVE but tid == (uint32_t)callerUid (i.e., a
+   raw UID fallback), allow UIDs 0 (root) and 1000 (system).
+
+Part of Phase 6.8.2 (samgr CanRequest fix) for hybris_generic.
+
+Change-Id: I56208c42e90ff80e66a12f648670ac2a0e69b6bc
+---
+ .../native/source/system_ability_manager_stub.cpp   | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
 diff --git a/services/samgr/native/source/system_ability_manager_stub.cpp b/services/samgr/native/source/system_ability_manager_stub.cpp
 index bd326ad2..27b0e372 100644
 --- a/services/samgr/native/source/system_ability_manager_stub.cpp
@@ -25,3 +52,6 @@ index bd326ad2..27b0e372 100644
          KHILOGE("CanRequest callingTkid:%{public}u, tokenType:%{public}d", tid, tokenType);
          return false;
      }
+-- 
+2.50.1
+

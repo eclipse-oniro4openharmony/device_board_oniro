@@ -1,0 +1,34 @@
+From 671a18f70bfec42c1833573513fc073e41ae7f13 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:36:05 +0000
+Subject: [PATCH] build: register oniro_soc_products (hybris_generic) as a
+ build subsystem
+
+Add the oniro_soc_products subsystem entry to subsystem_config.json so
+that the OpenHarmony build system recognizes device/soc/oniro as a valid
+subsystem path when building with --product-name hybris_generic.
+
+Part of Phase 5 (libhybris integration & HAL bridge) for hybris_generic.
+
+Change-Id: I5ee93d102fc702080f542d98e763d26005dbaac0
+---
+ subsystem_config.json | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/subsystem_config.json b/subsystem_config.json
+index 578ac460..cb2f4a8b 100644
+--- a/subsystem_config.json
++++ b/subsystem_config.json
+@@ -230,5 +230,9 @@
+   "game": {
+     "path": "domains/game",
+     "name": "game"
++  },
++  "oniro_soc_products": {
++    "path": "device/soc/oniro",
++    "name": "oniro_soc_products"
+   }
+ }
+-- 
+2.50.1
+

@@ -1,3 +1,31 @@
+From 96d0c5da72db0e3524501f8fdf397eec724bd17e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:36:01 +0000
+Subject: [PATCH] appspawn: add hybris env vars, /android+/apex sandbox mounts,
+ SELinux guards
+
+Three changes for hybris_generic LXC container support:
+
+1. appspawn.cfg: inject hybris environment variables into spawned processes:
+   LIBEGL, LIBGLESV2, HYBRIS_LD_LIBRARY_PATH, LD_LIBRARY_PATH, and
+   HYBRIS_EGLPLATFORM=ohos so spawned apps find Mali EGL via libhybris.
+
+2. appdata-sandbox.json: bind-mount /android and /apex into the app sandbox
+   so hybris can dlopen Android vendor libraries. Also adds /data/log/sanitizer.
+
+3. appspawn_adapter.cpp: guard CheckSpecialSpawnMode and LoadSeLinuxConfig
+   with #ifdef WITH_SELINUX to allow building without SELinux support.
+
+Phase 6.14 (launcher/HAP install) and Phase 8.18 (webview/nweb fix) for
+hybris_generic.
+
+Change-Id: I1f4110344495ec61a018b314f63b58bffb4a8a4a
+---
+ appdata-sandbox.json                | 15 +++++++++++++++
+ appspawn.cfg                        |  9 ++++++++-
+ modules/common/appspawn_adapter.cpp |  8 ++++++++
+ 3 files changed, 31 insertions(+), 1 deletion(-)
+
 diff --git a/appdata-sandbox.json b/appdata-sandbox.json
 index b0df2499..72c9ae64 100644
 --- a/appdata-sandbox.json
@@ -84,3 +112,6 @@ index aa5504c8..f602d7f5 100644
      }
  }
 +#endif
+-- 
+2.50.1
+

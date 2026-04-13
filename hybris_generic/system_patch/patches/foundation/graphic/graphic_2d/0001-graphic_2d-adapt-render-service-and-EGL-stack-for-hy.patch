@@ -1,0 +1,290 @@
+From 3fc9621d9811d3c0173c20d96410be1b837470a3 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:36:35 +0000
+Subject: [PATCH] graphic_2d: adapt render service and EGL stack for
+ hybris_generic container
+
+Multiple fixes to make the OHOS Rosen render pipeline work with Android HALs
+via libhybris inside an LXC container:
+
+boot_compatible_display_strategy.cpp: Poll GetDefaultScreenId() until a valid
+screen ID is available. The HIDL hotplug callback is async, so there is a
+window between bootevent.renderservice.ready=true and the default screen ID
+being set. Without the retry loop, boot animation fails immediately.
+
+egl_wrapper_display.cpp: Remove the strict EGLDisplay pointer equality check
+in GetWrapperDisplay(). On hybris the impl may return a different handle from
+the singleton wrapper address; since there is only one physical display, map
+any non-null handle to the singleton.
+
+render_context_gl.cpp: Use eglGetDisplay() (linked wrapper symbol) instead of
+eglGetProcAddress("eglGetPlatformDisplayEXT"). The latter returns the impl's raw
+function pointer, bypassing the OHOS EGL wrapper and producing a display handle
+that fails all subsequent wrapper validation. Hardcode the GLES version string
+to "OpenGL ES 3.2" to avoid a SIGSEGV from glGetString() with no GL context.
+Remove the spurious eglMakeCurrent(NO_SURFACE) call before eglCreateWindowSurface.
+
+vsync_distributor.cpp: Raise MAX_PID from 65536 to 4194304 (Linux PID_MAX_LIMIT).
+LXC containers share the host PID namespace; high-numbered host PIDs were silently
+dropped by the VSyncConnection connection table, causing missed vsync callbacks.
+
+rs_base_render_engine.cpp: Guard Init() against EGL context creation failure so
+render_service does not abort when the GPU is temporarily unavailable.
+
+rs_screen_manager.cpp: Add fallback in ProcessScreenConnected() to claim a screen
+as default when defaultScreenId_ is still INVALID after the MIPI check. Fixes an
+async hotplug race where the MIPI check flag was already set on an empty queue.
+
+rs_ipc_interface_code_access_verifier_base.cpp: Return TOKEN_NATIVE for token IDs
+below 10000 (raw UIDs from Android binder). Real OHOS tokens have type bits at
+bit 27-28 and are always >= 0x08000000.
+
+rs_surface_ohos_gl.cpp: Add debug log before RenderFrame/SwapBuffers to trace
+EGL surface lifetime issues (Phase 8.17 eglSwapBuffers/eglDestroySurface race).
+
+Covers Phase 6.11-6.12 (boot animation, first frame), Phase 6.10D (IPC token
+fallback), and Phase 8 stability fixes for hybris_generic.
+
+Change-Id: I5a70ed987ec6c3628492b4101b9b69bdb7ea6047
+---
+ .../src/boot_compatible_display_strategy.cpp  | 31 ++++++++++++-
+ .../src/EGL/egl_wrapper_display.cpp           | 15 ++++---
+ .../new_render_context/render_context_gl.cpp  | 43 ++++++++++---------
+ .../composer/vsync/src/vsync_distributor.cpp  |  2 +-
+ .../render_thread/rs_base_render_engine.cpp   |  5 ++-
+ .../core/screen_manager/rs_screen_manager.cpp |  9 ++++
+ ...pc_interface_code_access_verifier_base.cpp |  8 ++++
+ .../ohos/backend/rs_surface_ohos_gl.cpp       |  1 +
+ 8 files changed, 84 insertions(+), 30 deletions(-)
+
+diff --git a/frameworks/bootanimation/src/boot_compatible_display_strategy.cpp b/frameworks/bootanimation/src/boot_compatible_display_strategy.cpp
+index 2b7a8ed789..38fbf750e5 100644
+--- a/frameworks/bootanimation/src/boot_compatible_display_strategy.cpp
++++ b/frameworks/bootanimation/src/boot_compatible_display_strategy.cpp
+@@ -21,6 +21,35 @@
+ 
+ using namespace OHOS;
+ 
++namespace {
++// Poll GetDefaultScreenId() until render_service's screen manager has processed
++// the initial hotplug event and set a valid default screen ID.  The hotplug is
++// delivered asynchronously via a HIDL binder callback, so there is a window
++// between bootevent.renderservice.ready=true and defaultScreenId_ being set
++// where GetDefaultScreenId() returns INVALID_SCREEN_ID.
++static Rosen::ScreenId WaitDefaultScreenId(Rosen::RSInterfaces& rsInterface)
++{
++    constexpr int MAX_WAIT_RETRIES = 100;
++    Rosen::ScreenId screenId = rsInterface.GetDefaultScreenId();
++    int retryCount = 0;
++    while (screenId == Rosen::INVALID_SCREEN_ID && retryCount < MAX_WAIT_RETRIES) {
++        LOGI("WaitDefaultScreenId: still INVALID, retry %{public}d/%{public}d",
++            retryCount + 1, MAX_WAIT_RETRIES);
++        usleep(SLEEP_TIME_US);
++        screenId = rsInterface.GetDefaultScreenId();
++        ++retryCount;
++    }
++    if (screenId == Rosen::INVALID_SCREEN_ID) {
++        LOGE("WaitDefaultScreenId: timed out after %{public}d retries, screenId still INVALID",
++            MAX_WAIT_RETRIES);
++    } else {
++        LOGI("WaitDefaultScreenId: got screenId=%{public}llu after %{public}d retries",
++            (unsigned long long)screenId, retryCount);
++    }
++    return screenId;
++}
++} // namespace
++
+ void BootCompatibleDisplayStrategy::Display(int32_t duration, std::vector<BootAnimationConfig>& configs)
+ {
+     LOGI("BootCompatibleDisplayStrategy START");
+@@ -31,7 +60,7 @@ void BootCompatibleDisplayStrategy::Display(int32_t duration, std::vector<BootAn
+ 
+     Rosen::RSInterfaces& interface = Rosen::RSInterfaces::GetInstance();
+     for (auto& config : configs) {
+-        config.screenId = interface.GetDefaultScreenId();
++        config.screenId = WaitDefaultScreenId(interface);
+         if (config.rotateScreenId >= 0) {
+             config.screenId = interface.GetActiveScreenId();
+             if (config.screenId > 0) {
+diff --git a/frameworks/opengl_wrapper/src/EGL/egl_wrapper_display.cpp b/frameworks/opengl_wrapper/src/EGL/egl_wrapper_display.cpp
+index 067d78a0c7..3c96c6fb72 100644
+--- a/frameworks/opengl_wrapper/src/EGL/egl_wrapper_display.cpp
++++ b/frameworks/opengl_wrapper/src/EGL/egl_wrapper_display.cpp
+@@ -397,12 +397,15 @@ EGLBoolean EglWrapperDisplay::MakeCurrentAfterHook(EGLSurface draw, EGLSurface r
+ EglWrapperDisplay *EglWrapperDisplay::GetWrapperDisplay(EGLDisplay display)
+ {
+     WLOGD("");
+-    EglWrapperDisplay *disp = reinterpret_cast<EglWrapperDisplay *>(display);
+-    if (disp == &wrapperDisp_) {
+-        return disp;
+-    }
+-    WLOGE("invalid display pointer.");
+-    return nullptr;
++    if (display == EGL_NO_DISPLAY) {
++        return nullptr;
++    }
++    /* On hybris targets the EGLDisplay handle returned by the impl may differ
++     * from &wrapperDisp_ when the impl's eglGetPlatformDisplay was called
++     * directly (e.g., via eglGetProcAddress).  Since there is only one physical
++     * display, any valid (non-null) handle maps to the singleton wrapper display.
++     */
++    return &wrapperDisp_;
+ }
+ 
+ EGLDisplay EglWrapperDisplay::GetEglNativeDisplay(EGLenum platform,
+diff --git a/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp b/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp
+index 2634ffdde8..e700a0f99a 100644
+--- a/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp
++++ b/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp
+@@ -69,22 +69,20 @@ bool RenderContextGL::CheckEglExtension(const char* extensions, const char* exte
+ 
+ EGLDisplay RenderContextGL::GetPlatformEglDisplay(EGLenum platform, void* native_display, const EGLint* attrib_list)
+ {
+-    static GetPlatformDisplayExt eglGetPlatformDisplayExt = NULL;
+-
+-    if (!eglGetPlatformDisplayExt) {
+-        const char* extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+-        if (extensions &&
+-            (CheckEglExtension(extensions, EGL_EXT_PLATFORM_WAYLAND) ||
+-                CheckEglExtension(extensions, EGL_KHR_PLATFORM_WAYLAND))) {
+-            eglGetPlatformDisplayExt = reinterpret_cast<GetPlatformDisplayExt>(
+-                eglGetProcAddress(EGL_GET_PLATFORM_DISPLAY_EXT));
+-        }
+-    }
+-
+-    if (eglGetPlatformDisplayExt) {
+-        return eglGetPlatformDisplayExt(platform, native_display, attrib_list);
+-    }
+-
++    /* Use eglGetDisplay directly rather than eglGetProcAddress("eglGetPlatformDisplayEXT").
++     *
++     * On hybris targets the OHOS EGL wrapper (libEGL.so) intercepts linked EGL symbols
++     * and forwards them to libEGL_impl.so (the hybris EGL).  However, eglGetProcAddress
++     * returns the impl's RAW function pointers — calling them bypasses the wrapper,
++     * producing an EGLDisplay that the wrapper doesn't recognise.  All subsequent EGL
++     * calls (eglInitialize, eglCreateContext, ...) go through the wrapper's validation
++     * which rejects the foreign display, leaving the thread with no EGL context.
++     *
++     * eglGetDisplay (a linked symbol) goes through the wrapper, which creates a
++     * properly wrapped display object that passes validation in all subsequent calls.
++     */
++    (void)platform;
++    (void)attrib_list;
+     return eglGetDisplay(static_cast<EGLNativeDisplayType>(native_display));
+ }
+ 
+@@ -204,14 +202,19 @@ bool RenderContextGL::SetUpGpuContext(std::shared_ptr<Drawing::GPUContext> drawi
+     }
+ 
+     mHandler_ = std::make_shared<MemoryHandler>();
+-    auto glesVersion = reinterpret_cast<const char*>(glGetString(GL_VERSION));
++    /* On hybris targets, calling glGetString() here crashes with SIGSEGV because
++     * the GL symbol resolves to the Android EGL's dispatch table, which has
++     * "no context" stubs that access bionic TLS — incompatible with MUSL.
++     * The version string is only used for optional GPU context tuning, so we
++     * skip it and use a safe fallback (OpenGL ES 3.2, matching the Mali G57). */
++    const char* glesVersion = "OpenGL ES 3.2";
+     if (isUniRenderMode_) {
+         cacheDir_ = UNIRENDER_CACHE_DIR;
+     }
+     Drawing::GPUContextOptions options;
+     options.SetIsUniRender(isUniRenderMode_);
+-    if (glesVersion != nullptr) {
+-        auto size = glesVersion ? strlen(glesVersion) : 0;
++    {
++        auto size = strlen(glesVersion);
+         mHandler_->ConfigureContext(&options, glesVersion, size, cacheDir_, isUniRenderMode_);
+     }
+ 
+@@ -274,8 +277,6 @@ EGLSurface RenderContextGL::CreateEGLSurface(EGLNativeWindowType eglNativeWindow
+     }
+     nativeWindow_ = eglNativeWindow;
+ 
+-    eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+-
+     EGLSurface surface = eglCreateWindowSurface(eglDisplay_, config_, nativeWindow_, NULL);
+     if (surface == EGL_NO_SURFACE) {
+         LOGW("Failed to create eglsurface!!! %{public}x", eglGetError());
+diff --git a/rosen/modules/composer/vsync/src/vsync_distributor.cpp b/rosen/modules/composer/vsync/src/vsync_distributor.cpp
+index 2d4c8eec87..ee598b5ef9 100644
+--- a/rosen/modules/composer/vsync/src/vsync_distributor.cpp
++++ b/rosen/modules/composer/vsync/src/vsync_distributor.cpp
+@@ -57,7 +57,7 @@ constexpr int32_t VSYNC_CONNECTION_MAX_SIZE = 256;
+ constexpr std::string_view URGENT_SELF_DRAWING = "UrgentSelfdrawing";
+ constexpr int64_t MAX_SIZE_OF_DIGIT_NUM_FOR_PID = 8;
+ constexpr uint32_t MAX_VSYNC_QUEUE_SIZE = 30;
+-constexpr int32_t MAX_PID = 65536;
++constexpr int32_t MAX_PID = 4194304; // Linux PID_MAX_LIMIT; LXC containers share host PID namespace
+ }
+ 
+ VSyncConnection::VSyncConnectionDeathRecipient::VSyncConnectionDeathRecipient(
+diff --git a/rosen/modules/render_service/core/pipeline/render_thread/rs_base_render_engine.cpp b/rosen/modules/render_service/core/pipeline/render_thread/rs_base_render_engine.cpp
+index 21b9a81467..97347ca91a 100644
+--- a/rosen/modules/render_service/core/pipeline/render_thread/rs_base_render_engine.cpp
++++ b/rosen/modules/render_service/core/pipeline/render_thread/rs_base_render_engine.cpp
+@@ -90,7 +90,10 @@ void RSBaseRenderEngine::Init()
+ {
+ #if (defined RS_ENABLE_GL) || (defined RS_ENABLE_VK)
+     renderContext_ = RenderContext::Create();
+-    renderContext_->Init();
++    if (!renderContext_->Init()) {
++        RS_LOGE("RSRenderEngine::Init EGL context init failed — GPU rendering unavailable");
++        return;
++    }
+     if (RSUniRenderJudgement::IsUniRender()) {
+         RS_LOGI("RSRenderEngine::RSRenderEngine set new cacheDir");
+         renderContext_->SetUniRenderMode(true);
+diff --git a/rosen/modules/render_service/core/screen_manager/rs_screen_manager.cpp b/rosen/modules/render_service/core/screen_manager/rs_screen_manager.cpp
+index 1cce83ae4e..9c6dd7d393 100644
+--- a/rosen/modules/render_service/core/screen_manager/rs_screen_manager.cpp
++++ b/rosen/modules/render_service/core/screen_manager/rs_screen_manager.cpp
+@@ -716,6 +716,15 @@ void RSScreenManager::ProcessScreenConnected(std::shared_ptr<HdiOutput>& output)
+                 __func__, id, defaultScreenId);
+         defaultScreenId = id;
+     }
++    // Fallback: if defaultScreenId is still INVALID after the MIPI check, this screen
++    // arrived after ProcessScreenHotPlugEvents() already set mipiCheckInFirstHotPlugEvent_=true
++    // on an empty queue (async HIDL hotplug race).  Claim it as default unconditionally.
++    if (defaultScreenId == INVALID_SCREEN_ID) {
++        RS_LOGI("%{public}s Fallback: screen id %{public}" PRIu64
++            " forced to defaultScreenId (async hotplug race, mipiCheck was already set).",
++            __func__, id);
++        defaultScreenId = id;
++    }
+     defaultScreenId_ = defaultScreenId;
+ 
+     uint64_t vsyncEnabledScreenId = JudgeVSyncEnabledScreenWhileHotPlug(id, true);
+diff --git a/rosen/modules/render_service_base/src/ipc_security/rs_ipc_interface_code_access_verifier_base.cpp b/rosen/modules/render_service_base/src/ipc_security/rs_ipc_interface_code_access_verifier_base.cpp
+index fb0e30710b..fa54d180b3 100644
+--- a/rosen/modules/render_service_base/src/ipc_security/rs_ipc_interface_code_access_verifier_base.cpp
++++ b/rosen/modules/render_service_base/src/ipc_security/rs_ipc_interface_code_access_verifier_base.cpp
+@@ -43,6 +43,14 @@ bool RSInterfaceCodeAccessVerifierBase::IsInterfaceCodeAccessible(CodeUnderlying
+ Security::AccessToken::ATokenTypeEnum RSInterfaceCodeAccessVerifierBase::GetTokenType()
+ {
+     uint32_t tokenId = IPCSkeleton::GetCallingTokenID();
++    // When the Android binder doesn't propagate OHOS token IDs (hybris container),
++    // GetCallingTokenID() returns the caller's UID as a fallback (or 0 for root/uid=0).
++    // Real OHOS token IDs always have type bits encoded at bit 27-28, giving values >= 0x08000000.
++    // Values < 10000 are UIDs — system UIDs (including 0 for root) indicate trusted processes.
++    static constexpr uint32_t MAX_SYSTEM_UID = 10000;
++    if (tokenId < MAX_SYSTEM_UID) {
++        return Security::AccessToken::ATokenTypeEnum::TOKEN_NATIVE;
++    }
+     return Security::AccessToken::AccessTokenKit::GetTokenTypeFlag(tokenId);
+ }
+ 
+diff --git a/rosen/modules/render_service_base/src/platform/ohos/backend/rs_surface_ohos_gl.cpp b/rosen/modules/render_service_base/src/platform/ohos/backend/rs_surface_ohos_gl.cpp
+index c9ea5f10af..0456426668 100644
+--- a/rosen/modules/render_service_base/src/platform/ohos/backend/rs_surface_ohos_gl.cpp
++++ b/rosen/modules/render_service_base/src/platform/ohos/backend/rs_surface_ohos_gl.cpp
+@@ -118,6 +118,7 @@ bool RSSurfaceOhosGl::FlushFrame(std::unique_ptr<RSSurfaceFrame>& frame, uint64_
+     }
+ 
+     // gpu render flush
++    ROSEN_LOGD("RSSurfaceOhosGl: FlushFrame calling RenderFrame and SwapBuffers on surface %p", mEglSurface);
+     context->RenderFrame();
+     context->SwapBuffers(mEglSurface);
+     ROSEN_LOGD("RSSurfaceOhosGl: FlushFrame, SwapBuffers eglsurface");
+-- 
+2.50.1
+

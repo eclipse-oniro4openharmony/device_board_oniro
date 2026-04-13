@@ -1,3 +1,53 @@
+From 1a2a5ddda9f73a1ce9f8145e8795126ba9159e57 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:36:50 +0000
+Subject: [PATCH 2/4] init: skip privileged cmds, cgroup writes, and SELinux in
+ container mode
+
+Additional LXC container adaptations building on the existing InContainerMode()
+detection:
+
+libbegetutil.versionscript: export InContainerMode, InUpdaterMode, InRescueMode,
+and InRepairMode symbols so they are accessible from shared libraries that link
+libbegetutil (e.g. selinuxadp).
+
+init.cfg, init.without_two_stages.cfg: change the post-fs rootfs remount from
+ro to rw. Inside the LXC container the rootfs is already mounted read-write by
+the host; attempting to remount ro fails and blocks the boot sequence.
+
+init_common_cmds.c: skip DoChown, DoChmod, and DoMount when in container mode.
+These operations either fail on the read-write container rootfs or attempt
+mounts that the container namespace does not permit.
+
+init_cgroup.c: skip ProcessServiceDied and ProcessServiceAdd when in container
+mode. Cgroup v1 paths (/dev/blkio, /dev/cpuset, etc.) are not accessible inside
+the LXC namespace.
+
+init_service.c: disable sandbox (g_enableSandbox=false) and skip
+SetServiceEnterSandbox in container mode to prevent mount-namespace pivot_root
+failures inside LXC.
+
+selinux/BUILD.gn: add libbegetutil dep so selinuxadp can call InContainerMode.
+selinux/selinux_adp.c: skip LoadSelinuxPolicy, SetServiceContent, and
+SetServiceSaspawnContent in container mode. The Ubuntu Touch host owns the
+SELinux policy; loading the OHOS policy inside the container fails and blocks
+all service label transitions.
+
+Part of Phase 1 (infrastructure & target setup) and Phase 3 (core service
+stability) for hybris_generic.
+
+Change-Id: I6ad2f6744dfca8c72afa81d3c0a538d1ce7c872b
+---
+ interfaces/innerkits/libbegetutil.versionscript |  4 ++++
+ services/etc/init.cfg                           |  2 +-
+ services/etc/init.without_two_stages.cfg        |  2 +-
+ services/init/init_cgroup.c                     |  6 ++++++
+ services/init/init_common_cmds.c                |  9 +++++++++
+ services/init/standard/init_service.c           |  7 +++++++
+ services/modules/selinux/BUILD.gn               |  5 ++++-
+ services/modules/selinux/selinux_adp.c          | 13 +++++++++++++
+ 8 files changed, 45 insertions(+), 3 deletions(-)
+
 diff --git a/interfaces/innerkits/libbegetutil.versionscript b/interfaces/innerkits/libbegetutil.versionscript
 index aadd2b82..ceb77a4d 100644
 --- a/interfaces/innerkits/libbegetutil.versionscript
@@ -97,48 +147,6 @@ index 75e96f3f..25c927fa 100644
      INIT_ERROR_CHECK(ctx->argc <= SPACES_CNT_IN_CMD_MAX, return, "Invalid arg number");
      // format: fileSystemType source target mountFlag1 mountFlag2... data
      int index = 0;
-diff --git a/services/init/main.c b/services/init/main.c
-index 7e021456..720093b1 100644
---- a/services/init/main.c
-+++ b/services/init/main.c
-@@ -42,7 +42,7 @@ int main(int argc, char * const argv[])
-     } else {
-         upTimeInMicroSecs = GetUptimeInMicroSeconds(NULL);
-     }
--    if (getpid() != INIT_PROCESS_PID) {
-+    if (getpid() != INIT_PROCESS_PID && InContainerMode() == 0) {
-         INIT_LOGE("Process id error %d!", getpid());
-         return 0;
-     }
-diff --git a/services/init/standard/init.c b/services/init/standard/init.c
-index d3134637..1ab1d02b 100755
---- a/services/init/standard/init.c
-+++ b/services/init/standard/init.c
-@@ -318,7 +318,9 @@ void SystemConfig(const char *uptime)
-     HookMgrExecute(GetBootStageHookMgr(), INIT_PRE_PARAM_SERVICE, (void *)&timingStat, (void *)&options);
-     if (InitParamService() != 0) {
-         INIT_LOGE("[startup_failed]Init param service failed %d", SYS_PARAM_INIT_FAILED);
--        ExecReboot("panic");
-+        if (InContainerMode() == 0) {
-+            ExecReboot("panic");
-+        }
-     }
-     InitParseGroupCfg();
-     RegisterBootStateChange(BootStateChange);
-diff --git a/services/init/standard/init_cmds.c b/services/init/standard/init_cmds.c
-index ae2c546c..abc28fb5 100755
---- a/services/init/standard/init_cmds.c
-+++ b/services/init/standard/init_cmds.c
-@@ -986,6 +986,9 @@ static void DoSwapon(const struct CmdArgs *ctx)
- 
- static void DoMkSandbox(const struct CmdArgs *ctx)
- {
-+    if (InContainerMode() != 0) {
-+        return;
-+    }
-     INIT_LOGV("Do make sandbox start");
-     const char *sandbox = ctx->argv[0];
-     InitDefaultNamespace();
 diff --git a/services/init/standard/init_service.c b/services/init/standard/init_service.c
 index 4c41041b..755c97d1 100644
 --- a/services/init/standard/init_service.c
@@ -232,3 +240,6 @@ index 8b0c6268..d05a6c8f 100755
      PLUGIN_CHECK(name != NULL, return -1, "Invalid parameter");
      if (argc == 0) {
          setsockcreatecon(NULL);
+-- 
+2.50.1
+

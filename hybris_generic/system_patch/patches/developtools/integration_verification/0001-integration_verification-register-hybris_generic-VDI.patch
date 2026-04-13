@@ -1,3 +1,30 @@
+From e60eebdf9447ee81f2a51be8eb2026f38ad34936 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:37:43 +0000
+Subject: [PATCH] integration_verification: register hybris_generic VDI libs in
+ deps guard rules
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+passthrough_info.json: register libdisplay_buffer_vdi_impl.z.so and
+libdisplay_composer_vdi_impl.z.so from device/soc/oniro/hybris_generic as
+passthrough HAL implementations. Required by the deps_guard passthrough
+allowlist check during builds with integration verification enabled.
+
+chipsetsdk_dep_whitelist.json: whitelist the hybris_generic VDI libraries'
+dependencies on libhybris internals (libgralloc.z.so, libhwc2.z.so, etc.)
+which reside in system/lib64/libhybris/ — a non-standard path that would
+otherwise fail the chipsetsdk dependency check.
+
+Part of Phase 5 (libhybris integration & HAL bridge) for hybris_generic.
+
+Change-Id: I85823334c979ac78360b0b8dc4621967fb1e08d9
+---
+ .../rules/Passthrough/passthrough_info.json   | 12 +++++++
+ .../rules/chipsetsdk_dep_whitelist.json       | 35 +++++++++++++++++++
+ 2 files changed, 47 insertions(+)
+
 diff --git a/tools/deps_guard/rules/Passthrough/passthrough_info.json b/tools/deps_guard/rules/Passthrough/passthrough_info.json
 index be6f7b5..6633297 100755
 --- a/tools/deps_guard/rules/Passthrough/passthrough_info.json
@@ -67,3 +94,6 @@ index 13306b3..483fa03 100644
      {
          "so_file_name": "libmemory_tracker_interface_service_1.0.z.so",
          "so_file_path": "vendor/lib/passthrough/libmemory_tracker_interface_service_1.0.z.so",
+-- 
+2.50.1
+
