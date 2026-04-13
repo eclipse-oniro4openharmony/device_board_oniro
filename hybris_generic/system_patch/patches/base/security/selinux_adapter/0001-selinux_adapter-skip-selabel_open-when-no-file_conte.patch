@@ -1,0 +1,40 @@
+From abbe7f7598f2600d0262ef8fad85995491f2c9a5 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:35:54 +0000
+Subject: [PATCH] selinux_adapter: skip selabel_open when no file_contexts
+ files found
+
+When running in a container with SELinux disabled (build_selinux=false),
+the file_contexts paths may not exist. If no options are assembled, calling
+selabel_open() crashes with a NULL-dereference. Guard against this by
+returning early when index==0.
+
+Part of Phase 1 (infrastructure & target setup) for hybris_generic:
+SELinux is fully disabled for container operation; the Ubuntu Touch host
+manages the SELinux policy.
+
+Change-Id: I091fc1833af2b6fb653eecb076b7c69ea61b8197
+---
+ framework/policycoreutils/src/selinux_restorecon.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/framework/policycoreutils/src/selinux_restorecon.c b/framework/policycoreutils/src/selinux_restorecon.c
+index 5e00d1895..3b1dada1b 100644
+--- a/framework/policycoreutils/src/selinux_restorecon.c
++++ b/framework/policycoreutils/src/selinux_restorecon.c
+@@ -51,6 +51,12 @@ static void SetFileContextsHandle(void)
+         options[index++] = vendorOption;
+     }
+ 
++    if (index == 0) {
++        // No file_contexts files found - skip selabel_open to avoid crash in container/SELinux-disabled environments
++        selinux_log(SELINUX_WARNING, "No file_contexts files found, skipping restorecon handle init\n");
++        return;
++    }
++
+     // default option of selabel_open
+     SelinuxOptions digestOption = {SELABEL_OPT_DIGEST, (char *)1};
+     options[index++] = digestOption;
+-- 
+2.50.1
+

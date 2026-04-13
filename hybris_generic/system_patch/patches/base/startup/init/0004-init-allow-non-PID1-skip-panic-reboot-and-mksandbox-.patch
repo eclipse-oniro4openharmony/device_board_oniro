@@ -1,0 +1,75 @@
+From 6cdc9220a571f1228e2ae95ab249c3da32b46273 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:38:14 +0000
+Subject: [PATCH 4/4] init: allow non-PID1, skip panic reboot and mksandbox in
+ container mode
+
+Three additional container-mode guards:
+
+main.c: allow init to run with PID != 1 in container mode. Inside an LXC
+container init runs as PID 1 of the container's PID namespace, but getpid()
+may return a higher number when the container shares the host PID namespace
+(e.g. before full namespace isolation is set up).
+
+init.c (SystemConfig): skip ExecReboot("panic") when InitParamService fails
+in container mode. Param service failures in early container startup are
+recoverable; rebooting would kill the LXC container instead of recovering.
+
+init_cmds.c (DoMkSandbox): skip sandbox creation in container mode. The
+mksandbox command uses Linux namespaces (pivot_root, mount namespace) that
+are unavailable or restricted inside an LXC container.
+
+Part of Phase 1 (infrastructure & target setup) for hybris_generic.
+
+Change-Id: Iee1dee4eecf0e55f48cbbf5f9425a7380e769ad9
+---
+ services/init/main.c               | 2 +-
+ services/init/standard/init.c      | 4 +++-
+ services/init/standard/init_cmds.c | 3 +++
+ 3 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/services/init/main.c b/services/init/main.c
+index 7e021456..720093b1 100644
+--- a/services/init/main.c
++++ b/services/init/main.c
+@@ -42,7 +42,7 @@ int main(int argc, char * const argv[])
+     } else {
+         upTimeInMicroSecs = GetUptimeInMicroSeconds(NULL);
+     }
+-    if (getpid() != INIT_PROCESS_PID) {
++    if (getpid() != INIT_PROCESS_PID && InContainerMode() == 0) {
+         INIT_LOGE("Process id error %d!", getpid());
+         return 0;
+     }
+diff --git a/services/init/standard/init.c b/services/init/standard/init.c
+index d3134637..1ab1d02b 100755
+--- a/services/init/standard/init.c
++++ b/services/init/standard/init.c
+@@ -318,7 +318,9 @@ void SystemConfig(const char *uptime)
+     HookMgrExecute(GetBootStageHookMgr(), INIT_PRE_PARAM_SERVICE, (void *)&timingStat, (void *)&options);
+     if (InitParamService() != 0) {
+         INIT_LOGE("[startup_failed]Init param service failed %d", SYS_PARAM_INIT_FAILED);
+-        ExecReboot("panic");
++        if (InContainerMode() == 0) {
++            ExecReboot("panic");
++        }
+     }
+     InitParseGroupCfg();
+     RegisterBootStateChange(BootStateChange);
+diff --git a/services/init/standard/init_cmds.c b/services/init/standard/init_cmds.c
+index ae2c546c..abc28fb5 100755
+--- a/services/init/standard/init_cmds.c
++++ b/services/init/standard/init_cmds.c
+@@ -986,6 +986,9 @@ static void DoSwapon(const struct CmdArgs *ctx)
+ 
+ static void DoMkSandbox(const struct CmdArgs *ctx)
+ {
++    if (InContainerMode() != 0) {
++        return;
++    }
+     INIT_LOGV("Do make sandbox start");
+     const char *sandbox = ctx->argv[0];
+     InitDefaultNamespace();
+-- 
+2.50.1
+
