@@ -1,0 +1,63 @@
+From 6cd0be5b98195819cf24ba07db2191de985cea6c Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:37:33 +0000
+Subject: [PATCH] build: fix toolchain and python compatibility for OHOS kernel
+ build
+
+Two changes required for the OHOS kernel build environment:
+
+build.sh: expand ALLOWED_HOST_TOOLS to include C/C++ compiler and binutils
+(c++, g++, clang++, as, ld, ar, nm, objcopy, objdump, readelf, strip).
+The restricted PATH mode was blocking the clang/LLVM toolchain tools needed
+for cross-compilation.
+
+make-bootimage.sh, make-dtboimage.sh: replace python2 with python for
+mkdtboimg.py invocation. Python 2 is not available in the OHOS Docker build
+container; python (3) is the standard interpreter.
+
+Part of Phase 9 (Volla Tablet mimir bring-up) for hybris_generic.
+---
+ build.sh          | 2 +-
+ make-bootimage.sh | 2 +-
+ make-dtboimage.sh | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/build.sh b/build.sh
+index 040136a..0e58c6a 100755
+--- a/build.sh
++++ b/build.sh
+@@ -55,7 +55,7 @@ fi
+ if $deviceinfo_kernel_clang_compile; then
+     if [ -n "$deviceinfo_kernel_llvm_compile" ] && $deviceinfo_kernel_llvm_compile; then
+         # Restrict available binaries in PATH to make builds less susceptible to host differences
+-        ALLOWED_HOST_TOOLS="bash git perl sh sync tar yes"
++        ALLOWED_HOST_TOOLS="bash git perl sh sync tar yes c++ g++ clang++ as ld ar nm objcopy objdump readelf strip"
+ 
+         HOST_TOOLS=${TMPDOWN}/host_tools
+         rm -rf ${HOST_TOOLS}
+diff --git a/make-bootimage.sh b/make-bootimage.sh
+index 5e07a9d..054a2f0 100755
+--- a/make-bootimage.sh
++++ b/make-bootimage.sh
+@@ -173,7 +173,7 @@ elif [ -n "$deviceinfo_dtb" ]; then
+     DTBS="$PREFIX${deviceinfo_dtb// / $PREFIX}"
+     if [ -n "$deviceinfo_dtb_has_dt_table" ] && $deviceinfo_dtb_has_dt_table; then
+         echo "Appending DTB partition header to DTB"
+-        python2 "$TMPDOWN/libufdt/utils/src/mkdtboimg.py" create "$DTB" $DTBS --id="${deviceinfo_dtb_id:-0x00000000}" --rev="${deviceinfo_dtb_rev:-0x00000000}" --custom0="${deviceinfo_dtb_custom0:-0x00000000}" --custom1="${deviceinfo_dtb_custom1:-0x00000000}" --custom2="${deviceinfo_dtb_custom2:-0x00000000}" --custom3="${deviceinfo_dtb_custom3:-0x00000000}"
++        python "$TMPDOWN/libufdt/utils/src/mkdtboimg.py" create "$DTB" $DTBS --id="${deviceinfo_dtb_id:-0x00000000}" --rev="${deviceinfo_dtb_rev:-0x00000000}" --custom0="${deviceinfo_dtb_custom0:-0x00000000}" --custom1="${deviceinfo_dtb_custom1:-0x00000000}" --custom2="${deviceinfo_dtb_custom2:-0x00000000}" --custom3="${deviceinfo_dtb_custom3:-0x00000000}"
+     else
+         cat $DTBS > $DTB
+     fi
+diff --git a/make-dtboimage.sh b/make-dtboimage.sh
+index d8f81e6..577cb97 100755
+--- a/make-dtboimage.sh
++++ b/make-dtboimage.sh
+@@ -35,4 +35,4 @@ for dtbo in "${DTBOS[@]}"; do
+     i=$((i + 1))
+ done
+ 
+-python2 "$TMPDOWN/libufdt/utils/src/mkdtboimg.py" create "$OUT" $DTBO_ARGS
++python "$TMPDOWN/libufdt/utils/src/mkdtboimg.py" create "$OUT" $DTBO_ARGS
+-- 
+2.50.1
+

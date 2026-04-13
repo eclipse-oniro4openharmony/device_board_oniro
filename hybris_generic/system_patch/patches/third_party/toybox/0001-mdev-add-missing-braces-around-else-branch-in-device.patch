@@ -1,0 +1,36 @@
+From 4ac14cf1e7ca6c71cf35f8c4d927d875486c961d Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:35:26 +0000
+Subject: [PATCH] mdev: add missing braces around else branch in device node
+ creation
+
+The else branch of the device node path construction was missing braces,
+causing a spurious indentation and potential scope issues. Add braces to
+match the surrounding code style.
+
+Found during Phase 3 (core service stability) testing on the hybris_generic
+LXC container target.
+
+Change-Id: I8127c3df6ab0575883a4050ed53e069a1ead7ab3
+---
+ toys/pending/mdev.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/toys/pending/mdev.c b/toys/pending/mdev.c
+index eb44d9d..fc3d789 100644
+--- a/toys/pending/mdev.c
++++ b/toys/pending/mdev.c
+@@ -231,8 +231,9 @@ found_device:
+         else mkdir(toybuf, 0755);
+       }
+     }
+-    else
++    else {
+       sprintf(toybuf, "/dev/%s", device_name);
++    }
+ 
+       if ((temp=getenv("ACTION")) && !strcmp(temp, "remove")) {
+         unlink(toybuf);
+-- 
+2.50.1
+
