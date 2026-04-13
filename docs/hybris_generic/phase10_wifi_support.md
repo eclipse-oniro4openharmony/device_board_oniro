@@ -188,6 +188,78 @@ No manual configuration was needed.
 - **DNS:** `ping -c 3 google.com` → resolves and reaches `142.251.209.46`.
 - **WiFi processes:** `wifi_host` (-i 5), `wifi_manager_service`, `wpa_host` (-i 6) all running stably.
 
+### 10.10 — Volla Tablet (mimir) Bring-Up ✅ (2026-04-10)
+
+After Phase 9 completed mimir device bring-up, turning on WLAN in Settings produced a "WLAN Operation Error" toast even though the same codebase worked on X23. Two mimir-specific bugs were found and fixed:
+
+**Bug 10.10.A — `libwifi_hal_default.z.so` not installed into the rootfs**
+
+Symptom in hilog on WLAN toggle:
+```
+I C01566/HDF_LOG_TAG: Wifi HAL start enter
+W C03f07/MUSL-LDSO: load libwifi_hal_default.z.so failed, namespace=ndk no inherits, errno=2
+W C03f07/MUSL-LDSO: load libwifi_hal_default.z.so failed, namespace=default, errno=2
+E C01566/HDF_LOG_TAG: failed to open vendor hal library: libwifi_hal_default.z.so
+E C01566/HDF_LOG_TAG: Wifi HAL start failed.
+E C01560/HalDeviceManager: CheckChipHdiStarted, call Init failed! ret:-1
+```
+
+The chip HDI service (`libchip_controller_chip_interface_service_2.0.z.so`) dlopens `libwifi_hal_default.z.so` at start — this is the vendor HAL lib referenced by `drivers/peripheral/wlan/chip/hdi_service/wifi_vendor_hal_list.cpp`. Our hybris-patched version (with the `GetChipCaps`/`WifiGetSupportedFeatureSet` stubs from 10.5) is built by `device/soc/oniro/hybris_generic/hardware/wlan/BUILD.gn` and does exist at `out/hybris_generic/hdf/drivers_peripheral_wlan/libwifi_hal_default.z.so`, but it was never making it into `packages/phone/vendor/lib64/` and therefore never into the deployed rootfs.
+
+Root cause: the target had mismatched `part_name` / `subsystem_name`:
+```gn
+# BEFORE — wrong
+install_images = [ chipset_base_dir ]
+subsystem_name = "hdf"
+part_name = "drivers_peripheral_wlan"
+```
+The target lives under `device/soc/oniro/hybris_generic/` whose `bundle.json` registers component `hybris_generic_soc` under subsystem `oniro_soc_products`. The OHOS build system only collects a module's install metadata into `parts_modules_info.json` when the target's `part_name`/`subsystem_name` match the enclosing bundle.json component. With the mismatched values the `.so` compiled fine (the target is reachable from `hybris_generic_soc_group` in `device/soc/oniro/hybris_generic/BUILD.gn`) but the install collection + packaging phase silently dropped it. Compare with the sibling `hardware/display/BUILD.gn`, which correctly uses `part_name = "hybris_generic_soc"`.
+
+Fix in `device/soc/oniro/hybris_generic/hardware/wlan/BUILD.gn`:
+```gn
+# AFTER — correct
+install_images = [ chipset_base_dir ]
+subsystem_name = "oniro_soc_products"
+part_name = "hybris_generic_soc"
+```
+
+After a full (non-`--fast-rebuild`) build, `libwifi_hal_default.z.so` now lands in `packages/phone/vendor/lib64/` and the rootfs tarball. Short-term workaround while a full build is pending: `adb push` the built lib manually into `/home/phablet/openharmony/rootfs/vendor/lib64/`.
+
+**Bug 10.10.B — `phy0` soft-blocked by rfkill at boot**
+
+Once `libwifi_hal_default.z.so` was loadable, the chip HDI started successfully and OHOS reported `wifi state = 1`, but every scan attempt failed:
+```
+I C01566/HDF_LOG_TAG: start scan
+E C01566/HDF_LOG_TAG: failed to configure setup; result = -100
+E C01560/HalDeviceManager: Scan, call StartScan failed! ret:-1
+```
+`-100` is `-ENETDOWN` from the nl80211 `NL80211_CMD_TRIGGER_SCAN` path (`wifi_scan.cpp:259`), because `wlan0` was still `DOWN` (`cat /sys/class/net/wlan0/operstate` → `down`). Trying `ifconfig wlan0 up` from the host returned:
+```
+SIOCSIFFLAGS: Operation not possible due to RF-kill
+```
+`rfkill list` showed:
+```
+1: phy0: Wireless LAN
+    Soft blocked: yes
+    Hard blocked: no
+```
+On Ubuntu Touch, `urfkill` (and/or Android `wlan_assistant` before it's killed) can leave `phy0` soft-blocked at boot. The X23 path happens not to hit this; mimir does, every time. `rfkill unblock all` on the host cleared the block and `wlan0` came UP immediately, after which scans returned networks and association/DHCP/DNS all worked normally.
+
+Permanent fix: added an `rfkill unblock all` block to `start-ohos.sh`, right after the existing WiFi-daemon-stop section (so it runs before the container starts and before any OHOS service touches `wlan0`):
+```bash
+if command -v rfkill >/dev/null 2>&1; then
+    echo "Unblocking rfkill on all radios..." | tee -a $LOG_FILE
+    rfkill unblock all 2>&1 | tee -a $LOG_FILE || true
+fi
+```
+Harmless on X23 (phy0 is already unblocked there).
+
+**Diagnostic order for future WiFi regressions on mimir:**
+1. `rfkill list` on host — phy0 should show `Soft blocked: no`.
+2. `hdc shell "ifconfig wlan0"` and `cat /sys/class/net/wlan0/operstate` — must be `UP` / `up` after the container has tried to enable WiFi.
+3. `hdc shell "ls /vendor/lib64/libwifi_hal_default.z.so"` — absence gives the `MUSL-LDSO ... errno=2` + `Wifi HAL start failed` signature above.
+4. `hdc shell "hilog | grep -E 'HDF_LOG_TAG|HalDeviceManager|WifiStaHalInterface'"` while toggling WLAN.
+
 ---
 
 ## Files Modified
@@ -195,9 +267,10 @@ No manual configuration was needed.
 | File | Change |
 |------|--------|
 | `vendor/oniro/hybris_generic/hdf_config/uhdf/device_info.hcs` | Added `chip_interface_service`, `wpa :: host`, caps on `wifi_host` |
-| `drivers/peripheral/wlan/chip/wifi_hal/wifi_ioctl.cpp` | Stubbed `GetChipCaps`/`WifiGetSupportedFeatureSet` to avoid SIGSEGV on MediaTek |
+| `device/soc/oniro/hybris_generic/hardware/wlan/wifi_ioctl.cpp` | Hybris-local copy of `wifi_ioctl.cpp` with `GetChipCaps`/`WifiGetSupportedFeatureSet` stubbed to avoid SIGSEGV on MediaTek (built into `libwifi_hal_default.z.so` by the sibling BUILD.gn) |
+| `device/soc/oniro/hybris_generic/hardware/wlan/BUILD.gn` | **10.10.A fix** — `subsystem_name`/`part_name` changed from `hdf`/`drivers_peripheral_wlan` to `oniro_soc_products`/`hybris_generic_soc` so the built lib gets installed into the rootfs |
 | `device/board/oniro/hybris_generic/utils/lxc/config` | Added `/dev/rfkill` bind mount |
-| `device/board/oniro/hybris_generic/utils/start-ohos.sh` | Added WiFi daemon stop (host wpa_supplicant mask, Android ctl.stop) |
+| `device/board/oniro/hybris_generic/utils/start-ohos.sh` | Added WiFi daemon stop (host `wpa_supplicant` mask, Android `ctl.stop`); **10.10.B fix** — added `rfkill unblock all` |
 
 ---
 
@@ -227,4 +300,6 @@ Both files must be deployed to `/vendor/etc/hdfconfig/hdf_default.hcb` and `/ven
 | wpa_supplicant config | `/data/service/el1/public/wifi/wpa_supplicant/wpa_supplicant.conf` (runtime) |
 | WiFi crash logs | `/data/log/faultlog/faultlogger/cppcrash-wifi_host-*` |
 | HCB output | `out/hybris_generic/packages/phone/vendor/etc/hdfconfig/hdf_default.hcb` |
-| libwifi_hal_default.z.so | `out/hybris_generic/hdf/drivers_peripheral_wlan/libwifi_hal_default.z.so` |
+| libwifi_hal_default.z.so (built) | `out/hybris_generic/hdf/drivers_peripheral_wlan/libwifi_hal_default.z.so` |
+| libwifi_hal_default.z.so (installed, post full build) | `out/hybris_generic/packages/phone/vendor/lib64/libwifi_hal_default.z.so` → deployed as `/vendor/lib64/libwifi_hal_default.z.so` |
+| Hybris wlan BUILD.gn + patched ioctl | `device/soc/oniro/hybris_generic/hardware/wlan/` |
