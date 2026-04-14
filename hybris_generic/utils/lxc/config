@@ -85,5 +85,30 @@ lxc.mount.entry = /vendor/lib64/hw  vendor/lib64/hw  none bind,ro,create=dir,opt
 lxc.mount.entry = /run/ohos-host-action ohos-host-action none bind,create=file,optional 0 0
 lxc.hook.post-stop = /home/phablet/openharmony/ohos-post-stop.sh
 
+# Make /storage/Users readable by normal apps (sharefs substitute).
+# OHOS sandbox has two mounts for /storage/Users in appdata-sandbox.json:
+#   - FILE_CROSS_APP         -> /mnt/user/<uid>/nosharefs/docs   (privileged only)
+#   - FILE_ACCESS_COMMON_DIR -> /mnt/user/<uid>/sharefs/docs     (what normal apps see)
+# On a real OHOS device storage_daemon stacks the kernel `sharefs` filesystem
+# (fs/sharefs/) onto nosharefs/docs to produce sharefs/docs with per-URI
+# permission filtering. Our Halium/MediaTek 5.10 kernel has no sharefs driver
+# (`cat /proc/filesystems` only lists fuse), so sharefs/docs stays empty and
+# apps like VLC open picker URIs and hit ENOENT.
+# Pre-bind nosharefs/docs onto sharefs/docs at LXC mount time so every normal
+# app sees the same files the file picker enumerates. storage_daemon's
+# MountSharefs() early-exits when IsPathMounted(dst) is true, so this bind
+# sticks across the daemon's own mount attempt. Every app that gets the
+# FILE_ACCESS_COMMON_DIR sandbox mount sees all user files — no per-URI
+# filtering — which matches the existing security posture of this build.
+lxc.mount.entry = /home/phablet/openharmony/rootfs/mnt/user/100/nosharefs/docs mnt/user/100/sharefs/docs none bind,create=dir,optional 0 0
+
+# External storage for the OHOS FileAccess extension (com.ohos.UserFile.ExternalFileManager).
+# appspawn bind-mounts /mnt/data/external into the extension's per-app sandbox (as an
+# "individual" section — required to succeed). Without a source path the extension process
+# fails to spawn with "DoAppSandboxMountOnce section individual failed" and
+# fileAccess.createFileAccessHelper() times out with 14300009. Pointing this at
+# /home/phablet gives the picker access to the user's Ubuntu Touch media folders.
+lxc.mount.entry = /home/phablet mnt/data/external none rbind,create=dir,optional 0 0
+
 lxc.cgroup.devices.allow = a
 lxc.cgroup2.devices.allow = a
