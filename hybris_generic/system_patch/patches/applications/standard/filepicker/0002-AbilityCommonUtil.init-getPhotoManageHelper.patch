@@ -1,0 +1,44 @@
+From de8c187d4c71574d3d4e17e1e5a9e72ecffa7777 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 14 Apr 2026 15:32:54 +0000
+Subject: [PATCH 2/2] =?UTF-8?q?AbilityCommonUtil.init=20=E4=B8=AD=E4=B8=8D?=
+ =?UTF-8?q?=E5=86=8D=E5=90=8C=E6=AD=A5=E8=A7=A6=E5=8F=91=20getPhotoManageH?=
+ =?UTF-8?q?elper?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+photoAccessHelper.getPhotoAccessHelper() 是同步 IPC，在部分设备上
+(例如 hybris_generic/LXC 容器) 会阻塞主线程约 6 秒。init() 中的这次
+"预热"调用处于 FilePickerUIExtAbility.onSessionCreate → Promise.all
+链上，导致 UIExtensionAbility 的前台切换超过 5s 看门狗，触发
+LIFECYCLE_TIMEOUT 后被 AppMS 以 APP_FREEZE 杀掉，picker 永远无法拉起。
+
+移除此预热后，其他同名调用点 (getPhotoManageHelper 自身) 已经做了懒加载
+缓存，在首次真正需要媒体库实例时仍会按需创建，不影响功能。
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Change-Id: I1252ae30c1f7d3e4d4026afead736ab538f396e7
+---
+ entry/src/main/ets/base/utils/AbilityCommonUtil.ts | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/entry/src/main/ets/base/utils/AbilityCommonUtil.ts b/entry/src/main/ets/base/utils/AbilityCommonUtil.ts
+index d701e1b..af1fc22 100644
+--- a/entry/src/main/ets/base/utils/AbilityCommonUtil.ts
++++ b/entry/src/main/ets/base/utils/AbilityCommonUtil.ts
+@@ -104,7 +104,10 @@ namespace AbilityCommonUtil {
+    */
+   export function init(): Promise<void[]> {
+     const fileAccessHelperPromise = createFileAccessHelper();
+-    getPhotoManageHelper();
++    // 不在 init 中同步触发 photoAccessHelper.getPhotoAccessHelper()：
++    // 该 IPC 在本设备上会阻塞主线程 ~6s，导致 UIExtensionAbility 的前台切换
++    // 超过 5s 看门狗 (LIFECYCLE_TIMEOUT)，进程被 APP_FREEZE 杀掉。
++    // 媒体库实例由 getPhotoManageHelper() 在首次实际使用时懒加载。
+     const getRequestPermission = requestPermission();
+     const initData = initLastSelectPath();
+     return Promise.all([fileAccessHelperPromise, getRequestPermission, initData]);
+-- 
+2.50.1
+

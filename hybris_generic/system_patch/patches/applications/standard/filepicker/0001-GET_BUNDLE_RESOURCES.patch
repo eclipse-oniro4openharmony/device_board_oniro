@@ -1,0 +1,39 @@
+From 6b4d6927e11f2c4d1d0e0ee3d91e61434c1eae5e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 14 Apr 2026 15:32:43 +0000
+Subject: [PATCH 1/2] =?UTF-8?q?=E7=94=B3=E8=AF=B7=20GET=5FBUNDLE=5FRESOURC?=
+ =?UTF-8?q?ES=20=E6=9D=83=E9=99=90=E4=BB=A5=E8=8E=B7=E5=8F=96=E8=B0=83?=
+ =?UTF-8?q?=E7=94=A8=E6=96=B9=E5=9B=BE=E6=A0=87=E4=B8=8E=E6=A0=87=E7=AD=BE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+FilePickerUIExtAbility.onSessionCreate 调用 bundleResourceManager.getBundleResourceInfo(callerBundleName)
+以在 picker 顶部展示调用方应用的名称/图标。此 API 在 API 11+ 起需要
+ohos.permission.GET_BUNDLE_RESOURCES；否则每次拉起 picker 都会抛出并记录
+"getBundleResourceInfo failed: ..." 错误，appName/appIcon 也不会被注入 LocalStorage。
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Change-Id: Id1156fe87745b51dceed6f123536633ffcb7286f
+---
+ entry/src/main/module.json5 | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/entry/src/main/module.json5 b/entry/src/main/module.json5
+index 3fd8d33..e7375d7 100644
+--- a/entry/src/main/module.json5
++++ b/entry/src/main/module.json5
+@@ -75,6 +75,10 @@
+       {
+         name: 'ohos.permission.GET_BUNDLE_INFO_PRIVILEGED'
+       },
++      // getBundleResourceInfo 需要此权限获取调用方图标/标签
++      {
++        name: 'ohos.permission.GET_BUNDLE_RESOURCES'
++      },
+       // 公共目录uri代理授权的权限
+       {
+         "name": "ohos.permission.PROXY_AUTHORIZATION_URI"
+-- 
+2.50.1
+
