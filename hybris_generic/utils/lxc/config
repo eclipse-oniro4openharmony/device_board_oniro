@@ -54,6 +54,8 @@ lxc.mount.entry = /dev/mali0    dev/mali0    none bind,create=file,optional 0 0
 lxc.mount.entry = /dev/dri      dev/dri      none rbind,create=dir,optional 0 0
 lxc.mount.entry = /dev/input   dev/input    none rbind,create=dir,optional 0 0
 lxc.mount.entry = /dev/rfkill  dev/rfkill   none bind,create=file,optional 0 0
+# Phase 13B: native ALSA audio via alsa-lib — expose MTK sound card nodes
+lxc.mount.entry = /dev/snd     dev/snd      none rbind,create=dir,optional 0 0
 
 lxc.mount.entry = /dev/__properties__ dev/__properties__ none bind,create=dir,optional 0 0
 
