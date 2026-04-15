@@ -20,6 +20,7 @@ Detailed roadmap for running OpenHarmony 6.1 rootfs as an LXC container on the V
 | 10 | [WiFi Support](phase10_wifi_support.md) | ✅ Complete | Native OHOS WiFi stack via HDI WPA path (not legacy wifi_hal_service); host/Android daemon conflict resolution; `chip_interface_service` + `wpa_host` HDF config; MediaTek `GetChipCaps` SIGSEGV fix; WiFi scan + connect + DHCP + DNS working |
 | 11 | [Power Off & Backlight](phase11_power_off_and_backlight_plan.md) | 🔄 In Progress | Fix 1 (backlight sysfs write via `composer_host` + `DAC_OVERRIDE`) ✅ deployed and verified on X23; Fix 2 (container shutdown/reboot propagation via `/ohos-host-action` flag + `lxc.hook.post-stop`) implemented and built, on-device verification pending |
 | 12 | [User-File Access via `sharefs`](phase12_sharefs_user_files.md) | ⚠️ Workaround deployed / proper fix pending | Normal apps (VLC etc.) see `/storage/Users` via an LXC bind `nosharefs/docs` → `sharefs/docs` because the Halium 5.10 kernel has no `sharefs` driver; `storage_user_path.json` patched to mode `0755` on docs dirs so `ExternalFileManager` can enumerate. **TODO:** port `fs/sharefs/` from OHOS linux-6.6 onto the X23/mimir 5.10 kernel (Phase-2-style work) and revert the bind to restore per-URI permission filtering |
+| 13 | [Audio Support](phase13_audio_support.md) | ⚠️ 13B partially working — silent | Phase 13B (native ALSA via alsa-lib): all 13B sub-steps implemented + deployed on `phase13b-native-alsa-wip` branches; `audio_host` + `libaudio_render_adapter.z.so` + `libasound` + `/dev/snd/pcmC0D0p` chain is up; `snd_pcm_hw_params` succeeds; PCM RUNNING with `hw_ptr` advancing at ~44.1 kHz; all DAPM widgets (`DACL/R`, `HPL Mux=Audio Playback`, `Headphone L Ext Spk Amp`, `Ext_Speaker_Amp`) powered; non-zero S16LE music samples confirmed reaching `snd_pcm_writei` via dump — **but OHOS playback is silent**. `aplay -D hw:0,0` from the UT host with the same mixer state reliably produces audible sound (so speaker / codec / DAC work under the same kernel). Suspected culprits: OHOS-built libasound divergence, missing MTK kernel-side PLL/clock setup the Android HAL normally does, or audio_server feed pacing. See phase13 doc for next experiments. 13A (libhybris→MTK HAL) stays stashed as fallback — blocked by Bug 13.A (aurisys NULL deref). |
 
 ---
 
@@ -115,6 +116,54 @@ Normal apps couldn't see picker-granted files in `/storage/Users`: their sandbox
 **Workaround deployed (2026-04-15):** LXC-time bind `nosharefs/docs` → `sharefs/docs` (`storage_daemon::MountSharefs` early-exits on `IsPathMounted(dst)`, so the bind survives); `storage_user_path.json` patched to `mode: "0755"` on the four `{no,}sharefs/docs{,/currentUser}` entries so the sandboxed `ExternalFileManager` can enumerate them. Trade-off: `UriPermMgr` filtering is bypassed — every app with `FILE_ACCESS_COMMON_DIR` sees all of `/storage/Users`.
 
 **Proper fix (TODO):** port `fs/sharefs/` from OHOS linux-6.6 onto the X23/mimir 5.10 kernel (same Phase-2-style work as `hilog`/`accesstokenid`/binder token-id), then revert the LXC bind. See phase12 doc.
+
+### Phase 13 — Audio Support (13B native ALSA partially working on X23 — silent, 2026-04-16)
+
+**Current state (Phase 13B, 2026-04-16):** all 13B sub-steps implemented + deployed on the `phase13b-native-alsa-wip` branch in the affected repos. The community HDI path driving `libasound` → `/dev/snd/pcmC0D0p` (MT6789 `Playback_1`) is fully wired up: `audio_host` boots, `snd_pcm_hw_params` succeeds, the PCM stays in `RUNNING` with `hw_ptr` advancing at ~44.1 kHz, all DAPM widgets (`DACL/R`, `HPL Mux=Audio Playback`, `Headphone L Ext Spk Amp`, `Ext_Speaker_Amp`) are powered, and a debug dump in `RenderWritei` confirms non-zero S16LE music samples are reaching `snd_pcm_writei` from the `ohos.samples.distributedmusicplayer` sample. **Despite all of that, OHOS playback is silent.** Reverting via `lxc-stop` and running `aplay -D hw:0,0 dynamic.wav` from the UT host with `Ext_Speaker_Amp Switch = on` reliably produces audible sound on the same device with the same kcontrol/DAPM state — proving the speaker, codec and DAC are functional. The OHOS-specific silence is **unresolved**.
+
+Work delivered on `phase13b-native-alsa-wip` (commit pieces — no source yet committed to mainline):
+- `vendor/oniro/hybris_generic/hals/audio/product.gni` — `drivers_peripheral_audio_feature_alsa_lib = true` (mirrored in `config.json`)
+- `vendor/oniro/hybris_generic/hals/audio/alsa_adapter.json` + `alsa_paths.json` — MT6789-accurate adapter + scene paths
+- `vendor/oniro/hybris_generic/hdf_config/uhdf/device_info.hcs` — `caps = ["DAC_OVERRIDE","SYS_NICE"]` on `audio_host`
+- `device/board/oniro/hybris_generic/audio_alsa/{common.h,vendor_render.c,vendor_capture.c}` — MTK render/capture vendor hooks (`RenderInitImpl` drives the DAPM route bring-up + Ext_Speaker_Amp Off→On toggle so the kernel's DAPM power sequencer fires)
+- `device/board/oniro/hybris_generic/utils/lxc/config` — `/dev/snd rbind` entry
+- `device/board/oniro/hybris_generic/utils/start-ohos.sh` — PulseAudio mask
+- `device/board/oniro/hybris_generic/utils/ohos-post-stop.sh` — PulseAudio unmask on teardown
+- `drivers/peripheral/audio/supportlibs/alsa_adapter/src/alsa_snd_render.c` — open PCM in **blocking** mode (was `SND_PCM_NONBLOCK`, silent frame drops on EAGAIN), set `period_time` *before* `buffer_time` (matches `aplay`, gives 4×125ms periods instead of 2×250ms), `start_threshold = period_size` (was `buffer_size`, forced full refill after every xrun)
+
+**Open root cause** (suspected): OHOS-built `libasound.so` divergence from the host's working glibc-built one (size differs, musl vs glibc, dependency on `ld-linux-aarch64.so.1`); MTK kernel-side PLL/clock setup that the Android HAL normally performs and we don't replicate; or sustained underruns from `AudioRenderSink::RenderFrame` running at "cost: 101 ms" per 4 KiB write (~10× slower than real-time at 44.1 kHz S16LE stereo). Detailed next-experiment list in `phase13_audio_support.md` ("Recommended next experiments").
+
+Open items (Phase 13B), ordered by priority:
+- **Find the silence root cause.** Build `test_audio` inside the OHOS rootfs that calls `snd_pcm_open / hw_params / writei` directly on `/vendor/lib64/libasound.so` to bisect lib-vs-framework. Snoop kernel ASoC writes during working `aplay` and OHOS-silent runs to find missing PLL/clock setup.
+- Capture-side smoke test (mic recording). `vendor_capture.c` exists but is untested.
+- Headset-jack detect: the 13A poll thread on `/sys/class/switch/h2w/state` was tied to the VDI plugin; native-ALSA equivalent not yet wired.
+- Per-scene routing: `alsa_paths.json` is authored, but upstream `alsa_snd_render.c::RenderSelectSceneImpl` stubs it; wire it when ringtone/voice paths are exercised.
+- Volume slider from Settings — confirm it reaches the `Lineout Volume` kcontrol.
+
+**13A (libhybris → MTK HAL) history (kept as fallback):**
+
+
+Brings primary-output playback, primary-input capture, volume, routing, and wired-headset detection to the OHOS container. No kernel-side HDF audio driver exists on Halium 5.10, so the default community path (`drivers_peripheral_audio_feature_community = true`) is unusable. The plan flips the flag, rebuilds `libaudio_primary_impl_vendor.z.so` as a VDI dispatcher that `dlopen`s a plugin, and ships the plugin from `device/soc/oniro/hybris_generic/hardware/audio/` as a libhybris bridge onto `/android/vendor/lib64/hw/audio.primary.mt6789.so`.
+
+**Status (2026-04-15):** all code + LXC/deploy changes landed, full build green, deployed + booted on Volla X23 — HAL loads, adapter enumerates, `audio_host` stable while idle. **First-playback write still blocked by an MTK aurisys NULL-deref SIGSEGV (Bug 13.A).**
+
+Work completed:
+- VDI plugin `libaudio_primary_impl.z.so`: `IAudioManagerVdi` (single `primary` adapter), `IAudioAdapterVdi` (route/mute/voice-volume/extra-params + `CreateRender`/`CreateCapture`), `IAudioRenderVdi` (Start/Stop/Pause/Resume/Flush/Drain, Get{Latency,RenderPosition}, volume + mute, extra-params pass-through), `IAudioCaptureVdi` (symmetric read path + EC-frame stub).
+- Headset detection (13.6) via a worker thread polling `/sys/class/switch/h2w/state` (extcon fallback) and dispatching `AUDIO_VDI_EXT_PARAM_KEY_STATUS` param callbacks.
+- LXC config: `/dev/snd` rbind, `/android/vendor/etc/audio_{param,policy_*,effects,device}*` absolute-path binds; deploy script creates rootfs placeholders.
+- `start-ohos.sh` masks host PulseAudio before container start; `ohos-post-stop.sh` unmasks on container teardown.
+- `audio_host` in `device_info.hcs` gains `caps = ["DAC_OVERRIDE","SYS_NICE"]` (matches Phase 11 `composer_host` pattern).
+- Deploy script symlinks `/vendor/lib64/libaudio_primary_impl.z.so → passthrough/libaudio_primary_impl.z.so` because `innerapi_tags = [ "passthrough" ]` forces the subdir but the VDI dispatcher's `HDF_LIBRARY_FULL_PATH` resolves to the parent dir.
+
+Deviations from the original plan (all documented in `phase13_audio_support.md`):
+1. No link-time dep on libhardware/libhilog — `deps_guard` Passthrough rule refused the deps; instead the plugin dlopens `libhardware.z.so` at runtime and logs via `fprintf(stderr, …)`. Resulting `NEEDED` list is just `libc.so` + `libc++.so`.
+2. Patched upstream `vdi_src/audio_render_vdi.c` typo (`rendrId` vs `renderId`, 15 occurrences in a single file).
+3. Patched upstream `vdi_src/audio_manager_vdi.c` — `SetMaxWorkThreadNum` had C++ scope-resolution syntax in a `.c` file; stubbed to `(void)count`.
+4. Registered our plugin in `developtools/integration_verification/tools/deps_guard/rules/Passthrough/passthrough_info.json` so `check_depends_on_passthrough` accepts it.
+
+Open on-device items (13.7): `audio_host` boots clean, `IAudioManager::GetAllAdapters` returns `primary`, `idl_render`/`idl_capture` smoke tests, volume key integration, 30-minute music-loop RSS monitoring, verification that `libhdi_audio_pnp_server` consumes our jack-state callbacks or needs additional plumbing.
+
+**Pivot (2026-04-15):** 13A is now frozen in place as a fallback while Phase 13B — native ALSA via OHOS's existing `drivers_peripheral_audio_feature_alsa_lib` path — replaces it. 13B drives `/dev/snd/pcmC0D*` directly via `libasound`, skipping the MTK HAL and its DSP middleware entirely. The MTK kernel ALSA card (`mt6789-mt6366`) is already present and visible from the container; OHOS's upstream `drivers/peripheral/audio/supportlibs/alsa_adapter/` is the render/capture path; two reference products (rk3568, x86_general) exist as template. The delta to author is small: an MTK-accurate `alsa_adapter.json` + `alsa_paths.json`, a ~250-line `vendor_render.c` + ~150-line `vendor_capture.c` under `device/board/oniro/hybris_generic/audio_alsa/`, and product-gni flag flips. Full step-by-step plan in `phase13_audio_support.md` section "Phase 13B — Replacement plan". Trade-off: loses MTK's proprietary speaker protection, echo cancellation, noise suppression, and call-audio routing — none of which were working in 13A anyway. Preserves everything functional in 13A (stereo playback, mic capture, mixer volume). Stays valid unchanged when OHOS eventually boots natively with Android-as-guest.
 
 ---
 

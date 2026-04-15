@@ -16,6 +16,12 @@
 # The script always clears the flag after reading it so a subsequent container
 # respawn cannot re-trigger a stale action.
 
+# Phase 13B: restore UT PulseAudio so the host session recovers audio when the
+# OHOS container is stopped (start-ohos.sh masks these before lxc-start).
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl --global unmask pulseaudio.service pulseaudio.socket >/dev/null 2>&1 || true
+fi
+
 FLAG=/run/ohos-host-action
 
 [ -r "$FLAG" ] || exit 0
