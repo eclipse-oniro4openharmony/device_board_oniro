@@ -151,6 +151,17 @@ echo "Preparing host shutdown-request flag..." | tee -a $LOG_FILE
 : > /run/ohos-host-action
 chmod 0666 /run/ohos-host-action
 
+# ── Phase 13B: free the MTK audio card from the UT host ─────────────────
+# Ubuntu Touch ships PulseAudio (with `pulseaudio-modules-droid*`) which
+# opens /dev/snd/pcmC0D*p directly and would contend with OHOS's alsa-lib
+# render/capture path. Mask + kill both global and user-level instances so
+# the card is free before the container starts. ohos-post-stop.sh unmasks.
+echo "Masking host PulseAudio to release audio card..." | tee -a $LOG_FILE
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl --global mask pulseaudio.service pulseaudio.socket 2>&1 | tee -a $LOG_FILE || true
+fi
+pkill -u phablet -x pulseaudio 2>/dev/null || true
+
 # ── Start the OpenHarmony container ──────────────────────────────────────
 echo "Starting OpenHarmony container..." | tee -a $LOG_FILE
 /usr/bin/lxc-start -n openharmony -F 2>&1 | tee -a $LOG_FILE
