@@ -1,0 +1,134 @@
+From d97d04232b281c7af0feefa450a78da0e1a81cfd Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 16 Apr 2026 10:14:05 +0000
+Subject: [PATCH 1/2] alsa_adapter: open PCM blocking, set period_time first,
+ lower start_threshold
+
+Phase 13B (native ALSA audio on Volla X23, MT6789+MT6366) hits silent
+playback unless three things change in the upstream community-path
+alsa_snd_render code:
+
+1. snd_pcm_open with SND_PCM_NONBLOCK (and matching snd_pcm_nonblock(1))
+   makes snd_pcm_writei return -EAGAIN whenever the kernel ring buffer
+   is full. The retry loop in RenderWritei caps at AUDIO_ALSALIB_RETYR
+   (3) and then RETURNS HDF_SUCCESS, silently dropping frames. Open
+   blocking instead so writei sleeps until space is available.
+
+2. The hw_params helper called snd_pcm_hw_params_set_buffer_time_near
+   BEFORE snd_pcm_hw_params_set_period_time_near. With buffer fixed
+   first, the MTK kernel picks period = buffer/2 (250ms x 2) instead of
+   buffer/4 (125ms x 4). aplay does period-time first, gets 4 periods,
+   gives the app slack between writes. Swap the order to match aplay.
+
+3. SetSWParams forced start_threshold = (buffer_size / period_size) *
+   period_size = buffer_size, meaning playback only begins when the app
+   has fully filled 500ms of buffer. After every xrun the same rule
+   applies, so OHOS's bursty RenderFrame cadence stalls the stream
+   forever. Use period_size so play resumes as soon as one period is
+   queued.
+
+These fixes are necessary but NOT sufficient for OHOS audio to be
+audible on this device - sound is still silent under conditions where
+host aplay produces audible output. See
+device/board/oniro/docs/hybris_generic/phase13_audio_support.md
+for the full diagnosis and recommended next experiments.
+
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Change-Id: Ib681c42d6d5c156157c1ffaea6b0f8131d724665
+---
+ .../alsa_adapter/src/alsa_snd_render.c        | 41 ++++++++++++-------
+ 1 file changed, 27 insertions(+), 14 deletions(-)
+
+diff --git a/audio/supportlibs/alsa_adapter/src/alsa_snd_render.c b/audio/supportlibs/alsa_adapter/src/alsa_snd_render.c
+index f7250fd67..6e16fa7ee 100755
+--- a/audio/supportlibs/alsa_adapter/src/alsa_snd_render.c
++++ b/audio/supportlibs/alsa_adapter/src/alsa_snd_render.c
+@@ -174,11 +174,25 @@ static int32_t SetHWParams(struct AlsaSoundCard *cardIns, snd_pcm_access_t acces
+         AUDIO_FUNC_LOGE("SetHWRate failed!");
+         return HDF_FAILURE;
+     }
++    /* Phase 13B: Set period_time BEFORE buffer_time so the kernel honours
++     * the period choice (matches `aplay`'s ordering). With buffer_time set
++     * first the MTK AFE picks period=buffer/2 (250ms × 2) which leaves no
++     * slack for OHOS's bursty RenderFrame cadence; with period_time first
++     * we get the desired 4-period split (125ms × 4). */
+     snd_pcm_hw_params_get_buffer_time_max(hwParams, &renderIns->bufferTime, &dir);
+     if (renderIns->bufferTime > AUDIO_BUFFER_TIME_DEF) {
+         renderIns->bufferTime = AUDIO_BUFFER_TIME_DEF;
+     }
+     renderIns->periodTime = renderIns->bufferTime / AUDIO_PERIOD_TIME_RATIO;
++    if (snd_pcm_hw_params_set_period_time_near(cardIns->pcmHandle, hwParams, &renderIns->periodTime, &dir) < 0) {
++        AUDIO_FUNC_LOGE("Set period time %{public}u failed", renderIns->periodTime);
++        return HDF_FAILURE;
++    }
++    if (snd_pcm_hw_params_get_period_size(hwParams, &size, &dir) < 0) {
++        AUDIO_FUNC_LOGE("Unable to get period size for playback");
++        return HDF_FAILURE;
++    }
++    renderIns->periodSize = size;
+     if (snd_pcm_hw_params_set_buffer_time_near(cardIns->pcmHandle, hwParams, &renderIns->bufferTime, &dir) < 0) {
+         AUDIO_FUNC_LOGE("Set buffer time %{public}u failed", renderIns->bufferTime);
+         return HDF_FAILURE;
+@@ -188,15 +202,6 @@ static int32_t SetHWParams(struct AlsaSoundCard *cardIns, snd_pcm_access_t acces
+         return HDF_FAILURE;
+     }
+     renderIns->bufferSize = size;
+-    if (snd_pcm_hw_params_set_period_time_near(cardIns->pcmHandle, hwParams, &renderIns->periodTime, &dir) < 0) {
+-        AUDIO_FUNC_LOGE("Set period time %{public}u failed", renderIns->bufferTime);
+-        return HDF_FAILURE;
+-    }
+-    if (snd_pcm_hw_params_get_period_size(hwParams, &size, &dir) < 0) {
+-        AUDIO_FUNC_LOGE("Unable to get period size for playback");
+-        return HDF_FAILURE;
+-    }
+-    renderIns->periodSize = size;
+     if (snd_pcm_hw_params(cardIns->pcmHandle, hwParams) < 0) {
+         AUDIO_FUNC_LOGE("Unable to set hw params for playback");
+         return HDF_FAILURE;
+@@ -221,14 +226,18 @@ static int32_t SetSWParams(struct AlsaSoundCard *cardIns)
+         AUDIO_FUNC_LOGE("Unable to determine current swparams for playback: %{public}s", snd_strerror(ret));
+         return HDF_FAILURE;
+     }
+-    /* start the transfer when the buffer is almost full: */
+-    /* (buffer_size / avail_min) * avail_min */
++    /* Phase 13B: original code used start_threshold = buffer_size which
++     * forces the app to fully fill 500ms before any sound starts. After an
++     * xrun, snd_pcm_recover resets to PREPARED — and playback won't restart
++     * until the buffer is refilled, but by then we've underrun again. The
++     * 21ms-per-write OHOS cadence can't keep up. Use period_size so playback
++     * begins on the first write and recovery doesn't stall the stream. */
+     if (renderIns->periodSize == 0) {
+         AUDIO_FUNC_LOGE("g_periodSize=0");
+         return HDF_FAILURE;
+     }
+     ret = snd_pcm_sw_params_set_start_threshold(handle, swParams,
+-        (renderIns->bufferSize / renderIns->periodSize) * renderIns->periodSize);
++        renderIns->periodSize);
+     if (ret < 0) {
+         AUDIO_FUNC_LOGE("Unable to set start threshold mode for playback: %{public}s", snd_strerror(ret));
+         return HDF_FAILURE;
+@@ -662,15 +671,19 @@ static int32_t RenderOpenImpl(struct AlsaRender *renderIns)
+         return HDF_ERR_DEVICE_BUSY;
+     }
+ 
++    /* Phase 13B: MT6789 AFE drops audio when opened non-blocking because the
++     * community write path returns HDF_SUCCESS on EAGAIN timeout (see
++     * RenderWritei), silently dropping frames. Open blocking so writei
++     * waits for buffer space instead. */
+     int32_t ret = snd_pcm_open(&cardIns->pcmHandle, cardIns->devName,
+-        SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
++        SND_PCM_STREAM_PLAYBACK, 0);
+     if (ret < 0) {
+         AUDIO_FUNC_LOGE("snd_pcm_open fail: %{public}s!", snd_strerror(ret));
+         RenderFreeMemory();
+         return HDF_FAILURE;
+     }
+ 
+-    ret = snd_pcm_nonblock(cardIns->pcmHandle, 1);
++    ret = snd_pcm_nonblock(cardIns->pcmHandle, 0);
+     if (ret < 0) {
+         AUDIO_FUNC_LOGE("snd_pcm_nonblock fail: %{public}s!", snd_strerror(ret));
+         SndCloseHandle(&renderIns->soundCard);
+-- 
+2.50.1
+

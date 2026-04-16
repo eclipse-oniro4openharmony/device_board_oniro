@@ -1,0 +1,64 @@
+From 752e206dd750e6f20533c3aac250b043f2d98237 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 16 Apr 2026 10:14:05 +0000
+Subject: [PATCH 2/2] alsa_adapter: close snd_ctl_t handle in SndElementWrite
+ on every return path
+
+SndElementWrite opened a fresh snd_ctl_t per call via snd_ctl_open but
+never released it, so every mixer write leaked a /dev/snd/controlC0 fd.
+After a few minutes of playback audio_host accumulated 25+ controlC0
+fds; the upstream design that keeps audio_host alive across sessions
+made the leak unbounded.
+
+This also unblocks the Phase 13B fix in
+device/board/oniro/hybris_generic/audio_alsa/vendor_render.c that
+close+reopens the PCM on every Start to clear hidden MT6789 AFE
+per-session state -- without closing the ctl handle on each mixer
+write, the reopen pattern would leak ctl fds at the same rate.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Change-Id: Icd57c5e178082ff240bc5a77423f2eb0400095e8
+---
+ audio/supportlibs/alsa_adapter/src/alsa_soundcard.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
+index e6bd6ebf1..8eec87375 100644
+--- a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
++++ b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
+@@ -1245,11 +1245,13 @@ int32_t SndElementWrite(
+     ret = SetElementInfo(alsaHandle, ctlElem, elem_info, elem_id);
+     if (ret != HDF_SUCCESS) {
+         AUDIO_FUNC_LOGE("Set element %{public}s elem_info failed!\n", ctlElem->name);
++        snd_ctl_close(alsaHandle);
+         return HDF_FAILURE;
+     }
+ 
+     if (!snd_ctl_elem_info_is_writable(elem_info)) {
+         AUDIO_FUNC_LOGE("Element write enable\n");
++        snd_ctl_close(alsaHandle);
+         return HDF_FAILURE;
+     }
+ 
+@@ -1257,14 +1259,17 @@ int32_t SndElementWrite(
+     ret = snd_ctl_ascii_value_parse(alsaHandle, elem_value, elem_info, ctlElem->value);
+     if (ret < 0) {
+         AUDIO_FUNC_LOGE("Control parse error: %s\n", snd_strerror(ret));
++        snd_ctl_close(alsaHandle);
+         return HDF_FAILURE;
+     }
+     ret = snd_ctl_elem_write(alsaHandle, elem_value);
+     if (ret < 0) {
+         AUDIO_FUNC_LOGE("Control element write error: %s\n", snd_strerror(ret));
++        snd_ctl_close(alsaHandle);
+         return HDF_FAILURE;
+     }
+ 
++    snd_ctl_close(alsaHandle);
+     return HDF_SUCCESS;
+ }
+ 
+-- 
+2.50.1
+
