@@ -1,7 +1,7 @@
 From 42dedea8e75161157d9d7c65dfaa229724d99ede Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Tue, 14 Apr 2026 18:28:58 +0000
-Subject: [PATCH] hybris: relax docs dir perms from 0711 to 0755
+Subject: [PATCH 1/2] hybris: relax docs dir perms from 0711 to 0755
 
 The sandboxed ExternalFileManager (FileAccess extension, uid 20010039)
 needs the read bit on /mnt/user/<userId>/{no,}sharefs/docs and their

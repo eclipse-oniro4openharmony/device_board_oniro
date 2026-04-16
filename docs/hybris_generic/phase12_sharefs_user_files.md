@@ -136,7 +136,46 @@ Low priority for bring-up: the current workaround is fully functional for single
 | `foundation/filemanagement/storage_service/services/storage_daemon/storage_user_path.json` | `mode: "0711"` → `"0755"` on the four `{no,}sharefs/docs{,/currentUser}` entries |
 | `device/board/oniro/hybris_generic/utils/start-ohos.sh` | (Previously added chmod loop — removed after JSON patch replaced the need) |
 
+## 12.1 Normal-app file picker (VLC "Open File") — downstream of the same hmdfs gap
+
+**Symptom (2026-04-16):** In a normal app that calls `picker.DocumentViewPicker().select(...)` (e.g. VLC's `OPEN_FILE_SERVICE` flow), tapping "Open File" does nothing. The picker never appears; `com.ohos.filepicker` spawns, reaches `FilePickerUIExtAbility.onSessionCreate`, then hangs and is killed by AMS with `LIFECYCLE_TIMEOUT`.
+
+**Why Settings / `ExternalFileManager` picker worked already:** that flow enumerates `/mnt/user/100/nosharefs/docs` directly and doesn't touch MediaLibrary at all. VLC's picker goes through `com.ohos.filepicker`'s `FilePickerUIExtAbility`, whose `onSessionCreate → getMediaLibrary()` spawns `com.ohos.medialibrary.medialibrarydata` and connects to `datashare:///media`. That path was broken the whole time in our build — nobody had exercised it until VLC was installed.
+
+**Root cause (two chained checks in `foundation/multimedia/media_library/frameworks/innerkitsimpl/medialibrary_data_extension/src/media_datashare_ext_ability.cpp::CheckUnlockScene`):**
+
+1. **`IsStartBeforeUserUnlock()` → true** because `account_iam`'s `isVerified` for user 100 was `false`. On stock OHOS, `OsAccountInterface::SendToStorageAccountStart` → `UnlockUser` → `StorageManager::PrepareStartUser` → `storage_daemon::StartUser` tries to `mount(.., "hmdfs", ..) /mnt/hmdfs/100/account`. Our Halium 5.10 kernel has no `hmdfs` driver (same class as the `sharefs` problem above), so the mount fails with `ENODEV` and `StartUser` returns error `13600721`. `SendToStorageAccountStart` then keeps `isUserUnlocked = false`, never calls `SetIsVerified(true)`, and the runtime `verifiedAccounts_` map stays empty. MediaLibrary sees this, logs `Killing self caused by booting before unlocking`, and calls `KillApplicationSelf()`. The picker hangs on `datashare:///media` connect and AMS kills it on `LIFECYCLE_TIMEOUT`.
+
+2. **`MediaFileUtils::IsDirectory(ROOT_MEDIA_DIR)` → false** (where `ROOT_MEDIA_DIR = "/storage/cloud/files/"`). On stock OHOS, `cloud_service` creates / mounts `/storage/cloud/<userId>/files/` at boot. We have no cloud service. Even after fixing (1), MediaLibrary still self-killed with `Killing self caused by media path unmounted`.
+
+**Fix 1 — account verified in container mode.** Patched `base/account/os_account/services/accountmgr/src/osaccount/os_account_interface.cpp::SendToStorageAccountStart` to force `isUserUnlocked = true` when `getenv("container") != nullptr`, mirroring the existing `#else isUserUnlocked = true` fallback for builds without `HAS_STORAGE_PART`. This restores the `SetIsVerified(true)` + `SetIsLoggedIn(true)` auto-path (user 100 has no credential → no PIN check to bypass). Rebuilt `accountmgr` via `--build-target accountmgr`; the interesting binary is `libaccountmgr.z.so` at `out/hybris_generic/account/os_account/` (the `packages/phone/` copy is stale after `--build-target` — same gotcha documented in the auto-memory for `--fast-rebuild`). After patch: `acm dump -i 100` reports `Verified: true`.
+
+**Fix 2 — `/storage/cloud/<userId>/files` auto-created.** Added an entry to `foundation/filemanagement/storage_service/services/storage_daemon/storage_user_path.json`:
+
+```json
+{
+    "path": "/storage/cloud/<userId>/files",
+    "mode": "0711",
+    "uid": 1008,
+    "gid": 1008
+}
+```
+
+`storage_daemon`'s `PrepareUserDirs` reads this JSON on user activation and creates the directory via `PrepareDir`. No source patch, no cloud-service emulation needed — just the directory shell is enough to satisfy `IsDirectory(ROOT_MEDIA_DIR)`. Files end up on plain ext4 (no cloud sync), which matches the "no cloud service" reality.
+
+**Trade-off:** MediaLibrary now starts cleanly but `/storage/cloud/files/` is an empty plain-ext4 directory, not a cloud-synced mount. Any cloud-sync features (upload/download, cross-device media) silently no-op, which is the same posture as every other cloud-adjacent feature in this build.
+
+**Not fixed by these patches:** the underlying `UnlockUser` failure itself. `storage_daemon::StartUser` still fails with `ENODEV` on the hmdfs mount and `PrepareStartUser` still returns `13600721`. Any feature that *actually* depends on the hmdfs mount (distributed files, hmdfs cross-device shared media, `/data/storage/el2/distributedfiles`) remains unusable until the proper kernel-port fix — same overall shape as the `sharefs` TODO above.
+
+### Files touched (12.1)
+
+| File | Change |
+|------|--------|
+| `base/account/os_account/services/accountmgr/src/osaccount/os_account_interface.cpp` | `SendToStorageAccountStart`: force `isUserUnlocked = true` when `getenv("container") != nullptr` |
+| `foundation/filemanagement/storage_service/services/storage_daemon/storage_user_path.json` | Add `/storage/cloud/<userId>/files` entry (mode 0711, uid/gid 1008) |
+
 ## Related
 
 - Phase 2 (`phase2_kernel_adaptation.md`) — the reference for how we port OHOS kernel drivers onto the Halium kernel.
 - Phase 6.14 — `appdata-sandbox.json` deployment context (nweb sandbox config fix, same file family).
+- 12.1 shares the same underlying kernel-driver gap as the main Phase 12 work (`sharefs` there, `hmdfs` here) — both fall out of running stock OHOS storage code on Halium 5.10 without the OHOS-side kernel drivers.

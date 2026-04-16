@@ -1,4 +1,4 @@
-From d97d04232b281c7af0feefa450a78da0e1a81cfd Mon Sep 17 00:00:00 2001
+From b307a2c1216df2fa1dc246a5df536c477005e64b Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 16 Apr 2026 10:14:05 +0000
 Subject: [PATCH 1/2] alsa_adapter: open PCM blocking, set period_time first,

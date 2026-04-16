@@ -1,0 +1,52 @@
+From 4315d27b55860644b57a5ce44a67fbc877c7bb1b Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 16 Apr 2026 19:15:57 +0000
+Subject: [PATCH] hybris: mark user verified in container mode when hmdfs is
+ unavailable
+
+The Halium 5.10 kernel has no hmdfs driver, so storage_daemon's StartUser
+fails with ENODEV on /mnt/hmdfs/<uid>/account and PrepareStartUser returns
+13600721. Without this bypass isVerified stays false forever, breaking
+MediaLibrary (CheckUnlockScene self-kill) and the normal-app file picker.
+Guarded by the container= env var so the change is inert on real devices.
+
+See phase12_sharefs_user_files.md (Phase 12.1, 2026-04-16).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Change-Id: Ic52c6db9243de823364f5475f003037f1431c21f
+---
+ .../accountmgr/src/osaccount/os_account_interface.cpp | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/services/accountmgr/src/osaccount/os_account_interface.cpp b/services/accountmgr/src/osaccount/os_account_interface.cpp
+index 459399b75..b9730fec2 100644
+--- a/services/accountmgr/src/osaccount/os_account_interface.cpp
++++ b/services/accountmgr/src/osaccount/os_account_interface.cpp
+@@ -16,6 +16,7 @@
+ 
+ #include <cerrno>
+ #include <condition_variable>
++#include <cstdlib>
+ #include <future>
+ #include <thread>
+ 
+@@ -806,6 +807,16 @@ ErrCode OsAccountInterface::SendToStorageAccountStart(OsAccountInfo &osAccountIn
+ #else
+     isUserUnlocked = true;
+ #endif
++    // hybris_generic: Halium 5.10 kernel has no hmdfs driver, so storage_daemon's
++    // StartUser fails on /mnt/hmdfs/<uid>/account with ENODEV and PrepareStartUser
++    // returns 13600721. That leaves isVerified=false forever, which makes
++    // MediaLibrary (and any other service gated on IsOsAccountVerified) self-kill
++    // via CheckUnlockScene, breaking the file picker in normal apps.
++    if (!isUserUnlocked && getenv("container") != nullptr) {
++        ACCOUNT_LOGI("Container mode: treating user %{public}d as unlocked",
++            osAccountInfo.GetLocalId());
++        isUserUnlocked = true;
++    }
+     if (!osAccountInfo.GetIsVerified() && isUserUnlocked) {
+         ACCOUNT_LOGI("OS account:%{public}d is unlocked.", osAccountInfo.GetLocalId());
+         osAccountInfo.SetIsVerified(true);
+-- 
+2.50.1
+
