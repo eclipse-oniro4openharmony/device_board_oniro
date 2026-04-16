@@ -7,12 +7,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR/../../../../../"
 ROOT_DIR="$(cd "$ROOT_DIR" && pwd)"
 
-# Create the patches directory if it doesn't exist (in same directory as script)
-PATCHES_DIR="$SCRIPT_DIR/patches"
-mkdir -p "$PATCHES_DIR"
+MODE="generate"
+for arg in "$@"; do
+    case "$arg" in
+        -l|--list-dirty)
+            MODE="list-dirty"
+            ;;
+        -h|--help)
+            cat <<EOF
+Usage: $(basename "$0") [OPTION]
 
-echo "root directory: $ROOT_DIR"
-echo "patches directory: $PATCHES_DIR"
+With no option, generate git format-patch files for commits that exist
+locally but not on any upstream remote branch, for every (non-oniro) git
+repo under the OpenHarmony source tree.
+
+Options:
+  -l, --list-dirty   Instead of generating patches, list repositories with
+                     uncommitted changes in the working tree or index.
+  -h, --help         Show this help and exit.
+EOF
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg (see --help)" >&2
+            exit 2
+            ;;
+    esac
+done
+
+# Create the patches directory only when actually generating patches
+PATCHES_DIR="$SCRIPT_DIR/patches"
+if [[ "$MODE" == "generate" ]]; then
+    mkdir -p "$PATCHES_DIR"
+    echo "root directory: $ROOT_DIR"
+    echo "patches directory: $PATCHES_DIR"
+else
+    echo "root directory: $ROOT_DIR"
+fi
 
 # Generate git format-patch files for all commits in the repo that exist
 # in the local branch but not on any upstream remote branch.
@@ -67,22 +98,45 @@ generate_patch() {
     fi
 }
 
-# Export the function for use with find -exec
+# Report repos whose working tree or index has uncommitted changes.
+# Prints one relative path per dirty repo.
+list_dirty() {
+    repo_path=$1
+    root_dir=$2
+
+    if [[ -z "$(git -C "$repo_path" status --porcelain 2>/dev/null)" ]]; then
+        return
+    fi
+
+    realpath --relative-to="$root_dir" "$repo_path"
+}
+
+# Export the functions for use with find -exec
 export -f generate_patch
+export -f list_dirty
 
 # Export variables for use with find -exec
 export ROOT_DIR
 export PATCHES_DIR
 
-# Find all git repositories in ROOT_DIR and generate patch files.
+# Find all git repositories in ROOT_DIR.
 # Exclude the .repo directory and the oniro device/board/soc/vendor trees
 # (those are our own repos, not upstream repos being patched).
-find "$ROOT_DIR" -name ".git" \( -type d -o -type l \) \
-    ! -path "$ROOT_DIR/.repo/*" \
-    ! -path "$ROOT_DIR/device/board/oniro/*" \
-    ! -path "$ROOT_DIR/device/soc/oniro/*" \
-    ! -path "$ROOT_DIR/vendor/oniro/*" \
-    -exec bash -c 'generate_patch "$(dirname "{}")" "$ROOT_DIR" "$PATCHES_DIR"' \;
+if [[ "$MODE" == "list-dirty" ]]; then
+    find "$ROOT_DIR" -name ".git" \( -type d -o -type l \) \
+        ! -path "$ROOT_DIR/.repo/*" \
+        ! -path "$ROOT_DIR/device/board/oniro/*" \
+        ! -path "$ROOT_DIR/device/soc/oniro/*" \
+        ! -path "$ROOT_DIR/vendor/oniro/*" \
+        -exec bash -c 'list_dirty "$(dirname "{}")" "$ROOT_DIR"' \;
+else
+    find "$ROOT_DIR" -name ".git" \( -type d -o -type l \) \
+        ! -path "$ROOT_DIR/.repo/*" \
+        ! -path "$ROOT_DIR/device/board/oniro/*" \
+        ! -path "$ROOT_DIR/device/soc/oniro/*" \
+        ! -path "$ROOT_DIR/vendor/oniro/*" \
+        -exec bash -c 'generate_patch "$(dirname "{}")" "$ROOT_DIR" "$PATCHES_DIR"' \;
 
-echo ""
-echo "All patch files are saved in the patches directory: $PATCHES_DIR"
+    echo ""
+    echo "All patch files are saved in the patches directory: $PATCHES_DIR"
+fi
