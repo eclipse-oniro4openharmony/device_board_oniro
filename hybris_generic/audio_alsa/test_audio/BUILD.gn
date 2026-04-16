@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Oniro / Hybris Generic.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+#
+# Phase 13B bisection binary — see test_audio.c comment header.
+
+import("//build/ohos.gni")
+
+ohos_executable("test_audio") {
+  sources = [ "test_audio.c" ]
+
+  include_dirs = [
+    "//third_party/alsa-lib/include",
+  ]
+
+  deps = [
+    "//third_party/alsa-lib:libasound",
+  ]
+
+  libs = [ "m" ]
+
+  install_enable = true
+  install_images = [ "system" ]
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
+group("test_audio_group") {
+  deps = [ ":test_audio" ]
+}
