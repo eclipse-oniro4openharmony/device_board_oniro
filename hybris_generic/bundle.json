@@ -14,7 +14,9 @@
         "components": [
           "hilog"
         ],
-        "third_party": []
+        "third_party": [
+          "alsa-lib"
+        ]
       },
       "build": {
         "sub_component": [

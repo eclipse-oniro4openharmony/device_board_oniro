@@ -13,6 +13,7 @@
  * control. `Ext_Speaker_Amp Switch` is toggled at Start/Stop.
  */
 
+#include <alsa/asoundlib.h>
 #include "alsa_snd_render.h"
 #include "common.h"
 
@@ -227,6 +228,30 @@ static int32_t RenderStartImpl(struct AlsaRender *renderIns)
     if (ret != HDF_SUCCESS) {
         AUDIO_FUNC_LOGE("enable Ext_Speaker_Amp Switch failed!");
         return HDF_FAILURE;
+    }
+
+    /* Close + reopen the PCM on every Start. Without this, OHOS playback is
+     * silent on MT6789 even though hw_ptr advances, DAPM widgets are On,
+     * mixer state is correct, and the codec backend reports "start". A fresh
+     * snd_pcm_open (matching test_audio's lifecycle) is audible; keeping the
+     * long-lived audio_host handle open across sessions is not. The root
+     * cause lives in the MTK AFE / ASoC stream-session state machine and
+     * isn't observable from userspace. Close+reopen here forces each Start
+     * through the same "first open" codepath that we've verified works. The
+     * SndElementWrite fd-leak fix in alsa_soundcard.c makes reopening cheap. */
+    if (cardIns->pcmHandle != NULL) {
+        snd_pcm_close(cardIns->pcmHandle);
+        cardIns->pcmHandle = NULL;
+        int32_t oret = snd_pcm_open(&cardIns->pcmHandle, cardIns->devName,
+                                    SND_PCM_STREAM_PLAYBACK, 0);
+        if (oret < 0) {
+            AUDIO_FUNC_LOGE("snd_pcm_open re-open fail: %{public}s", snd_strerror(oret));
+            return HDF_FAILURE;
+        }
+        (void)snd_pcm_nonblock(cardIns->pcmHandle, 0);
+        /* Force hw_params/sw_params to be re-applied on next RenderRender by
+         * clearing the adapter's params-cached flag (misnamed mmapFlag). */
+        cardIns->mmapFlag = false;
     }
     return HDF_SUCCESS;
 }

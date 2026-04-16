@@ -1,6 +1,12 @@
 # Phase 13: Audio Support
 
-## Status: ⚠️ Phase 13B partially working (2026-04-16) — `snd_pcm_hw_params` succeeds, the kernel reports the PCM as RUNNING with `hw_ptr` advancing at ~44.1 kHz, real S16LE music samples reach `snd_pcm_writei`, all DAPM widgets are powered, and the speaker amp matches the working `aplay` configuration — yet OHOS playback is silent. Reverting the container and running `aplay -D hw:0,0` from the UT host with the same mixer state produces audible sound. The OHOS-specific silence is **unresolved**. Working pieces are committed on the `phase13b-native-alsa-wip` branch in each affected repo. 13A libhybris bridge remains stashed as fallback.
+## Status: ✅ Phase 13B WORKING (2026-04-16) — OHOS speaker playback audible end-to-end
+
+**Fix (one-line summary):** `snd_pcm_close` + `snd_pcm_open` on every `Start` in `device/board/oniro/hybris_generic/audio_alsa/vendor_render.c::RenderStartImpl`. All other Phase 13B infrastructure (flag flip, alsa_paths.json, DAPM route bring-up, blocking PCM, period-time-before-buffer-time, start_threshold=period_size) remains in place; the close+reopen is the final ingredient that makes OHOS playback audible.
+
+**Root cause:** when `audio_host` keeps the PCM handle open across multiple render sessions (the upstream design — `RenderOpenImpl` happens once and lives for the lifetime of `audio_host`), the MT6789 AFE / ASoC stream-session state enters a configuration where `hw_ptr` advances, `snd_pcm_state` reports `RUNNING`, DAPM widgets are On, the codec backend reports `start`, and real PCM data (verified peak=19601 reaching `snd_pcm_writei`) is written to the kernel ring buffer — yet no audio reaches the speaker. A fresh `snd_pcm_open` (as `test_audio` does) under the exact same mixer/hw_params/sw_params configuration is audible. The stream-session state is not observable through any userspace API we exercised (`/proc/asound/card0/pcm0p/sub0/*`, `/sys/kernel/debug/asoc/.../dapm/*`, `Playback_1/state`, `amixer contents`, `strace ioctl` — all byte-identical between the silent and audible runs). Forcing a fresh PCM session on every Start sidesteps it.
+
+13A libhybris bridge remains stashed as fallback.
 
 **Phase 13B progress (2026-04-15 → 2026-04-16):**
 - All planned 13B sub-steps (13B.1–13B.8) implemented + deployed. Build green.
@@ -8,23 +14,20 @@
 - DAPM bring-up enables `ADDA_DL_CH1 DL1_CH1`, `ADDA_DL_CH2 DL1_CH2`, `HPL/HPR Mux = "Audio Playback"`, `Ext_Speaker_Amp Switch = on` from `vendor_render.c::RenderInitImpl` so the MT6789 ASoC accepts hw_params (it would otherwise reject every Playback_X format combination with `no backend DAIs enabled`). Confirmed via `dmesg` and reproduced by failing `aplay` from the host without these writes.
 - Several additional fixes landed in upstream `alsa_snd_render.c`: open the PCM in **blocking** mode (was `SND_PCM_NONBLOCK`, causing silent frame drops on EAGAIN per the `tryNum == 0 → return HDF_SUCCESS` path); set `period_time` *before* `buffer_time` (so the kernel honours `period_time` and returns 4×125 ms periods instead of 2×250 ms — matches `aplay`'s ordering); lower `start_threshold` from `buffer_size` to `period_size` (was forcing the app to fully refill the entire 500 ms buffer after every xrun before play could resume).
 - DAPM toggle Off→On (rather than just-write-On) added to both `RenderInitImpl` and `RenderStartImpl` so the kernel's DAPM power sequencer fires whenever the `Ext_Speaker_Amp Switch` kcontrol is already in the requested state from a prior session.
-- Music playback driven by `ohos.samples.distributedmusicplayer` reaches `RUNNING` with `hw_ptr` advancing at ~44.1 kHz, app-side `MUSIC` volume = 12/15, `volumeDb 1.0`, sink = `SPEAKER`, `hpaeSinkInputNode` connected, and a debug dump in `RenderWritei` verifies non-zero S16LE music samples (e.g. `2900370029003700...`) reach `snd_pcm_writei`. Yet the speaker is silent.
-- Reverting via `lxc-stop` and running `aplay -D hw:0,0 dynamic.wav` from the UT host with `Ext_Speaker_Amp Switch = on` reliably produces audible sound on the same device with the same kcontrol/DAPM state. So the speaker, codec, and DAC are all functional under the same kernel.
+- **Close + reopen PCM on every Start (2026-04-16, this is the fix that flipped silence → audible):** see `device/board/oniro/hybris_generic/audio_alsa/vendor_render.c::RenderStartImpl`. `audio_host` is designed to hold the PCM open across sessions, but on MT6789 that causes the speaker to stay silent even when every observable stream/mixer/DAPM state looks correct. Replacing the persistent handle with a fresh `snd_pcm_close` + `snd_pcm_open` on every Start makes every session behave like `test_audio` (which always worked). Also landed: fd-leak fix in `alsa_soundcard.c::SndElementWrite` (`snd_ctl_close` on all return paths) — without this the reopen would also leak ctl handles.
+- `SndElementWrite` control-handle leak fixed in `drivers/peripheral/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c:1225` — the function opened a new `snd_ctl_t` per write and never closed it, accumulating 25+ `/dev/snd/controlC0` fds in `audio_host` after a few minutes of playback. Added `snd_ctl_close` on every return path.
+- Music playback driven by `ohos.samples.distributedmusicplayer` on the Volla Tablet (mimir, 1600×2560, MT6789 + MT6366) plays `dynamic.wav` audibly through the built-in speaker with stereo 44.1 kHz S16_LE at `MUSIC` volume = 12/15.
 
-**Open root cause:** the silence is OHOS-specific despite OHOS sending real PCM data to the same `/dev/snd/pcmC0D0p` and the kernel reporting the stream as healthy. Likely culprits, in order of suspicion:
+### Bisection log that led to the fix
 
-1. **OHOS-built `libasound.so` divergence.** The host's working `libasound.so.2.0.0` is glibc-built (~1.1 MiB) and depends on `ld-linux-aarch64.so.1`; the OHOS one (`/vendor/lib64/libasound.so`, ~888 KiB, musl-built from `third_party/alsa-lib/`) cannot be substituted — `audio_host` fails with `Error loading shared library ld-linux-aarch64.so.1: (needed by /vendor/lib64/libasound.so)` if you copy the host one in. A direct A/B test inside the OHOS environment requires a `test_audio` binary that calls `snd_pcm_open / hw_params / writei` against the OHOS libasound — TBD.
-2. **MTK kernel-side PLL/clock/DSP setup performed by the Android HAL** that we don't replicate from native ALSA. Halium's stock pulseaudio + Android `audio.primary.mt6789.so` may initialise an audio reference clock or codec power gate at boot that stays alive long enough for `aplay` to inherit, but is reset/missing when OHOS holds the PCM. No hard evidence yet — `dmesg` shows only the previously-fixed "no backend DAIs enabled" warnings during failed-hw_params attempts.
-3. **Audio buffer pacing on the OHOS framework side.** `AudioRenderSink::RenderFrame` was observed at "cost: 101 ms" per 4 KiB write (~10× slower than real-time at 44.1 kHz stereo S16LE). Even with blocking PCM and lowered start_threshold, sustained underruns could explain pure silence (vs the chopped audio one would normally expect on partial underruns). Worth instrumenting the audio_server feed loop.
+1. **Built `test_audio` (`device/board/oniro/hybris_generic/audio_alsa/test_audio/test_audio.c`)** — a standalone ARM binary that opens `/vendor/lib64/libasound.so` directly, programs the MT6789 DAPM route via `snd_ctl_elem_write` (numids 211, 226, 311, 312, 305 + Lineout/Headset volumes), opens `hw:0,0` with the same hw/sw params as `alsa_snd_render.c`, and writes a 440 Hz sine for 3 s. Audible → OHOS `libasound.so` + kernel path fully functional. **Bug is above the PCM write boundary.**
+2. **Overwrite-sine hack in `RenderWritei`** — replaced the framework data with a known-good sine in the adapter just before `snd_pcm_writei`. Still silent. **Bug is not in the data the framework gives us** — the adapter+PCM-session itself is silent with loud valid samples.
+3. **Full state diff** — captured `/proc/asound/card0/pcm0p/sub0/{status,hw_params,sw_params}`, `/sys/kernel/debug/asoc/mt6789-mt6366/{Playback_1/state,dapm/*,mt6358-sound/dapm/*}`, and `amixer -c 0` contents for the silent OHOS run and the audible `test_audio` run. Every captured field **byte-identical** except expected run-time variance (pid, trigger_time, hw/appl_ptr snapshots). Mixer, DAPM, DAI state all On/start.
+4. **`strace -e trace=ioctl`** on both runs — `SNDRV_PCM_IOCTL_*` sequence virtually identical. No suspicious pause/drain cycles during playback (1 DRAIN, 1 PREPARE across 421 WRITEI_FRAMES).
+5. **Reduced test_audio write granularity to 1024-frame chunks** to mimic OHOS's `AudioRenderSink::RenderFrame` 4 KiB cadence. Still audible — so the write size isn't the issue.
+6. **Close+reopen PCM on every Start in `RenderStartImpl`** — immediately audible. Confirmed root cause: per-session hidden state on the MT6789 ASoC side that only clears on a fresh `snd_pcm_open`.
 
-**Recommended next experiments** (when resuming):
-- Build a minimal `test_audio` target inside the OHOS rootfs that calls `snd_pcm_open / hw_params / writei` directly against `/vendor/lib64/libasound.so`, deploy via `hdc shell`, and play `dynamic.wav`. If audible, the libasound is fine and the bug is in `audio_render_adapter` / `audio_server` / `HiPlayer` pacing. If silent, OHOS libasound itself is broken (likely a build option missing on the musl path).
-- Capture the kernel's audio register writes during a working `aplay` (`echo 1 > /sys/kernel/debug/regmap/.../debug_regmap_writes`, or `tracepoints/asoc:*`) and diff against the OHOS-silent run to find the missing PLL/clock setup.
-- Add per-call timing instrumentation around `AudioRenderRenderFrame` in `audio_render.c` and around the `hpaeSinkOutputNode` write loop in audio_server. If the framework feed rate is slower than real time we'll see it directly.
-
-**Workaround for users right now:** none — OHOS audio is silent. `aplay` works for ad-hoc testing only when the container is stopped first.
-
-**Earlier (now obsolete) status:** an earlier snapshot of this status section had claimed Phase 13B was working end-to-end based on the `HDF_AUDIO_PRIMARY_IMPL::AudioRenderGetLatency: 21 ms` log spam. That log only confirms the HDI binder loop is alive — it does not prove samples reached the speaker. After the user reported silence and we instrumented the actual write path + speaker chain, we confirmed the data is reaching the kernel but no audible output occurs. The earlier write-up has been corrected.
+The `test_audio` binary remains deployed at `/system/bin/test_audio` on the rootfs as a standing diagnostic tool for future audio regressions (BUILD.gn + bundle.json entry are in-tree — see 13B.10 below).
 
 ## Status (older, superseded): ⚠️ Pivoting — Phase 13A (libhybris → MTK HAL bridge) blocked by Bug 13.A (aurisys SIGSEGV); superseded by **Phase 13B (native ALSA via alsa-lib)** — see bottom of document (2026-04-15)
 
@@ -721,9 +724,39 @@ Board / device tree:
 
 Upstream tree: **no patches required**. `drivers/peripheral/audio/hdi_service/supportlibs/BUILD.gn` already consumes `//device/board/${product_company}/${device_name}/audio_alsa/vendor_{render,capture}.c` via the existing `product_company/device_name` substitution.
 
+### 13B.10 — Bisection tool: `test_audio` against OHOS `libasound` (2026-04-16)
+
+Added a standalone executable (`device/board/oniro/hybris_generic/audio_alsa/test_audio/test_audio.c`) that exercises `/vendor/lib64/libasound.so` **directly**, bypassing `audio_host` / `audio_server` / HDF. It programs the MT6789 DAPM route via `snd_ctl_elem_write` (same numids as `vendor_render.c::RenderInitImpl` — 211/226/311/312/305 + Lineout/Headset vol), opens `hw:0,0` blocking with identical hw/sw params (44100 S16_LE stereo, period_time=125 ms, buffer_time=500 ms, start_threshold=period_size), and writes a 440 Hz sine tone for ~3 s.
+
+Build + deploy:
+```bash
+sudo docker exec -u root -w /home/openharmony/workdir 8f7084d45c89 \
+    ./build.sh --product-name hybris_generic --ccache \
+    --build-target "device/board/oniro/hybris_generic/audio_alsa/test_audio:test_audio"
+hdc file send out/hybris_generic/device_hybris_generic/device_hybris_generic/test_audio /data/local/tmp/test_audio
+hdc shell "chmod +x /data/local/tmp/test_audio"
+```
+
+Run (audio_host must be killed because it holds `pcmC0D0p` exclusive):
+```bash
+hdc shell "kill -9 \$(pidof audio_host); \
+    LD_LIBRARY_PATH=/vendor/lib64:/system/lib64 /data/local/tmp/test_audio"
+```
+
+**Outcome (2026-04-16): AUDIBLE.** The 440 Hz sine tone played clearly from the speaker. `snd_pcm_open` returns 0, `hw_params` applies (rate=44100 ch=2 period_us=125011 buffer_us=500045 → period_size=5513 frames, buffer_size=22052 frames), PCM reports `RUNNING` with `avail=67`, 23 periods written without a single EAGAIN / recover. This result kicked off the bisection chain (overwrite-sine → state diff → strace → close+reopen) that led to the final fix in `RenderStartImpl`.
+
+The binary is retained as a standing diagnostic — see its comment header for how to re-use it for future audio regressions.
+
+Wire-up details (new files + one-line hooks):
+- `device/board/oniro/hybris_generic/audio_alsa/test_audio/test_audio.c` (new, ~240 lines)
+- `device/board/oniro/hybris_generic/audio_alsa/test_audio/BUILD.gn` (new — `ohos_executable("test_audio")` → `/system/bin/test_audio`; `part_name = subsystem_name = "device_hybris_generic"`, deps on `//third_party/alsa-lib:libasound`, include dir on alsa-lib's public headers)
+- `device/board/oniro/hybris_generic/BUILD.gn` — `audio_alsa/test_audio:test_audio_group` added to `hybris_generic_group`
+- `device/board/oniro/hybris_generic/bundle.json` — `"alsa-lib"` added to `component.deps.third_party` (without this, `check_deps_handler.py` fails the build with `need set part deps alsa-lib info`)
+
 ### Open items (13B)
 
-- Capture-side verification: `vendor_capture.c` is written but not smoke-tested yet. Mic routing mixers (`Mic Type Mux`, `PGA L/R Mux`) may also require DAPM wake-up, similar to the render fix. Expect the same pattern.
+- ✅ **Silence root cause — RESOLVED (2026-04-16).** Close+reopen PCM on every Start in `RenderStartImpl`. See status banner + bisection log.
+- Capture-side verification: `vendor_capture.c` is written but not smoke-tested yet. Mic routing mixers (`Mic Type Mux`, `PGA L/R Mux`) may also require DAPM wake-up and/or the same close+reopen-on-Start pattern. Expect the same fix class.
 - Headset jack detect: the previous 13A poll thread on `/sys/class/switch/h2w/state` was tied to the VDI plugin; a native-ALSA equivalent (probably via `AudioSocketThread` in the adapter) is not yet wired.
 - Scene routing: `alsa_paths.json` is authored but the pathselect parser runs in the `alsa_lib_render` path via `AudioInterfaceLibCtlRender(SCENESELECT_WRITE)`; the upstream alsa_adapter currently stubs `SelectScene` to `HDF_SUCCESS`, so the scene JSON writes don't reach the mixer yet. Wire this up when per-scene audio (ringtone / voice) is exercised.
 - Volume UI: volume keys reach the `Lineout Volume` kcontrol via the vendor hook; on-device confirmation that the slider in Settings also drives this path is pending.
