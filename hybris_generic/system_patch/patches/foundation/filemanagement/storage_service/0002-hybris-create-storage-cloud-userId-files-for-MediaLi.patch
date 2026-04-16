@@ -1,0 +1,39 @@
+From c7dc5aeaa3e22f9eebcf7835932c9659fb636b3e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 16 Apr 2026 19:16:08 +0000
+Subject: [PATCH 2/2] hybris: create /storage/cloud/<userId>/files for
+ MediaLibrary
+
+MediaLibrary's ROOT_MEDIA_DIR check requires /storage/cloud/<userId>/files
+to exist; without it the service self-kills and the normal-app file picker
+(VLC "Open File" etc.) returns empty. Adding the entry makes storage_daemon
+create the directory at user start.
+
+See phase12_sharefs_user_files.md (Phase 12.1, 2026-04-16).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Change-Id: Ie3d0540982793795569022f72c40a39d54acf422
+---
+ services/storage_daemon/storage_user_path.json | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/services/storage_daemon/storage_user_path.json b/services/storage_daemon/storage_user_path.json
+index 023e57ba..e6087a05 100644
+--- a/services/storage_daemon/storage_user_path.json
++++ b/services/storage_daemon/storage_user_path.json
+@@ -790,6 +790,12 @@
+             "uid": 1008,
+             "gid": 1008
+         },
++        {
++            "path": "/storage/cloud/<userId>/files",
++            "mode": "0711",
++            "uid": 1008,
++            "gid": 1008
++        },
+         {
+             "path": "/mnt/share/",
+             "mode": "0711",
+-- 
+2.50.1
+

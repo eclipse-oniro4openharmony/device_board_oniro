@@ -1,0 +1,273 @@
+From b622170320ab6d98d86c69174a0d3ae05113a777 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 16 Apr 2026 19:10:27 +0000
+Subject: [PATCH 2/2] launcher: fix top gap, bleed wallpaper under system bars,
+ modernize build
+
+- LayoutViewModel.calculateDesktop: drop remainHeight/2 from marginTop on
+  phone so the app grid hugs the status bar instead of self-centering
+  within the reserved 6-row area (previously left ~81vp of empty space
+  above the first row on the Volla X23/mimir form factor).
+- EntryView: expandSafeArea(SYSTEM, [TOP, BOTTOM]) on the background
+  container so the default wallpaper extends under status/nav bars.
+- Switch default wallpaper from jpg to png.
+- Replace hvigorfile.js with hvigorfile.ts (hvigor 5.18.5 rejects the
+  old .js form with "The root node is not yet available for build").
+- Drop the vendored hvigorw/hvigorw.bat wrappers and local.properties;
+  rely on the system-PATH hvigorw and per-developer local settings.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Change-Id: I6645ae0fc76ede2718b4da330472050943327ea2
+---
+ .../ets/default/viewmodel/LayoutViewModel.ts  |   2 +-
+ hvigorfile.js                                 |  17 -----
+ hvigorfile.ts                                 |   6 ++
+ hvigorw                                       |  48 -------------
+ hvigorw.bat                                   |  64 ------------------
+ local.properties                              |  25 -------
+ .../ets/common/constants/StyleConstants.ts    |   2 +-
+ ..._default.jpg => img_wallpaper_default.png} | Bin
+ .../phone/src/main/ets/pages/EntryView.ets    |   1 +
+ 9 files changed, 9 insertions(+), 156 deletions(-)
+ delete mode 100644 hvigorfile.js
+ create mode 100644 hvigorfile.ts
+ delete mode 100644 hvigorw
+ delete mode 100644 hvigorw.bat
+ delete mode 100755 local.properties
+ rename product/phone/src/main/ets/common/pics/{img_wallpaper_default.jpg => img_wallpaper_default.png} (100%)
+
+diff --git a/common/src/main/ets/default/viewmodel/LayoutViewModel.ts b/common/src/main/ets/default/viewmodel/LayoutViewModel.ts
+index 42f1051..5ac53ac 100644
+--- a/common/src/main/ets/default/viewmodel/LayoutViewModel.ts
++++ b/common/src/main/ets/default/viewmodel/LayoutViewModel.ts
+@@ -212,7 +212,7 @@ export class LayoutViewModel {
+         }
+         let remainHeight = (realHeight + gutter - (itemSize + gutter) * row)
+         realHeight -= remainHeight
+-        marginTop = remainHeight / 2 + this.mSysUITopHeight
++        marginTop = this.mSysUITopHeight
+     }
+     //set desktop icon
+     let ratio = this.mLauncherLayoutStyleConfig.mIconRatio;
+diff --git a/hvigorfile.js b/hvigorfile.js
+deleted file mode 100644
+index 22fbe15..0000000
+--- a/hvigorfile.js
++++ /dev/null
+@@ -1,17 +0,0 @@
+-/**
+- * Copyright (c) 2022 Huawei Device Co., Ltd.
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-// Script for compiling build behavior. It is built in the build plug-in and cannot be modified currently.
+-module.exports = require('@ohos/hvigor-ohos-plugin').appTasks
+\ No newline at end of file
+diff --git a/hvigorfile.ts b/hvigorfile.ts
+new file mode 100644
+index 0000000..82442cf
+--- /dev/null
++++ b/hvigorfile.ts
+@@ -0,0 +1,6 @@
++import { appTasks } from '@ohos/hvigor-ohos-plugin';
++
++export default {
++  system: appTasks, /* Built-in plugin of Hvigor. It cannot be modified. */
++  plugins: []       /* Custom plugin to extend the functionality of Hvigor. */
++}
+diff --git a/hvigorw b/hvigorw
+deleted file mode 100644
+index 2ea1a82..0000000
+--- a/hvigorw
++++ /dev/null
+@@ -1,48 +0,0 @@
+-#!/bin/bash
+-
+-# ----------------------------------------------------------------------------
+-#  Hvigor startup script, version 1.0.0
+-# 
+-#  Required ENV vars:
+-#  ------------------
+-#    NODE_HOME - location of a Node home dir
+-#    or 
+-#    Add /usr/local/nodejs/bin to the PATH environment variable
+-# ----------------------------------------------------------------------------
+-
+-HVIGOR_APP_HOME="`pwd -P`"
+-HVIGOR_WRAPPER_SCRIPT=${HVIGOR_APP_HOME}/hvigor/hvigor-wrapper.js
+-warn() {
+-	echo ""
+-	echo -e "\033[1;33m`date '+[%Y-%m-%d %H:%M:%S]'`$@\033[0m"
+-}
+-
+-error() {
+-	echo ""
+-	echo -e "\033[1;31m`date '+[%Y-%m-%d %H:%M:%S]'`$@\033[0m"
+-}
+-
+-fail() {
+-	error "$@"
+-	exit 1
+-}
+-
+-# Determine node to start hvigor wrapper script
+-if [ -n "${NODE_HOME}" ];then
+-   EXECUTABLE_NODE="${NODE_HOME}/bin/node"
+-   if [ ! -x "$EXECUTABLE_NODE" ];then
+-       fail "ERROR: NODE_HOME is set to an invalid directory,check $NODE_HOME\n\nPlease set NODE_HOME in your environment to the location where your nodejs installed"
+-   fi
+-else
+-   EXECUTABLE_NODE="node"
+-   which ${EXECUTABLE_NODE} > /dev/null 2>&1 || fail "ERROR: NODE_HOME is not set and not 'node' command found in your path"
+-fi
+-
+-# Check hvigor wrapper script
+-if [ ! -r "$HVIGOR_WRAPPER_SCRIPT" ];then
+-	fail "ERROR: Couldn't find hvigor/hvigor-wrapper.js in ${HVIGOR_APP_HOME}"
+-fi
+-
+-# start hvigor-wrapper script
+-exec "${EXECUTABLE_NODE}" \
+-	"${HVIGOR_WRAPPER_SCRIPT}" "$@"
+diff --git a/hvigorw.bat b/hvigorw.bat
+deleted file mode 100644
+index 6861293..0000000
+--- a/hvigorw.bat
++++ /dev/null
+@@ -1,64 +0,0 @@
+-@if "%DEBUG%" == "" @echo off
+-@rem ##########################################################################
+-@rem
+-@rem  Hvigor startup script for Windows
+-@rem
+-@rem ##########################################################################
+-
+-@rem Set local scope for the variables with windows NT shell
+-if "%OS%"=="Windows_NT" setlocal
+-
+-set DIRNAME=%~dp0
+-if "%DIRNAME%" == "" set DIRNAME=.
+-set APP_BASE_NAME=%~n0
+-set APP_HOME=%DIRNAME%
+-
+-@rem Resolve any "." and ".." in APP_HOME to make it shorter.
+-for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
+-
+-set WRAPPER_MODULE_PATH=%APP_HOME%\hvigor\hvigor-wrapper.js
+-set NODE_EXE=node.exe
+-
+-goto start
+-
+-:start
+-@rem Find node.exe
+-if defined NODE_HOME goto findNodeFromNodeHome
+-
+-%NODE_EXE% --version >NUL 2>&1
+-if "%ERRORLEVEL%" == "0" goto execute
+-
+-echo.
+-echo ERROR: NODE_HOME is not set and no 'node' command could be found in your PATH.
+-echo.
+-echo Please set the NODE_HOME variable in your environment to match the
+-echo location of your NodeJs installation.
+-
+-goto fail
+-
+-:findNodeFromNodeHome
+-set NODE_HOME=%NODE_HOME:"=%
+-set NODE_EXE_PATH=%NODE_HOME%/%NODE_EXE%
+-
+-if exist "%NODE_EXE_PATH%" goto execute
+-echo.
+-echo ERROR: NODE_HOME is not set and no 'node' command could be found in your PATH.
+-echo.
+-echo Please set the NODE_HOME variable in your environment to match the
+-echo location of your NodeJs installation.
+-
+-goto fail
+-
+-:execute
+-@rem Execute hvigor
+-"%NODE_EXE%" %WRAPPER_MODULE_PATH% %*
+-
+-if "%ERRORLEVEL%" == "0" goto hvigorwEnd
+-
+-:fail
+-exit /b 1
+-
+-:hvigorwEnd
+-if "%OS%" == "Windows_NT" endlocal
+-
+-:end
+diff --git a/local.properties b/local.properties
+deleted file mode 100755
+index 5ce895d..0000000
+--- a/local.properties
++++ /dev/null
+@@ -1,25 +0,0 @@
+-/*
+- * Copyright (c) 2021 Huawei Device Co., Ltd.
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-## This file must *NOT* be checked into Version Control Systems,
+-# as it contains information specific to your local configuration.
+-#
+-# Location of the SDK. This is only used by Gradle.
+-# For customization when using a Version Control System, please read the
+-# header note.
+-#Thu Mar 18 17:01:34 CST 2021
+-hwsdk.dir=XXX
+-native.dir=XXX
+-nodejs.dir=XXX
+diff --git a/product/phone/src/main/ets/common/constants/StyleConstants.ts b/product/phone/src/main/ets/common/constants/StyleConstants.ts
+index 4f1e4fd..034b450 100644
+--- a/product/phone/src/main/ets/common/constants/StyleConstants.ts
++++ b/product/phone/src/main/ets/common/constants/StyleConstants.ts
+@@ -14,7 +14,7 @@
+  */
+ 
+ export default class StyleConstants {
+-  static readonly DEFAULT_BACKGROUND_IMAGE = '/common/pics/img_wallpaper_default.jpg';
++  static readonly DEFAULT_BACKGROUND_IMAGE = '/common/pics/img_wallpaper_default.png';
+   static readonly DEFAULT_APP_ICON_SIZE_WIDTH = 70;
+   static readonly DEFAULT_APP_NAME_SIZE = 20;
+   static readonly DEFAULT_APP_NAME_HEIGHT  = 95;
+diff --git a/product/phone/src/main/ets/common/pics/img_wallpaper_default.jpg b/product/phone/src/main/ets/common/pics/img_wallpaper_default.png
+similarity index 100%
+rename from product/phone/src/main/ets/common/pics/img_wallpaper_default.jpg
+rename to product/phone/src/main/ets/common/pics/img_wallpaper_default.png
+diff --git a/product/phone/src/main/ets/pages/EntryView.ets b/product/phone/src/main/ets/pages/EntryView.ets
+index 7159e57..fdb2bf6 100644
+--- a/product/phone/src/main/ets/pages/EntryView.ets
++++ b/product/phone/src/main/ets/pages/EntryView.ets
+@@ -180,5 +180,6 @@ struct EntryView {
+     .backgroundImagePosition(Alignment.Center)
+     .width('100%')
+     .height('100%')
++    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+   }
+ }
+-- 
+2.50.1
+
