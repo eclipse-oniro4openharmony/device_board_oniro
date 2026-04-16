@@ -1,4 +1,4 @@
-From 752e206dd750e6f20533c3aac250b043f2d98237 Mon Sep 17 00:00:00 2001
+From 69226944a9c58463bbe5b498c3349679f1de5ae8 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 16 Apr 2026 10:14:05 +0000
 Subject: [PATCH 2/2] alsa_adapter: close snd_ctl_t handle in SndElementWrite
