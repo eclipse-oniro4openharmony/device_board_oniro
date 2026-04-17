@@ -52,7 +52,11 @@
 #define PERIOD_US   125000   /* 125 ms */
 #define BUFFER_US   500000   /* 500 ms */
 
-static int write_integer_numid(snd_ctl_t *ctl, unsigned int numid, long value)
+/* Name-based write. Looking up by numid would be fragile: the Volla X23 and
+ * Volla Tablet (mimir) kernels have the same control *names* but different
+ * numids (extra DAC In Mux / MTK_SPK_* entries on X23 shift everything by +2).
+ * The codec driver exposes the same names on both, so look up by name. */
+static int write_integer_name(snd_ctl_t *ctl, const char *name, long value)
 {
     snd_ctl_elem_id_t *id;
     snd_ctl_elem_info_t *info;
@@ -63,12 +67,15 @@ static int write_integer_numid(snd_ctl_t *ctl, unsigned int numid, long value)
     snd_ctl_elem_info_alloca(&info);
     snd_ctl_elem_value_alloca(&val);
 
-    snd_ctl_elem_id_set_numid(id, numid);
+    snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
+    snd_ctl_elem_id_set_name(id, name);
     snd_ctl_elem_info_set_id(info, id);
     if ((err = snd_ctl_elem_info(ctl, info)) < 0) {
-        fprintf(stderr, "elem_info numid=%u: %s\n", numid, snd_strerror(err));
+        fprintf(stderr, "elem_info \"%s\": %s\n", name, snd_strerror(err));
         return err;
     }
+    /* Resolve id (fill in numid from name lookup) for the write side. */
+    snd_ctl_elem_info_get_id(info, id);
     count = snd_ctl_elem_info_get_count(info);
     snd_ctl_elem_value_set_id(val, id);
     for (i = 0; i < count; i++) {
@@ -83,26 +90,25 @@ static int write_integer_numid(snd_ctl_t *ctl, unsigned int numid, long value)
             snd_ctl_elem_value_set_enumerated(val, i, (unsigned int)value);
             break;
         default:
-            fprintf(stderr, "numid=%u: unsupported elem type %d\n",
-                    numid, snd_ctl_elem_info_get_type(info));
+            fprintf(stderr, "\"%s\": unsupported elem type %d\n",
+                    name, snd_ctl_elem_info_get_type(info));
             return -EINVAL;
         }
     }
     if ((err = snd_ctl_elem_write(ctl, val)) < 0) {
-        fprintf(stderr, "elem_write numid=%u val=%ld: %s\n",
-                numid, value, snd_strerror(err));
+        fprintf(stderr, "elem_write \"%s\" val=%ld: %s\n",
+                name, value, snd_strerror(err));
         return err;
     }
-    fprintf(stdout, "  numid=%-4u <- %ld  (%s)\n", numid, value,
-            snd_ctl_elem_info_get_name(info));
+    fprintf(stdout, "  \"%s\" <- %ld\n", name, value);
     return 0;
 }
 
-static int toggle_on(snd_ctl_t *ctl, unsigned int numid)
+static int toggle_on_name(snd_ctl_t *ctl, const char *name)
 {
     int err;
-    if ((err = write_integer_numid(ctl, numid, 0)) < 0) return err;
-    return write_integer_numid(ctl, numid, 1);
+    if ((err = write_integer_name(ctl, name, 0)) < 0) return err;
+    return write_integer_name(ctl, name, 1);
 }
 
 static int setup_dapm(void)
@@ -117,20 +123,24 @@ static int setup_dapm(void)
     }
 
     fprintf(stdout, "Programming DAPM route:\n");
-    /* ADDA_DL_CH1 DL1_CH1 = on (numid 211) */
-    write_integer_numid(ctl, 211, 1);
-    /* ADDA_DL_CH2 DL1_CH2 = on (numid 226) */
-    write_integer_numid(ctl, 226, 1);
-    /* HPL Mux = "Audio Playback" = item 2 (numid 311) */
-    write_integer_numid(ctl, 311, 2);
-    /* HPR Mux = "Audio Playback" = item 2 (numid 312) */
-    write_integer_numid(ctl, 312, 2);
-    /* Ext_Speaker_Amp Switch: toggle off->on so the DAPM power sequencer fires */
-    toggle_on(ctl, 305);
-    /* Lineout Volume = 12 (numid 286) */
-    write_integer_numid(ctl, 286, 12);
-    /* Headset Volume = 12 (numid 285) */
-    write_integer_numid(ctl, 285, 12);
+    write_integer_name(ctl, "ADDA_DL_CH1 DL1_CH1", 1);
+    write_integer_name(ctl, "ADDA_DL_CH2 DL1_CH2", 1);
+    write_integer_name(ctl, "HPL Mux", 2); /* Audio Playback */
+    write_integer_name(ctl, "HPR Mux", 2); /* Audio Playback */
+    /* X23 speaker path: DL1 -> I2S3 -> AW883xx smart PA. Tablet's speaker
+     * goes via ADDA -> Lineout -> Ext_Speaker_Amp instead; enabling I2S3
+     * on the tablet is a no-op (I2S3 is not connected to any physical out). */
+    write_integer_name(ctl, "I2S3_Out_Mux", 0);    /* Normal */
+    write_integer_name(ctl, "I2S3_CH1 DL1_CH1", 1);
+    write_integer_name(ctl, "I2S3_CH2 DL1_CH2", 1);
+    /* AWINIC AW883xx smart PA (X23 only; missing kcontrols no-op on tablet). */
+    write_integer_name(ctl, "aw_dev_0_prof", 0);   /* Music */
+    write_integer_name(ctl, "aw_dev_0_switch", 0); /* Disable */
+    write_integer_name(ctl, "aw_dev_0_switch", 1); /* Enable (DAPM toggle) */
+    /* Ext_Speaker_Amp Switch: tablet speaker amp (also toggled via DAPM). */
+    toggle_on_name(ctl, "Ext_Speaker_Amp Switch");
+    write_integer_name(ctl, "Lineout Volume", 12);
+    write_integer_name(ctl, "Headset Volume", 12);
 
     snd_ctl_close(ctl);
     return 0;
@@ -199,6 +209,72 @@ static int set_swparams(snd_pcm_t *handle,
     return 0;
 }
 
+static int dump_controls(void)
+{
+    snd_ctl_t *ctl = NULL;
+    snd_ctl_elem_list_t *list;
+    snd_ctl_elem_info_t *info;
+    int err;
+    unsigned int n, i;
+
+    if ((err = snd_ctl_open(&ctl, CARD, 0)) < 0) {
+        fprintf(stderr, "snd_ctl_open(%s): %s\n", CARD, snd_strerror(err));
+        return err;
+    }
+    snd_ctl_elem_list_alloca(&list);
+    snd_ctl_elem_info_alloca(&info);
+
+    if ((err = snd_ctl_elem_list(ctl, list)) < 0) {
+        fprintf(stderr, "snd_ctl_elem_list: %s\n", snd_strerror(err));
+        snd_ctl_close(ctl); return err;
+    }
+    n = snd_ctl_elem_list_get_count(list);
+    if ((err = snd_ctl_elem_list_alloc_space(list, n)) < 0) {
+        fprintf(stderr, "alloc_space: %s\n", snd_strerror(err));
+        snd_ctl_close(ctl); return err;
+    }
+    if ((err = snd_ctl_elem_list(ctl, list)) < 0) {
+        fprintf(stderr, "snd_ctl_elem_list(full): %s\n", snd_strerror(err));
+        snd_ctl_elem_list_free_space(list);
+        snd_ctl_close(ctl); return err;
+    }
+
+    fprintf(stdout, "count=%u\n", n);
+    for (i = 0; i < n; i++) {
+        snd_ctl_elem_id_t *id;
+        snd_ctl_elem_id_alloca(&id);
+        snd_ctl_elem_list_get_id(list, i, id);
+        snd_ctl_elem_info_set_id(info, id);
+        if (snd_ctl_elem_info(ctl, info) < 0) continue;
+        unsigned int numid = snd_ctl_elem_id_get_numid(id);
+        const char *name = snd_ctl_elem_id_get_name(id);
+        snd_ctl_elem_type_t type = snd_ctl_elem_info_get_type(info);
+        const char *tname = snd_ctl_elem_type_name(type);
+        if (type == SND_CTL_ELEM_TYPE_INTEGER) {
+            fprintf(stdout, "  numid=%4u  type=%-11s  min=%ld max=%ld  name=\"%s\"\n",
+                    numid, tname,
+                    snd_ctl_elem_info_get_min(info),
+                    snd_ctl_elem_info_get_max(info), name);
+        } else if (type == SND_CTL_ELEM_TYPE_ENUMERATED) {
+            unsigned int j, items = snd_ctl_elem_info_get_items(info);
+            fprintf(stdout, "  numid=%4u  type=%-11s  items=%u  name=\"%s\"\n",
+                    numid, tname, items, name);
+            for (j = 0; j < items && j < 16; j++) {
+                snd_ctl_elem_info_set_item(info, j);
+                if (snd_ctl_elem_info(ctl, info) < 0) continue;
+                fprintf(stdout, "      [%u] %s\n", j,
+                        snd_ctl_elem_info_get_item_name(info));
+            }
+        } else {
+            fprintf(stdout, "  numid=%4u  type=%-11s  name=\"%s\"\n",
+                    numid, tname, name);
+        }
+    }
+    snd_ctl_elem_list_free_space(list);
+    snd_ctl_close(ctl);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     snd_pcm_t *pcm = NULL;
@@ -206,7 +282,9 @@ int main(int argc, char **argv)
     snd_pcm_sframes_t period_size = 0, buffer_size = 0;
     int err, i;
 
-    (void)argc; (void)argv;
+    if (argc > 1 && strcmp(argv[1], "--dump") == 0) {
+        return dump_controls() == 0 ? 0 : 1;
+    }
 
     fprintf(stdout, "test_audio (phase13B libasound bisection)\n");
 
