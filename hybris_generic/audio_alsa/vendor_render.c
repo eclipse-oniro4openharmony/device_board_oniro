@@ -24,6 +24,33 @@ typedef struct _RENDER_DATA_ {
     long tempVolume;
 } RenderData;
 
+/* Probe whether a named mixer kcontrol exists on this card. Used to gate the
+ * X23-only AW883xx/I2S3 speaker path so that the tablet (which lacks the
+ * AW883xx but does expose the MT6789 I2S3 mixers for other reasons) isn't
+ * affected by DAPM writes that have no audible purpose there. */
+static bool KcontrolExists(const struct AlsaSoundCard *cardIns, const char *name)
+{
+    snd_ctl_t *ctl = NULL;
+    snd_ctl_elem_id_t *id = NULL;
+    snd_ctl_elem_info_t *info = NULL;
+    bool exists = false;
+
+    if (cardIns == NULL || name == NULL) {
+        return false;
+    }
+    if (snd_ctl_open(&ctl, cardIns->ctrlName, 0) < 0) {
+        return false;
+    }
+    snd_ctl_elem_id_alloca(&id);
+    snd_ctl_elem_info_alloca(&info);
+    snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
+    snd_ctl_elem_id_set_name(id, name);
+    snd_ctl_elem_info_set_id(info, id);
+    exists = (snd_ctl_elem_info(ctl, info) == 0);
+    snd_ctl_close(ctl);
+    return exists;
+}
+
 static int32_t RenderInitImpl(struct AlsaRender *renderIns)
 {
     int32_t ret;
@@ -73,6 +100,32 @@ static int32_t RenderInitImpl(struct AlsaRender *renderIns)
     elem.value = "on";
     (void)SndElementWrite(cardIns, &elem);
 
+    /* X23 speaker route: DL1 -> I2S3 -> AW883xx smart PA. Only enable this
+     * when `aw_dev_0_switch` is present (X23 has it; tablet doesn't) so that
+     * the tablet's I2S3 subsystem (which the same MT6789 AFE exposes but
+     * which is not connected to any audible output on the tablet) stays in
+     * whatever state the MTK path left it in. */
+    bool hasAwSmartPa = KcontrolExists(cardIns, SND_ELEM_AW_DEV_0_SWITCH);
+    if (hasAwSmartPa) {
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_I2S3_OUT_MUX;
+        elem.value = SND_I2S3_OUT_MUX_NORMAL;
+        (void)SndElementWrite(cardIns, &elem);
+
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_I2S3_CH1_DL1_CH1;
+        elem.value = "on";
+        (void)SndElementWrite(cardIns, &elem);
+
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_I2S3_CH2_DL1_CH2;
+        elem.value = "on";
+        (void)SndElementWrite(cardIns, &elem);
+    }
+
     /* Power up the HP and speaker routes so DAPM keeps the DAC on. */
     SndElementItemInit(&elem);
     elem.numid = SND_NUMID_HPL_MUX;
@@ -99,6 +152,27 @@ static int32_t RenderInitImpl(struct AlsaRender *renderIns)
     elem.name = SND_ELEM_EXT_SPK_AMP_SWITCH;
     elem.value = SND_OUT_CARD_ON;
     (void)SndElementWrite(cardIns, &elem);
+
+    /* AWINIC AW883xx smart PA (Volla X23 only; absent on mimir tablet).
+     * Without this the speaker output stays silent on X23 even with the
+     * ADDA -> Lineout -> Ext_Speaker_Amp route programmed correctly. */
+    if (hasAwSmartPa) {
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_AW_DEV_0_PROF;
+        elem.value = SND_AW_PROF_MUSIC;
+        (void)SndElementWrite(cardIns, &elem);
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_AW_DEV_0_SWITCH;
+        elem.value = SND_AW_SWITCH_DISABLE;
+        (void)SndElementWrite(cardIns, &elem);
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_AW_DEV_0_SWITCH;
+        elem.value = SND_AW_SWITCH_ENABLE;
+        (void)SndElementWrite(cardIns, &elem);
+    }
 
     return HDF_SUCCESS;
 }
@@ -230,6 +304,20 @@ static int32_t RenderStartImpl(struct AlsaRender *renderIns)
         return HDF_FAILURE;
     }
 
+    /* Re-toggle AW883xx smart PA (Volla X23 only). */
+    if (KcontrolExists(cardIns, SND_ELEM_AW_DEV_0_SWITCH)) {
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_AW_DEV_0_SWITCH;
+        elem.value = SND_AW_SWITCH_DISABLE;
+        (void)SndElementWrite(cardIns, &elem);
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_AW_DEV_0_SWITCH;
+        elem.value = SND_AW_SWITCH_ENABLE;
+        (void)SndElementWrite(cardIns, &elem);
+    }
+
     /* Close + reopen the PCM on every Start. Without this, OHOS playback is
      * silent on MT6789 even though hw_ptr advances, DAPM widgets are On,
      * mixer state is correct, and the codec backend reports "start". A fresh
@@ -271,6 +359,15 @@ static int32_t RenderStopImpl(struct AlsaRender *renderIns)
     ret = SndElementWrite(cardIns, &elem);
     if (ret != HDF_SUCCESS) {
         AUDIO_FUNC_LOGE("disable Ext_Speaker_Amp Switch failed!");
+    }
+
+    /* Disable AW883xx smart PA on Stop (X23 only). */
+    if (KcontrolExists(cardIns, SND_ELEM_AW_DEV_0_SWITCH)) {
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_AW_DEV_0_SWITCH;
+        elem.value = SND_AW_SWITCH_DISABLE;
+        (void)SndElementWrite(cardIns, &elem);
     }
 
     if (renderIns->soundCard.pcmHandle != NULL) {
