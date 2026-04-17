@@ -590,7 +590,7 @@ stickyClientLayers_[layerId] = static_cast<int32_t>(HWC2::Composition::Client);
 
 ---
 
-## 8.17 — `com.ohos.systemui` SIGSEGV in Mali `eglSwapBuffers` During Dropdown Dismiss (FIXED)
+## 8.17 — `com.ohos.systemui` SIGSEGV in Mali `eglSwapBuffers` During Dropdown Dismiss (PARTIALLY FIXED — cross-thread race closed, same crash signature still reproduces on same-thread dropdown open/close)
 
 ### Symptom
 
@@ -684,7 +684,59 @@ EGLBoolean _my_eglSwapBuffersWithDamageEXT(...) {
 - After destroy, the mapping is removed; any subsequent swap sees no mapping and returns `EGL_FALSE` without calling Mali
 - `ws_DestroyWindow` (OhosNativeWindow cleanup) runs outside the lock to avoid blocking swaps on other surfaces
 
-**Status:** FIXED (2026-04-09). Deployed and verified: 5 rapid dropdown open/close cycles with no crash. `com.ohos.systemui` PID remains stable throughout.
+**Status:** PARTIALLY FIXED (2026-04-09). The rwlock closes the cross-thread destroy-vs-swap race described above and remains correct/deployed. However, the same SIGSEGV signature (`NULL+0x1d8` in Mali at `_my_eglSwapBuffersWithDamageEXT+152` on `RSRenderThread`) still reproduces on dropdown open/close — see "Regression — Re-opened 2026-04-17" below for what the follow-up investigation ruled out.
+
+### Regression — Re-opened 2026-04-17
+
+The exact same crash signature (`SIGSEGV(SEGV_MAPERR)@0x1d8`, `RSRenderThread`, `libGLES_mali.so +0x76e920` → `libGLES_mali.so +0x7a8894` → `_my_eglSwapBuffersWithDamageEXT+152`) reproduced deterministically on Volla X23 by opening and closing the control-center dropdown a few times. All four crashes inspected in this session had byte-identical Mali frames and crash register patterns (`x0=0, x1=0xf, x3=0xf, x19=0xf, x25=0xf`).
+
+**Precise Mali crash instruction** (decoded from `/android/vendor/lib64/egl/mt6789/libGLES_mali.so` at pc `0x76e920`):
+
+```
+  76e8dc: ldr w9, [x0]        # active-flag, non-zero — iteration continues
+  76e900: ldr x8, [x0, #8]    # x8 = manager_ref  (valid)
+  76e904: ldr x0, [x8, #8]    # x0 = backing     (NULL  ←  corruption)
+  76e910: b.ne 0x76e920       # x3=0xf, not the 0xff00000000 fallback path
+  76e920: ldr w10, [x0, #472] # NULL + 0x1d8 → SIGSEGV
+```
+
+This is a classic "reference alive, backing freed" pattern inside Mali's per-swap FBO-attachment walker: the attachment slot is still marked active and its manager ref is still valid, but the backing it points at has been zeroed. For `x3 = 0xf` (the normal "all 4 channels" mask) Mali has no fallback and just dereferences.
+
+**Crash is NOT a cross-thread race.** Investigation confirmed both the surface-destroy path and the surface-swap path run on the *same* `RSRenderThread`:
+
+| Caller | Source | Thread |
+|--------|--------|--------|
+| `RSSurfaceOhosGl::ClearBuffer()` → `MakeCurrent(EGL_NO_SURFACE)` → `eglDestroySurface()` | `rosen/modules/render_service_base/src/platform/ohos/backend/rs_surface_ohos_gl.cpp:128-140` | `RSRenderThread` (posted from main via `RSUIDirector::GoBackground`, `rs_ui_director.cpp:310-322`) |
+| `RSSurfaceOhosGl::FlushFrame()` → `SwapBuffers(mEglSurface)` | `rs_surface_ohos_gl.cpp:112-126` | `RSRenderThread` (VSync-driven from `RSRenderThreadVisitor::ProcessRootRenderNode`) |
+
+Because both paths are event-handler callbacks on the same `EventRunner`, they cannot overlap — the existing `_surface_lifecycle_lock` is effectively a no-op for this workload. The corruption is purely *temporal*: Mali's internal shared-context state gets poisoned by *something* in the dropdown-close teardown, and the crash happens on the *next* vsync swap of a surviving surface (status bar or nav bar) — which can be anywhere from hundreds of ms to several seconds later.
+
+**The surface-destroy call itself is not the trigger.** Tested by short-circuiting `_eglDestroySurface` in libhybris (leak the Mali EGLSurface metadata but still call `ws_DestroyWindow` to release the OhosNativeWindow wrapper and the 13 MB of backbuffer memory). Deployed, verified by MD5 that the skip-destroy code was active, confirmed via hilog that the `"eglDestroySurface SKIPPING Mali destroy (leak)"` log line printed for every destroy — yet the same `NULL+0x1d8` crash returned after ~8 minutes of normal use (the process survived the first few stress-test swipes but later crashed from organic dropdown use; see `cppcrash-com.ohos.systemui-10008-20260417041041152.log`, process lifetime 476 s, MD5 `93636179997549d6091ead894eecc668` matches the skip-destroy build). Reverted after the regression confirmed skip-destroy is not the fix.
+
+**`eglWaitGL()` before the destroy is also not the fix.** Tested by adding `(*_eglWaitGL)()` inside the destroy wrlock (guarded by an `eglGetCurrentContext()` check). Same crash, no improvement — ruling out "pending GPU work on a surface being destroyed" as the corruption source.
+
+**Mali environment context (explains what paths are available):**
+
+- Mali advertises `EGL_KHR_surfaceless_context` (confirmed via `strings /android/vendor/lib64/egl/mt6789/libGLES_mali.so`), so `RenderContextGL::CreatePbufferSurface()` (`render_context_gl.cpp:230`) leaves `pbufferSurface_ = EGL_NO_SURFACE`.
+- `RenderContextGL::MakeCurrent(EGL_NO_SURFACE)` at `render_context_gl.cpp:246-258` therefore becomes `eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, eglContext_)` — a *surfaceless* transition, not a full unbind.
+- `ClearBuffer` at `rs_surface_ohos_gl.cpp:128-140` calls, in order: `DestoryNativeWindow(mWindow)` → `MakeCurrent(EGL_NO_SURFACE)` → `DestroyEGLSurface(mEglSurface)` → `producer_->GoBackground()`. Each of these is a candidate trigger for the corruption that surfaces on the *next* swap.
+
+### Still Open — Candidates Worth Instrumenting Next
+
+With both "Mali destroy" and "pending GPU work" ruled out, the corruption must come from one of:
+
+1. **`DestoryNativeWindow(mWindow)` before the EGL teardown** — decrements the OHOS NativeWindow refcount while the Mali-side EGLSurface still holds internal pointers into its buffer queue. `OhosNativeWindow` keeps its own ref, but the *inner* OHOS NativeWindow's producer state may transition.
+2. **`producer_->GoBackground()` after the destroy** — may actively disconnect the BufferQueue producer; if Mali had cached buffer handles via earlier `dequeueBuffer` calls, those are now dangling.
+3. **`eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, ctx)` (surfaceless transition)** — forces Mali per-thread state into surfaceless mode while the context is shared across multiple surfaces. A Mali bug in the surfaceless→bound re-transition could leave one FBO attachment slot mis-wired.
+4. **GL-side resource deletes in ArkUI's dropdown teardown** — `glDeleteFramebuffers` / `glDeleteRenderbuffers` / `glDeleteTextures` called on shared-context resources that other surviving surfaces' FBOs still reference. These calls go through OHOS's `libGLESv3.z.so`, not libhybris, and are currently invisible to our tracing.
+
+**Concrete next-session plan:**
+
+- Add entry/exit hilog to `_my_eglSwapBuffersWithDamageEXT` with surface pointer (60 Hz but tractable for a few seconds of repro) and correlate the last swap surface against the `hideSelf, hide anim finish` / `ClearBuffer` events, so we know *which* surface crashes and whether it's the dropdown itself or a sibling like the status bar.
+- Hook `glDeleteFramebuffers` / `glDeleteRenderbuffers` / `glDeleteTextures` via `eglGetProcAddress` from inside libhybris and log each call, to see if the main thread is deleting shared-context resources mid-render.
+- If (1) or (2) is implicated, try moving `DestoryNativeWindow` *after* `DestroyEGLSurface` in a local `rs_surface_ohos_gl.cpp` patch, or skip `producer_->GoBackground()`. Both are one-line changes; if either prevents the crash, we've localized the Mali bug to a specific buffer-queue disconnect.
+
+**Working state as of 2026-04-17:** All experimental changes reverted. `libEGL.z.so` is back to the 2026-04-09 Bug 8.17 rwlock-only version (MD5 `515dcb427474afd69183b3730c905e5c`, size 32648). The cross-thread race fix is still in place and still correct for any future path that does actually destroy a surface from a non-`RSRenderThread` context.
 
 ---
 
