@@ -1,6 +1,7 @@
 #!/bin/bash
 
-export OHOS_DIR=$(dirname "$(realpath $0)")/../../../../../
+export OHOS_DIR=$(dirname "$(realpath $0)")/../../../../../../
+DEVICE_FILES_DIR=$(dirname "$(realpath $0)")/../device
 
 ROOTFS_TARBALL_PATH="${OHOS_DIR}/out/hybris_generic/packages/phone/images/ohos-rootfs.tar.gz"
 PREBUILT_ROOTFS_TARBALL=""
@@ -139,43 +140,22 @@ else
     ROOTFS_TARBALL_PATH="$PREBUILT_ROOTFS_TARBALL"
 fi
 
-log "Pushing root filesystem archive to device..."
-adb shell mkdir -p /home/phablet/openharmony && log "Created openharmony directory on device."
-adb push $ROOTFS_TARBALL_PATH /home/phablet/openharmony/ && log "Root filesystem archive pushed to device."
+INSTALLER="$(dirname "$(realpath $0)")/../installer/deploy.sh"
 
-log "Pushing additional files to device..."
-adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/lxc/config /home/phablet/openharmony/ && log "Config file pushed."
-adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/start-ohos.sh /home/phablet/openharmony/ && log "Start script pushed."
-adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/ohos-post-stop.sh /home/phablet/openharmony/ && log "Post-stop hook script pushed."
-adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/systemd/ohos.service /home/phablet/openharmony/ && log "Service file pushed."
-adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/systemd/ohos-binder-setup.service /home/phablet/openharmony/ && log "Binder setup service file pushed."
-adb push ${OHOS_DIR}/device/board/oniro/hybris_generic/utils/create-ohos-binder-devices.py /home/phablet/openharmony/ && log "Binder device creation script pushed."
+# Stage the rootfs tarball + device-side helpers in the layout deploy.sh
+# expects, then delegate to it. deploy.sh is the single source of truth for
+# the on-device install steps (push, extract, install systemd units, etc.) —
+# the same script also ships in the user-distributable installer archive.
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/lxc" "$STAGE/systemd"
+cp "$ROOTFS_TARBALL_PATH"                         "$STAGE/ohos-rootfs.tar.gz"
+cp "${DEVICE_FILES_DIR}/lxc/config"               "$STAGE/lxc/config"
+cp "${DEVICE_FILES_DIR}/start-ohos.sh"            "$STAGE/start-ohos.sh"
+cp "${DEVICE_FILES_DIR}/ohos-post-stop.sh"        "$STAGE/ohos-post-stop.sh"
+cp "${DEVICE_FILES_DIR}/create-ohos-binder-devices.py" "$STAGE/create-ohos-binder-devices.py"
+cp "${DEVICE_FILES_DIR}/systemd/ohos.service"     "$STAGE/systemd/ohos.service"
+cp "${DEVICE_FILES_DIR}/systemd/ohos-binder-setup.service" "$STAGE/systemd/ohos-binder-setup.service"
 
-log "Configuring device directories and permissions..."
-adb shell "echo $DEVICE_PASSWORD | sudo -S mount -o remount,rw /" && log "Remounted root filesystem as read-write."
-adb shell "echo $DEVICE_PASSWORD | sudo -S mkdir -p /var/lib/lxc/openharmony" && log "Created LXC directory on device."
-adb shell "echo $DEVICE_PASSWORD | sudo -S mv /home/phablet/openharmony/config /var/lib/lxc/openharmony" && log "Moved config file to LXC directory."
-
-log "Extracting root filesystem on device..."
-adb shell "echo $DEVICE_PASSWORD | sudo -S rm -rf /home/phablet/openharmony/rootfs" && log "Removed existing rootfs directory on device."
-adb shell "mkdir -p /home/phablet/openharmony/rootfs" && log "Created rootfs directory on device."
-log "Extracting tarball (this may take a while)..."
-adb shell "echo $DEVICE_PASSWORD | sudo -S tar -xzf /home/phablet/openharmony/$(basename $ROOTFS_TARBALL_PATH) -C /home/phablet/openharmony/rootfs" && log "Extracted root filesystem archive on device."
-
-log "Setting permissions and moving service files..."
-adb shell chmod +x /home/phablet/openharmony/start-ohos.sh && log "Made start script executable."
-adb shell chmod +x /home/phablet/openharmony/ohos-post-stop.sh && log "Made post-stop hook executable."
-# Make sandbox configs world-readable so nwebspawn (uid 3081, not root) can
-# load them at preload time. Upstream appdata_sandbox_fixer.py installs these
-# with mode 0660 which umask trims to 0640; on a real OHOS image fs_config
-# rewrites them, but our LXC rootfs keeps the literal mode. Without this,
-# LoadAppSandboxConfigCJson silently fails inside nwebspawn, the render
-# sandbox mount-paths are skipped, and every webview renderer exits in
-# SetFileDescriptors trying to open /dev/null. See README.md Phase 8.18.
-adb shell "echo $DEVICE_PASSWORD | sudo -S chmod 0644 /home/phablet/openharmony/rootfs/system/etc/sandbox/appdata-sandbox.json /home/phablet/openharmony/rootfs/system/etc/sandbox/appdata-sandbox-isolated.json" && log "Made sandbox configs world-readable for nwebspawn."
-adb shell "echo $DEVICE_PASSWORD | sudo -S mv /home/phablet/openharmony/ohos.service /lib/systemd/system" && log "Moved ohos service file to systemd directory."
-adb shell "echo $DEVICE_PASSWORD | sudo -S mv /home/phablet/openharmony/ohos-binder-setup.service /lib/systemd/system" && log "Moved binder setup service file to systemd directory."
-adb shell "echo $DEVICE_PASSWORD | sudo -S systemctl enable ohos" && log "Enabled ohos systemd service."
-adb shell "echo $DEVICE_PASSWORD | sudo -S systemctl enable ohos-binder-setup" && log "Enabled ohos-binder-setup systemd service."
-
-log "Deployment complete. To start the container, run 'sudo start-ohos.sh' on the device or 'sudo systemctl start ohos'."
+log "Delegating on-device install to $(basename $INSTALLER)..."
+"$INSTALLER" --rootfs --rootfs-dir "$STAGE"
