@@ -1,7 +1,7 @@
 From 81f54f123d82174f07aed1c5332b002ed2c4c43b Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:37:12 +0000
-Subject: [PATCH 1/2] launcher: update SDK version to 23 and default wallpaper
+Subject: [PATCH 1/5] launcher: update SDK version to 23 and default wallpaper
  for hybris_generic
 
 build-profile.json5: bump compileSdkVersion and compatibleSdkVersion from 20

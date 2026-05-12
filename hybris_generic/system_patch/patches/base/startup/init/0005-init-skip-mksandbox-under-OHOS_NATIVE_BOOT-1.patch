@@ -1,0 +1,50 @@
+From 0ba80790808dad779a26a32b94c60ed1ee5dd784 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 12 May 2026 11:09:05 +0000
+Subject: [PATCH 5/5] init: skip mksandbox under OHOS_NATIVE_BOOT=1
+
+In native chainload boot mode, OHOS init runs as PID 1 chrooted into
+system_a. DoMkSandbox's unshare(CLONE_NEWNS) + chdir(rootPath) +
+pivot_root + umount2(MNT_DETACH) + setns(orig_ns) sequence leaves
+init's fs_struct->{root,pwd} pointing into a detached mount tree from
+NS1. Every subsequent fork+exec from init then has a child whose
+CWD/root inode is unreachable, and execv fails silently before
+reaching userspace.
+
+The chainload sets OHOS_NATIVE_BOOT=1 in init's environment so we can
+detect chrooted bring-up here and skip the sandbox dance. Sandboxing
+is a service-isolation feature, not required for the chainload
+bring-up path.
+
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Change-Id: If89d2a0adb522c4d513ac0ac9293da533702c105
+---
+ services/init/standard/init_cmds.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/services/init/standard/init_cmds.c b/services/init/standard/init_cmds.c
+index abc28fb5..6fb7b842 100755
+--- a/services/init/standard/init_cmds.c
++++ b/services/init/standard/init_cmds.c
+@@ -989,6 +989,18 @@ static void DoMkSandbox(const struct CmdArgs *ctx)
+     if (InContainerMode() != 0) {
+         return;
+     }
++    /* Native chainload boot (init runs chrooted into system_a): the
++     * unshare+chdir+pivot_root+umount2+setns sequence below leaves init's
++     * fs_struct->{root,pwd} pointing into a detached mount tree.  Every
++     * subsequent fork+exec from init then has a child whose CWD/root
++     * inode is unreachable, and `execv` fails silently before reaching
++     * userspace.  The chainload sets OHOS_NATIVE_BOOT=1 so we can detect
++     * this mode here and skip sandboxing — sandboxing is for service
++     * isolation in a normal native boot, not required for the chainload
++     * bring-up path. */
++    if (getenv("OHOS_NATIVE_BOOT") != NULL) {
++        return;
++    }
+     INIT_LOGV("Do make sandbox start");
+     const char *sandbox = ctx->argv[0];
+     InitDefaultNamespace();
+-- 
+2.50.1
+

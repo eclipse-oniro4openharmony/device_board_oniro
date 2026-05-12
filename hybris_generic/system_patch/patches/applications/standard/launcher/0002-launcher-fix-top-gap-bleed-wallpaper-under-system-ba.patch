@@ -1,7 +1,7 @@
 From b622170320ab6d98d86c69174a0d3ae05113a777 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 16 Apr 2026 19:10:27 +0000
-Subject: [PATCH 2/2] launcher: fix top gap, bleed wallpaper under system bars,
+Subject: [PATCH 2/5] launcher: fix top gap, bleed wallpaper under system bars,
  modernize build
 
 - LayoutViewModel.calculateDesktop: drop remainHeight/2 from marginTop on
