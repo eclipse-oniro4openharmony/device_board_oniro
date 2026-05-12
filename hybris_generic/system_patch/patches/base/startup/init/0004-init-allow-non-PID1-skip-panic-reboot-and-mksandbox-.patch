@@ -1,7 +1,7 @@
 From 6cdc9220a571f1228e2ae95ab249c3da32b46273 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:38:14 +0000
-Subject: [PATCH 4/4] init: allow non-PID1, skip panic reboot and mksandbox in
+Subject: [PATCH 4/5] init: allow non-PID1, skip panic reboot and mksandbox in
  container mode
 
 Three additional container-mode guards:

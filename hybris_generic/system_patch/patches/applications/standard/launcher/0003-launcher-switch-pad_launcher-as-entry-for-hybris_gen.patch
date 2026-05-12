@@ -1,0 +1,213 @@
+From 3fdf28b5ce87bcaab7a80d34615a66272027f188 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Sat, 18 Apr 2026 20:31:01 +0000
+Subject: [PATCH 3/5] launcher: switch pad_launcher as entry for
+ hybris_generic, restore system splash + faster startup
+
+- feature/settings/build-profile.json5: entryModules -> ["pad_launcher"]
+so
+  Launcher.hap ships the pad module instead of phone, giving a
+tablet-appropriate
+  layout for the Volla Tablet (1600x2560).
+- product/pad/EntryView.ets: fire bootevent.launcher.ready in onPageShow
+(pad
+  was the only EntryView without it, so bootanimation never got the
+ready vote
+  and hung on first boot). Drop RemoteWindowWrapper + its scale-to-0.95
+handlers:
+  windowAnimationManager.setController overrode the system
+app-transition and
+  suppressed startWindowIcon splashes. Falling back to the default
+transition
+  restores splashes and speeds up app open/close.
+- product/pad/MainAbility.ts: create the desktop window before awaiting
+RDB
+  init so the first frame isn't gated on storage setup. Switch to
+windowEvent +
+  WindowEventType.WINDOW_ACTIVE (matches phone) and call
+  launcherAbilityManager.checkBundleMonitor() on focus so bundle changes
+  refresh. Stop destroying APP_CENTER_WINDOW on every onRequest.
+
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Change-Id: Ibe8572cc8f5b1b3672b28eb1864c1a390f5b114d
+---
+ feature/settings/build-profile.json5          |  2 +-
+ .../src/main/ets/MainAbility/MainAbility.ts   | 22 +++++-----
+ product/pad/src/main/ets/pages/EntryView.ets  | 44 ++++---------------
+ 3 files changed, 19 insertions(+), 49 deletions(-)
+
+diff --git a/feature/settings/build-profile.json5 b/feature/settings/build-profile.json5
+index 510289d..286272c 100644
+--- a/feature/settings/build-profile.json5
++++ b/feature/settings/build-profile.json5
+@@ -7,5 +7,5 @@
+       "name": "default",
+     }
+   ],
+-  "entryModules": ["pad_launcher", "phone_launcher"]
++  "entryModules": ["pad_launcher"]
+ }
+\ No newline at end of file
+diff --git a/product/pad/src/main/ets/MainAbility/MainAbility.ts b/product/pad/src/main/ets/MainAbility/MainAbility.ts
+index 6583f25..66f19d6 100644
+--- a/product/pad/src/main/ets/MainAbility/MainAbility.ts
++++ b/product/pad/src/main/ets/MainAbility/MainAbility.ts
+@@ -58,28 +58,27 @@ export default class MainAbility extends ServiceExtension {
+     // init Gesture navigation
+     this.startGestureNavigation();
+ 
+-    // init rdb
+-    let dbStore = RdbStoreManager.getInstance();
+-    await dbStore.initRdbConfig();
+-    await dbStore.createTable();
+-
+     let registerWinEvent = (win) => {
+-      win.on('lifeCycleEvent', (stageEventType) => {
+-        // 桌面获焦或失焦时，通知桌面的卡片变为可见状态
+-        if (stageEventType === Window.WindowStageEventType.INACTIVE
+-        || stageEventType === Window.WindowStageEventType.ACTIVE) {
++      win.on('windowEvent', (stageEventType) => {
++        if (stageEventType === Window.WindowEventType.WINDOW_ACTIVE) {
++          launcherAbilityManager.checkBundleMonitor();
+           localEventManager.sendLocalEventSticky(EventConstants.EVENT_REQUEST_FORM_ITEM_VISIBLE, null);
+-          Log.showInfo(TAG, `lifeCycleEvent change: ${stageEventType}`);
++          Log.showInfo(TAG, `windowEvent change: ${stageEventType}`);
+         }
+       })
+     };
+ 
+     windowManager.registerWindowEvent();
+     navigationBarCommonEventManager.registerNavigationBarEvent();
+-    // create Launcher entry view
++    // create Launcher entry view first so the first frame isn't gated on RDB init
+     windowManager.createWindow(globalThis.desktopContext, windowManager.DESKTOP_WINDOW_NAME,
+       windowManager.DESKTOP_RANK, 'pages/' + windowManager.DESKTOP_WINDOW_NAME, true, registerWinEvent);
+ 
++    // init rdb after window creation
++    let dbStore = RdbStoreManager.getInstance();
++    await dbStore.initRdbConfig();
++    await dbStore.createTable();
++
+     // load recent
+     windowManager.createRecentWindow();
+     this.registerInputConsumer();
+@@ -178,7 +177,6 @@ export default class MainAbility extends ServiceExtension {
+       windowManager.minimizeAllApps();
+     }
+     windowManager.hideWindow(windowManager.RECENT_WINDOW_NAME);
+-    windowManager.destroyWindow(windowManager.APP_CENTER_WINDOW_NAME);
+     this.closeFolder();
+     this.closeRecentDockPopup();
+   }
+diff --git a/product/pad/src/main/ets/pages/EntryView.ets b/product/pad/src/main/ets/pages/EntryView.ets
+index 15114f0..954a4bd 100644
+--- a/product/pad/src/main/ets/pages/EntryView.ets
++++ b/product/pad/src/main/ets/pages/EntryView.ets
+@@ -22,18 +22,19 @@ import { EventConstants } from '@ohos/common';
+ import { windowManager } from '@ohos/common';
+ import { localEventManager } from '@ohos/common';
+ import { SettingsModel, LayoutViewModel } from '@ohos/common';
+-import { RemoteWindowWrapper } from '@ohos/common/component';
+ import { SmartDock } from '@ohos/smartdock/component';
+ import { PageDesktopLayout } from '@ohos/pagedesktop/component';
+ import { BigFolderConstants, BigFolderStyleConfig } from '@ohos/bigfolder';
+ import { FolderOpenComponent } from '@ohos/bigfolder/component';
+ import PadStage from '../common/PadStage';
++// No RemoteWindowWrapper: its windowAnimationManager.setController overrides the system app-transition and suppresses startWindowIcon splashes.
+ import StyleConstants from '../common/constants/StyleConstants';
+ import { FormStyleConfig } from '@ohos/form';
+ import AppCenterGridStyleConfig from '@ohos/appcenter/src/main/ets/default/common/AppCenterGridStyleConfig';
+ import PadPageDesktopGridStyleConfig from '../common/PadPageDesktopGridStyleConfig';
+ import { SmartDockStyleConfig } from '@ohos/smartdock';
+ import display from '@ohos.display';
++import systemParameter from '@ohos.systemparameter';
+ 
+ const RAW_IMAGE_CACHE_SIZE = 20000000;
+ const TAG = 'EntryView';
+@@ -54,9 +55,6 @@ struct EntryView {
+   private mStage: PadStage = new PadStage();
+   private navigationBarStatus: string | undefined;
+   private mOrientationListener = mediaquery.matchMediaSync('(orientation: landscape)');
+-  @State mAppScaleX: number = 1.0;
+-  @State mAppScaleY: number = 1.0;
+-  @State mAppAlpha: number = 1.0;
+   @StorageLink('IsSetImageRawDataCacheSize') isSetImageRawDataCacheSize?: boolean = undefined;
+   async onPortrait(mediaQueryResult: mediaquery.MediaQueryResult) {
+     if (mediaQueryResult.matches) {
+@@ -90,9 +88,7 @@ struct EntryView {
+ 
+   registerPageDesktopNavigatorStatusChangeEvent(listener: LocalEventListener): void {
+     localEventManager.registerEventListener(listener, [
+-      EventConstants.EVENT_NAVIGATOR_BAR_STATUS_CHANGE,
+-      EventConstants.EVENT_ANIMATION_START_APPLICATION,
+-      EventConstants.EVENT_ANIMATION_CLOSE_APPLICATION
++      EventConstants.EVENT_NAVIGATOR_BAR_STATUS_CHANGE
+     ]);
+   }
+ 
+@@ -102,36 +98,10 @@ struct EntryView {
+       if (event === EventConstants.EVENT_NAVIGATOR_BAR_STATUS_CHANGE) {
+         this.navigationBarStatus = params;
+         this.updateScreenInfo();
+-      } else if (event === EventConstants.EVENT_ANIMATION_START_APPLICATION) {
+-        this.startAppAnimation();
+-      } else if (event === EventConstants.EVENT_ANIMATION_CLOSE_APPLICATION) {
+-        this.closeAppAnimation();
+       }
+     }
+   };
+ 
+-  private startAppAnimation(): void {
+-    animateTo({
+-      duration: 500,
+-      curve: Curve.Friction,
+-      onFinish: () => {},
+-    }, () => {
+-      this.mAppScaleX = 0.95;
+-      this.mAppScaleY = 0.95;
+-    })
+-  }
+-
+-  private closeAppAnimation(): void {
+-    animateTo({
+-      duration: 370,
+-      delay: 0,
+-      curve: Curve.Friction,
+-    }, () => {
+-      this.mAppScaleX = 1.0;
+-      this.mAppScaleY = 1.0;
+-    })
+-  }
+-
+   private updateScreenInfo(): void {
+     Log.showInfo(TAG, 'updateScreenInfo');
+     if (this.screenWidth !== 0 && this.screenHeight !== 0) {
+@@ -156,6 +126,11 @@ struct EntryView {
+       app.setImageCacheCount(100);
+       this.isSetImageRawDataCacheSize = true;
+     }
++    try {
++      systemParameter.setSync('bootevent.launcher.ready', 'true');
++    } catch (err) {
++      Log.showError(TAG, `set bootevent.launcher.ready err, ${JSON.stringify(err)}`);
++    }
+   }
+ 
+   private getWindowSize(): void {
+@@ -238,13 +213,10 @@ struct EntryView {
+       }
+       .width('100%')
+       .height('100%')
+-      .scale({ x: this.mAppScaleX, y: this.mAppScaleY })
+-      .opacity(this.mAppAlpha)
+ 
+       if ((AppStorage.get<number>('openFolderStatus') as number) !== BigFolderConstants.OPEN_FOLDER_STATUS_CLOSE) {
+         FolderOpenComponent();
+       }
+-      RemoteWindowWrapper();
+     }
+     .backgroundImage(StyleConstants.DEFAULT_BACKGROUND_IMAGE)
+     .backgroundImageSize(ImageSize.Cover)
+-- 
+2.50.1
+
