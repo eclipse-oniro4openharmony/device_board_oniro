@@ -1,0 +1,168 @@
+From 41eaeed4d3f3014f4bb1b30eceb759cc0fcc72c1 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 27 Apr 2026 08:31:18 +0000
+Subject: [PATCH] Lockscreen: render edge-to-edge over systemui bars
+
+Configure the keyguard window for transparent fullscreen rendering
+(transparent background, layout-fullscreen, own bars hidden) and let
+the Wallpaper Image and outer content Flex expandSafeArea on all
+edges. The keyguard is z-order above SystemUi_StatusBar /
+SystemUi_NavigationBar, so the lockscreen now paints over them at
+y=0 instead of being inset by their safe-area reservation.
+
+Removes the empty StatusBar placeholder column and dead mHeightPx
+field; StatusBar now sits at the top of the main content Flex.
+Also resets backgroundScale 1.1 -> 1 so the wallpaper isn't cropped
+during the unlock animation.
+
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Change-Id: I69205e84ea62355601e1310eeb6843d4bbe37a7b
+---
+ .../ets/com/ohos/view/component/wallpaper.ets |  2 ++
+ .../ServiceExtAbility/ServiceExtAbility.ts    | 34 +++++++++++++++++++
+ .../src/main/ets/pages/slidescreenlock.ets    | 15 +++-----
+ .../main/ets/vm/slideScreenLockViewModel.ts   |  6 ++--
+ 4 files changed, 43 insertions(+), 14 deletions(-)
+
+diff --git a/features/wallpapercomponent/src/main/ets/com/ohos/view/component/wallpaper.ets b/features/wallpapercomponent/src/main/ets/com/ohos/view/component/wallpaper.ets
+index f9cec19..4687f84 100644
+--- a/features/wallpapercomponent/src/main/ets/com/ohos/view/component/wallpaper.ets
++++ b/features/wallpapercomponent/src/main/ets/com/ohos/view/component/wallpaper.ets
+@@ -41,6 +41,8 @@ export default struct Wallpaper {
+         .height(Constants.FULL_CONTAINER_HEIGHT)
+         .objectFit(ImageFit.Cover)
+         .hoverEffect(HoverEffect.None)
++        .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.CUTOUT],
++                        [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM, SafeAreaEdge.START, SafeAreaEdge.END])
+     }
+   }
+ }
+\ No newline at end of file
+diff --git a/product/phone/src/main/ets/ServiceExtAbility/ServiceExtAbility.ts b/product/phone/src/main/ets/ServiceExtAbility/ServiceExtAbility.ts
+index ab079fd..7027c3d 100644
+--- a/product/phone/src/main/ets/ServiceExtAbility/ServiceExtAbility.ts
++++ b/product/phone/src/main/ets/ServiceExtAbility/ServiceExtAbility.ts
+@@ -39,6 +39,40 @@ class ServiceExtAbility extends ServiceExtension {
+                 Log.showInfo(TAG, 'get UIContext successful,' + JSON.stringify(UIContext));
+                 AppStorage.SetOrCreate('UIContext', UIContext);
+                 Log.showInfo(TAG, name + " window loadContent in then! ")
++                // Layer B fix: keyguard window defaults to opaque white in newer SDKs,
++                // which leaks through above/below the wallpaper (the white bars at top
++                // and bottom of the lockscreen). Force transparent AFTER loadContent so
++                // only the SlideScreenlock wallpaper layer is visible.
++                try {
++                    win.setWindowBackgroundColor("#00000000")
++                    Log.showInfo(TAG, "Set window background to transparent")
++                } catch (e) {
++                    Log.showError(TAG, "setWindowBackgroundColor failed: " + JSON.stringify(e))
++                    try { win.setBackgroundColor("#00000000") } catch (e2) {}
++                }
++                // Layer B fix: extend the lockscreen window edge-to-edge under the
++                // status bar / nav bar avoidance areas, so the wallpaper image
++                // actually fills the entire screen instead of breaking at the
++                // safe-area lines at top and bottom.
++                try {
++                    win.setWindowLayoutFullScreen(true)
++                    Log.showInfo(TAG, "Set window layout fullscreen")
++                } catch (e) {
++                    Log.showError(TAG, "setWindowLayoutFullScreen failed: " + JSON.stringify(e))
++                    try { win.setLayoutFullScreen(true) } catch (e2) {}
++                }
++                // Layer B fix: hide both system status bar and navigation bar
++                // for our own window. The keyguard window is z-order above the
++                // systemui bars and its content uses .expandSafeArea on the
++                // outer Flex, so the lockscreen draws edge-to-edge regardless
++                // of whether systemui bars are present.
++                try {
++                    win.setWindowSystemBarEnable([])
++                    Log.showInfo(TAG, "Hid system bars (own window)")
++                } catch (e) {
++                    Log.showError(TAG, "setWindowSystemBarEnable failed: " + JSON.stringify(e))
++                    try { win.setSystemBarEnable([]) } catch (e2) {}
++                }
+                 win.show().then(() => {
+                     Log.showInfo(TAG, "then begin " + name + " window show in then! ");
+                 })
+diff --git a/product/phone/src/main/ets/pages/slidescreenlock.ets b/product/phone/src/main/ets/pages/slidescreenlock.ets
+index 65e6b6b..f566256 100644
+--- a/product/phone/src/main/ets/pages/slidescreenlock.ets
++++ b/product/phone/src/main/ets/pages/slidescreenlock.ets
+@@ -33,7 +33,6 @@ export default struct SlideScreenlock {
+   @StorageLink('deviceStatus') @Watch('onDeviceStatusChange') deviceStatus: string = ""
+   @StorageLink('isWallpaperShow') isWallpaperShow: boolean = true
+   @Provide @Watch('unlockScreen') isClickFrontItem: boolean = false
+-  private mHeightPx : number = 48
+   aboutToAppear() {
+     Log.showInfo(TAG, `aboutToAppear`)
+     this.mViewModel.ViewModelInit()
+@@ -67,6 +66,8 @@ export default struct SlideScreenlock {
+       .backgroundColor($r('app.color.screenlock_backgroundcolor'))
+       .width(Constants.FULL_CONTAINER_WIDTH)
+       .height(Constants.FULL_CONTAINER_HEIGHT)
++      .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.CUTOUT],
++                      [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM, SafeAreaEdge.START, SafeAreaEdge.END])
+       .scale({
+         x: this.mViewModel.backgroundScale,
+         y: this.mViewModel.backgroundScale
+@@ -83,16 +84,6 @@ export default struct SlideScreenlock {
+         Column() {
+           StatusBar()
+         }
+-        .height(this.mHeightPx + 'px' )
+-        .onAreaChange((e, e2) => {
+-          Log.showDebug(TAG, `onAreaChange, e: ${JSON.stringify(e)} e2: ${JSON.stringify(e2)}`);
+-        })
+-      }
+-
+-      Flex({ direction: FlexDirection.Column, alignItems: ItemAlign.Center, justifyContent: FlexAlign.Start }) {
+-        Column() {
+-        }
+-        .height(0)
+ 
+         Column() {
+           Row() {
+@@ -121,6 +112,8 @@ export default struct SlideScreenlock {
+       }
+       .width(Constants.FULL_CONTAINER_WIDTH)
+       .height(Constants.FULL_CONTAINER_HEIGHT)
++      .expandSafeArea([SafeAreaType.SYSTEM, SafeAreaType.CUTOUT],
++                      [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM, SafeAreaEdge.START, SafeAreaEdge.END])
+       .opacity(this.mViewModel.elementAlpha)
+       .scale({
+         x: this.mViewModel.elementScale,
+diff --git a/product/phone/src/main/ets/vm/slideScreenLockViewModel.ts b/product/phone/src/main/ets/vm/slideScreenLockViewModel.ts
+index 17a20df..91c7b15 100644
+--- a/product/phone/src/main/ets/vm/slideScreenLockViewModel.ts
++++ b/product/phone/src/main/ets/vm/slideScreenLockViewModel.ts
+@@ -32,7 +32,7 @@ export default class SlideScreenLockViewModel {
+     slidingLength: number = 0
+     elementAlpha: number = 1
+     elementScale: number = 1
+-    backgroundScale: number = 1.1
++    backgroundScale: number = 1
+     duration: number= 250
+     toggleShow: boolean = false
+ 
+@@ -46,7 +46,7 @@ export default class SlideScreenLockViewModel {
+                 callback()
+                 this.elementAlpha = 1
+                 this.elementScale = 1
+-                this.backgroundScale = 1.1
++                this.backgroundScale = 1
+             }, 250);
+         })
+         this.slidingLength = SLIDING_LENGTH
+@@ -86,7 +86,7 @@ export default class SlideScreenLockViewModel {
+     onPageShow(): void {
+         this.elementAlpha = 1
+         this.elementScale = 1
+-        this.backgroundScale = 1.1
++        this.backgroundScale = 1
+         AppStorage.SetOrCreate('slidestatus', false);
+     }
+ }
+\ No newline at end of file
+-- 
+2.50.1
+

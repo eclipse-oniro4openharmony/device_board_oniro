@@ -1,0 +1,267 @@
+From 65ad297e4f2214199b0fed283d72982a6cd8fe19 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 27 Apr 2026 08:34:37 +0000
+Subject: [PATCH] Dropdown panel: iPad-style top-anchored card on tablets
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Branch in dropdownpanel/Index on px2vp(width) >= 600vp. Tablet path
+renders a frosted-glass card anchored to the top edge — control
+center top-right, notifications top-left — over a dim tap-to-dismiss
+backdrop, instead of the full-screen panel that's correct on phones.
+
+Card box and scale are tuned per panel: control 700x1000 @ 0.5 (its
+resource fonts are huge phone-style), notification 380x600 @ 1.0
+(text already small). Scale anchor flips to the side the card is
+on so it sits flush after scaling.
+
+Notification.ets and Control.ets gain a hideInnerStatusBar prop that
+the tablet branch sets to true — the host status bar is already
+visible above the floating card, so the in-card status bar is
+redundant. Phone branch keeps the original full-screen layout.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Change-Id: I438f51e8871b80d408f489bb603f9fdfe5ddd47e
+---
+ .../src/main/ets/pages/control.ets            |  27 ++--
+ .../src/main/ets/pages/index.ets              | 146 ++++++++++++++----
+ .../src/main/ets/pages/notification.ets       |   7 +-
+ 3 files changed, 140 insertions(+), 40 deletions(-)
+
+diff --git a/product/phone/dropdownpanel/src/main/ets/pages/control.ets b/product/phone/dropdownpanel/src/main/ets/pages/control.ets
+index 5ae3691..e8b2aaf 100644
+--- a/product/phone/dropdownpanel/src/main/ets/pages/control.ets
++++ b/product/phone/dropdownpanel/src/main/ets/pages/control.ets
+@@ -36,6 +36,9 @@ const TAG = 'DropdownPanel-Control';
+ @Component
+ export default struct Control {
+   private touchMoveCallback: Function = () => {}
++  // Layer B: when true, hide the inner status bar (used in tablet iPad-style mode
++  // where the real status bar is already visible above the floating card).
++  hideInnerStatusBar: boolean = false;
+   startX: number = 0
+   startY: number = 0
+   @State moveX: number = 0
+@@ -53,18 +56,20 @@ export default struct Control {
+ 
+   build() {
+     Column() {
+-      Column() {
+-        statusBar({ touchMoveCallback: (data: TouchMoveData): void => this.touchMoveCallback(data) })
++      if (!this.hideInnerStatusBar) {
++        Column() {
++          statusBar({ touchMoveCallback: (data: TouchMoveData): void => this.touchMoveCallback(data) })
++        }
++        .width('100%')
++        .height(this.style.statusBarHeight)
++        .padding({
++          top: $r("app.float.status_bar_padding_top_bottom"),
++          bottom: $r("app.float.status_bar_padding_top_bottom"),
++          left: $r("sys.float.ohos_id_max_padding_start"),
++          right: $r("sys.float.ohos_id_max_padding_end")
++        })
++        .layoutWeight(0)
+       }
+-      .width('100%')
+-      .height(this.style.statusBarHeight)
+-      .padding({
+-        top: $r("app.float.status_bar_padding_top_bottom"),
+-        bottom: $r("app.float.status_bar_padding_top_bottom"),
+-        left: $r("sys.float.ohos_id_max_padding_start"),
+-        right: $r("sys.float.ohos_id_max_padding_end")
+-      })
+-      .layoutWeight(0)
+ 
+       Scroll(new Scroller()) {
+         Column() {
+diff --git a/product/phone/dropdownpanel/src/main/ets/pages/index.ets b/product/phone/dropdownpanel/src/main/ets/pages/index.ets
+index e8c4886..a4a23b9 100644
+--- a/product/phone/dropdownpanel/src/main/ets/pages/index.ets
++++ b/product/phone/dropdownpanel/src/main/ets/pages/index.ets
+@@ -294,39 +294,129 @@ struct Index {
+     }
+   }
+ 
++  // Layer B: iPad-style top-anchored card on tablets (width >= 600vp).
++  // On phones we keep the original full-screen layout untouched.
++  // Each panel sets its own box size + scale so the *visible* size and the
++  // resulting font readability are tuned independently. Visible size = box * scale.
++  // Control center: icon-heavy, big resource fonts → bigger box at smaller scale.
++  // Notification: dense text, smaller resource fonts → smaller box at scale 1.0.
++  private static readonly TABLET_WIDTH_VP: number = 600;
++  private static readonly CONTROL_WIDTH_VP: number = 700;
++  private static readonly CONTROL_HEIGHT_VP: number = 1000;
++  private static readonly CONTROL_SCALE: number = 0.5;
++  private static readonly NOTIF_WIDTH_VP: number = 380;
++  private static readonly NOTIF_HEIGHT_VP: number = 600;
++  private static readonly NOTIF_SCALE: number = 1.0;
++  private static readonly PANEL_INSET_VP: number = 8;
++
++  isTabletLayout(): boolean {
++    return px2vp(this.mWidthPx) >= Index.TABLET_WIDTH_VP;
++  }
++
+   build() {
+-    Stack({ alignContent: Alignment.Top }) {
+-      Image($r("app.media.dropdownpanel_bgc"))
+-        .width('100%')
+-        .height('100%')
+-        .objectFit(ImageFit.Fill)
+-        .blur(25)
+-        .opacity(1)
+-      Column() {
+-        if (this.showComponentName === DropdownPanelComponentName.NOTIFICATION) {
+-          Notification({ touchMoveCallback: (data: TouchMoveData): void => this.onTouchMove(data) })
+-            .transition(this.mNotificationInsert)
+-            .transition(this.mNotificationDelete)
+-        }
+-        if (this.showComponentName === DropdownPanelComponentName.CONTROL_CENTER) {
+-          ControlCenterComponent({
+-            touchMoveCallback: (data: TouchMoveData): void => this.onTouchMove(data)
++    if (this.isTabletLayout()) {
++      // Tablet: dim background covers full window for tap-to-dismiss; the actual panel
++      // is a card anchored to top-RIGHT (control center) or top-LEFT (notification).
++      // The Stack's alignContent is fixed to TopStart and we use Row for horizontal
++      // anchoring, so we can flip control vs notification at runtime.
++      Stack({ alignContent: Alignment.TopStart }) {
++        Column()
++          .width('100%')
++          .height('100%')
++          .backgroundColor('#A0000000')
++          .opacity(this.backgroundOpacity)
++          .onClick(() => this.hideSelf())
++
++        if (this.showComponentName !== DropdownPanelComponentName.NONE) {
++          Row() {
++            Column() {
++              if (this.showComponentName === DropdownPanelComponentName.NOTIFICATION) {
++                Notification({
++                  touchMoveCallback: (data: TouchMoveData): void => this.onTouchMove(data),
++                  hideInnerStatusBar: true
++                })
++                  .transition(this.mNotificationInsert)
++                  .transition(this.mNotificationDelete)
++              }
++              if (this.showComponentName === DropdownPanelComponentName.CONTROL_CENTER) {
++                ControlCenterComponent({
++                  touchMoveCallback: (data: TouchMoveData): void => this.onTouchMove(data),
++                  hideInnerStatusBar: true
++                })
++                  .transition(this.mControlCenterInsert)
++                  .transition(this.mControlCenterDelete)
++              }
++            }
++            .width((this.showComponentName === DropdownPanelComponentName.NOTIFICATION ? Index.NOTIF_WIDTH_VP : Index.CONTROL_WIDTH_VP) + 'vp')
++            .height((this.showComponentName === DropdownPanelComponentName.NOTIFICATION ? Index.NOTIF_HEIGHT_VP : Index.CONTROL_HEIGHT_VP) + 'vp')
++            .padding(16)
++            .borderRadius(40)
++            .clip(true)
++            .backgroundColor('#5099C8E6')
++            .backgroundBlurStyle(BlurStyle.Regular)
++            .shadow({ radius: 40, color: '#66000000', offsetX: 0, offsetY: 8 })
++            // Anchor scale to whichever side the card is on so the visible card
++            // sits flush with that screen edge after scaling. Notification panel
++            // uses scale 1.0 (text already small), control uses 0.5 (resource fonts huge).
++            .scale({
++              x: this.showComponentName === DropdownPanelComponentName.NOTIFICATION ? Index.NOTIF_SCALE : Index.CONTROL_SCALE,
++              y: this.showComponentName === DropdownPanelComponentName.NOTIFICATION ? Index.NOTIF_SCALE : Index.CONTROL_SCALE,
++              centerX: this.showComponentName === DropdownPanelComponentName.NOTIFICATION ? '0%' : '100%',
++              centerY: '0%'
++            })
++            .translate({ y: this.componentOptAreaTranslateY })
++          }
++          .width('100%')
++          .padding({
++            top: Index.PANEL_INSET_VP,
++            left: Index.PANEL_INSET_VP,
++            right: Index.PANEL_INSET_VP
+           })
+-            .transition(this.mControlCenterInsert)
+-            .transition(this.mControlCenterDelete)
++          .justifyContent(this.showComponentName === DropdownPanelComponentName.NOTIFICATION ? FlexAlign.Start : FlexAlign.End)
++          .alignItems(VerticalAlign.Top)
++        }
++      }
++      .width('100%')
++      .height('100%')
++      .onAreaChange((e, e2) => {
++        Log.showInfo(TAG, `onAreaChange (tablet), e2: ${JSON.stringify(e2)}`);
++        this.mWidthPx = vp2px(Number(e2.width))
++      })
++    } else {
++      // Phone: original full-screen layout
++      Stack({ alignContent: Alignment.Top }) {
++        Image($r("app.media.dropdownpanel_bgc"))
++          .width('100%')
++          .height('100%')
++          .objectFit(ImageFit.Fill)
++          .blur(25)
++          .opacity(1)
++        Column() {
++          if (this.showComponentName === DropdownPanelComponentName.NOTIFICATION) {
++            Notification({ touchMoveCallback: (data: TouchMoveData): void => this.onTouchMove(data) })
++              .transition(this.mNotificationInsert)
++              .transition(this.mNotificationDelete)
++          }
++          if (this.showComponentName === DropdownPanelComponentName.CONTROL_CENTER) {
++            ControlCenterComponent({
++              touchMoveCallback: (data: TouchMoveData): void => this.onTouchMove(data)
++            })
++              .transition(this.mControlCenterInsert)
++              .transition(this.mControlCenterDelete)
++          }
+         }
++        .width('100%')
++        .height(this.componentOptAreaHeightPX + 'px')
++        .translate({ y: this.componentOptAreaTranslateY })
+       }
+       .width('100%')
+-      .height(this.componentOptAreaHeightPX + 'px')
+-      .translate({ y: this.componentOptAreaTranslateY })
++      .height('100%')
++      .backgroundColor($r("app.color.default_background"))
++      .opacity(1)
++      .onAreaChange((e, e2) => {
++        Log.showInfo(TAG, `onAreaChange, e: ${JSON.stringify(e)} e2: ${JSON.stringify(e2)}`);
++        this.mWidthPx = vp2px(Number(e2.width))
++      })
+     }
+-    .width('100%')
+-    .height('100%')
+-    .backgroundColor($r("app.color.default_background"))
+-    .opacity(1)
+-    .onAreaChange((e, e2) => {
+-      Log.showInfo(TAG, `onAreaChange, e: ${JSON.stringify(e)} e2: ${JSON.stringify(e2)}`);
+-      this.mWidthPx = vp2px(Number(e2.width))
+-    })
+   }
+ }
+diff --git a/product/phone/dropdownpanel/src/main/ets/pages/notification.ets b/product/phone/dropdownpanel/src/main/ets/pages/notification.ets
+index 5e55f2f..999995c 100644
+--- a/product/phone/dropdownpanel/src/main/ets/pages/notification.ets
++++ b/product/phone/dropdownpanel/src/main/ets/pages/notification.ets
+@@ -49,6 +49,9 @@ const deviceTypeInfo = deviceInfo.deviceType;
+ @Component
+ export default struct Notification {
+   private touchMoveCallback: Function = () => {}
++  // Layer B: when true (tablet card mode), hide the inner status bar to avoid
++  // duplicating the host status bar that's already visible above the floating card.
++  hideInnerStatusBar: boolean = false;
+   startX: number = 0
+   startY: number = 0
+   @State moveX: number = 0
+@@ -72,7 +75,9 @@ export default struct Notification {
+ 
+       Flex({ direction: FlexDirection.Row, alignItems: ItemAlign.Center, justifyContent: FlexAlign.Center }) {
+         Flex({ direction: FlexDirection.Column, alignItems: ItemAlign.Start, justifyContent: FlexAlign.Start }) {
+-          statusBar({ touchMoveCallback: (data: TouchMoveData): void => this.touchMoveCallback(data) })
++          if (!this.hideInnerStatusBar) {
++            statusBar({ touchMoveCallback: (data: TouchMoveData): void => this.touchMoveCallback(data) })
++          }
+           CenterTitle({
+             touchMoveCallback: (data: TouchMoveData):void => this.CenterTitleTouchMoveCallback(data)
+           })
+-- 
+2.50.1
+
