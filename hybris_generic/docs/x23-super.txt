@@ -1,0 +1,92 @@
+Volla X23 partition layout reference
+====================================
+Captured 2026-04-30 from a running Halium 12 / Ubuntu Touch shell.
+
+Slot _a is currently active (boots Halium / Ubuntu Touch).
+Slot _b is the native-boot OHOS target (Phase N1.2 layout A).
+
+Key sizes
+---------
+super         9,663,676,416 bytes  (9.66 GB)  -- dynamic-partitions container
+userdata    116,828,110,848 bytes  (108.79 GB) -- shared, formatted on first OHOS boot
+boot_a/_b        67,108,864 bytes  (64 MB each)
+vendor_boot_a/_b 67,108,864 bytes  (64 MB each)
+dtbo_a/_b         8,388,608 bytes  (8 MB each)
+
+Currently dm-mapped (slot _a active)
+-------------------------------------
+/dev/mapper/system_a -> /dev/dm-1
+/dev/mapper/vendor_a -> /dev/dm-0
+
+system_b and vendor_b are recorded in super metadata but not dm-materialised
+on this boot. The N4 androidd launcher mounts slot _a's dm-mapper devices
+read-only at /android/system and /android/vendor. The OHOS first-stage init
+mounts slot _b raw via /dev/disk/by-partlabel/system_b and vendor_b once we
+populate them in Phase N10.
+
+All by-partlabel symlinks (58 total)
+-------------------------------------
+boot_a / boot_b
+boot_para
+connsys_bt_a / connsys_bt_b
+connsys_gnss_a / connsys_gnss_b
+connsys_wifi_a / connsys_wifi_b
+dpm_a / dpm_b
+dram_para
+dtbo_a / dtbo_b
+expdb
+flashinfo
+frp
+gz_a / gz_b
+lk_a / lk_b
+logo
+mcupm_a / mcupm_b
+md1img_a / md1img_b
+metadata
+misc
+nvcfg
+nvdata
+nvram
+otp
+para
+persist
+pi_img_a / pi_img_b
+protect1
+protect2
+scp_a / scp_b
+sec1
+seccfg
+spmfw_a / spmfw_b
+sspm_a / sspm_b
+super
+tee_a / tee_b
+userdata
+vbmeta_a / vbmeta_b
+vbmeta_system_a / vbmeta_system_b
+vbmeta_vendor_a / vbmeta_vendor_b
+vendor_boot_a / vendor_boot_b
+
+Notes
+-----
+- Full A/B everywhere except shared partitions (userdata, misc, persist, nv*).
+- VBMeta is per-slot and per-stage (vbmeta + vbmeta_system + vbmeta_vendor).
+  For unsigned OHOS images we set verifiedbootstate=orange, veritymode=disabled
+  via fastboot --disable-verity --disable-verification on the slot _b flash.
+- nvram, nvdata, nvcfg, protect1, protect2 carry IMEI / radio calibration —
+  do NOT touch in N1; preserve as-is. Telephony out of scope for Milestone 4.
+- Kernel cmdline already carries firmware_class.path=/vendor/firmware,
+  ramoops.* (see /proc/cmdline), and hardware=x23 — no changes needed for N1.
+
+Boot artifact mapping (Layout A)
+---------------------------------
+slot _a (Halium, untouched)         slot _b (OHOS, target)
+----------------------------         -----------------------
+boot_a       <- Halium boot.img      boot_b       <- out/hybris_generic/boot-ohos.img
+dtbo_a       <- Halium dtbo.img      dtbo_b       <- Halium dtbo.img (same kernel, same DT)
+vendor_boot_a (Halium)               vendor_boot_b <- Halium vendor_boot.img (untouched)
+system_a (Halium, in super)          system_b     <- out/hybris_generic/packages/phone/images/system.img
+vendor_a (Halium, in super)          vendor_b     <- out/hybris_generic/packages/phone/images/vendor.img
+                                     (chip_prod / sys_prod: deferred to N5)
+
+Shared between slots:
+userdata     <- formatted on first OHOS boot (one-way encryption format change)
