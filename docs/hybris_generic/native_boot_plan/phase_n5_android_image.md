@@ -1,173 +1,241 @@
-# Phase N5 — Android Container Image
+# Phase N5 — Halium HAL Image (Native Boot)
 
-**Status:** 🔄 In Progress (2026-04-30)
+**Status:** 🔄 Open — rewritten 2026-05-12 to reflect the chainload reality.
 
-A read-only Android rootfs containing exactly the binaries needed for the 5 HAL services, sized to ~50–80 MB for the trimmed variant.
-
----
-
-## N5.1 — Source the rootfs ✅
-
-**Decision: Option A — bind-mount the existing Halium `system_a` + `vendor_a` directly during bring-up; switch to Option B (squashfs of trimmed Halium content) once Milestone 2 is green.**
-
-Why this two-step pivot:
-
-1. **Bring-up (today):** the launcher accepts a block device path via `ANDROID_ROOTFS_SRC` and `ANDROID_VENDOR_SRC`. When Halium's dynamic partitions are dm-mapped (which they are at boot of a Halium-active device, but **NOT** on first boot of a slot-_b OHOS), pointing at `/dev/mapper/system_a` works zero-copy. This is the path we exercise during in-Halium development.
-2. **Production (after Milestone 2):** snapshot the Halium `system_a` and `vendor_a` content into squashfs files (`/var/lib/android/system.sfs`, `vendor.sfs`) shipped *inside* OHOS `system.img`. The launcher loop-mounts them. This eliminates the dependency on Halium dynamic partitions being dm-mapped on a slot-_b boot. ~2 GB cost inside our system.img — acceptable on the X23's 2 GB system_b budget.
-
-### Why not Option C (rebuild stripped Halium tree)
-
-Out of scope for Milestone 4. The current Halium 12 `system_a` is 600 MB and works; rebuilding it from source is multi-day work for marginal size gain.
-
-### Plan adjustment
-
-The original plan described "Option A (recommended for bring-up): mount the existing Halium … directly. No surgery, fast iteration." — that's correct ONLY when Halium's dm-linears exist. Native boot from slot _b means the kernel has *not* loaded slot _a's dynamic-partition metadata; the `/dev/mapper/system_a` device file does NOT exist. So Option A *as the plan described it* doesn't work for the actual native-boot scenario.
-
-**Two practical workarounds, both supported by the launcher (Phase N4.2):**
-
-- **Option A (revised)** — Boot Halium first to set up dm, then `kexec` or `chainload` into OHOS without re-loading firmware. Painful; not pursued.
-- **Option B (squashfs)** — preferred. The launcher's loop-mount path handles this directly.
-
-**N5.1 final decision: Option B for the actual native-boot.** Document the snapshot procedure in N5.4.
+> **Goal.** Get Halium 12's Android `system` and `vendor` content onto the device, mounted read-only at `/android/system` and `/android/vendor` inside the native OHOS root, so libhybris's hard-coded `/android/vendor/lib64/{egl,hw}/...` lookups resolve and `androidd` (Phase N4) can launch the HAL services.
 
 ---
 
-## N5.2 — Trimmed init.rc ✅
+## N5.0 — Why this phase needs a rewrite
 
-**Authored:** `device/board/oniro/hybris_generic/launcher/android-overlay/init.hal-only.rc`
+The original plan (pre-chainload) assumed Halium's `system_a` and `vendor_a` would still be present on the device, in their original slot, after the OHOS flash. **That assumption no longer holds.** Our Phase N11 flow ships a custom `super.img` (built by `kernel/x23/build_super_img.sh`) containing only:
 
 ```
-import /init.environ.rc
-on early-init
-    write /proc/sys/kernel/sysrq 0
-    write /proc/sys/kernel/modprobe \n
-
-on init
-    mkdir /dev/socket 0755 root root
-    mkdir /mnt 0775 root system
-    chmod 0666 /dev/binder
-    chmod 0666 /dev/hwbinder
-    chmod 0666 /dev/vndbinder
-    setprop ro.hardware mt6789
-    setprop ro.hardware.egl mali
-    setprop ro.hardware.vulkan mali
-    setprop ro.board.platform mt6789
-    setprop ro.zygote zygote64
-    setprop ro.bionic.arch arm64
-    setprop debug.sf.no_hw_vsync 0
-
-on boot
-    start hwservicemanager
-    start servicemanager
-    start vndservicemanager
-
-service hwservicemanager /system/bin/hwservicemanager
-service servicemanager   /system/bin/servicemanager
-service vndservicemanager /vendor/bin/vndservicemanager /dev/vndbinder
-service vendor.hwcomposer-2-1 /vendor/bin/hw/android.hardware.graphics.composer@2.1-service
-service vendor.gralloc-4-0    /vendor/bin/hw/android.hardware.graphics.allocator@4.0-service-mediatek
+system_a       — OHOS system
+vendor_a       — OHOS vendor
+sys_prod_a     — OHOS sys_prod
+chip_prod_a    — OHOS chip_prod
 ```
 
-(Full file has class/user/group/caps and explicit suppression of zygote/surfaceflinger/system_server.)
+Halium's original `system_a` and `vendor_a` are overwritten during the first `fastboot flash super`. There is no other on-device source for them — the kernel/Halium build tree at `kernel/linux/volla-vidofnir/` only produces the kernel + boot.img + vendor_boot.img; it never had the Halium ext4 images.
 
-**HAL service binary verification (on-device):**
-
-```
-$ ls /var/lib/lxc/android/rootfs/vendor/bin/hw/
-android.hardware.graphics.allocator@4.0-service-mediatek
-android.hardware.graphics.composer@2.1-service
-android.hardware.graphics.composer@2.3-service        # also present, libhybris uses 2.1
-android.hardware.graphics.composer@2.4-service        # also present, libhybris uses 2.1
-... (~30 other HAL services we suppress)
-```
-
-The plan claimed the binary path is `/vendor/bin/hw/android.hardware.graphics.composer@2.1-service` — **confirmed**. composer@2.3 and @2.4 are also present in the Halium image; libhybris-hwc2 was built against the @2.1 HIDL surface (Phase 5), so we explicitly start that one.
-
-### Plan adjustments
-
-1. **Service `wait_for_prop` chain.** Halium's vendor `init.mt6789.rc` has `wait_for_prop hwservicemanager.ready "true"` before composer/allocator start. We rely on that — our overlay starts the three service-managers in `on boot`, then the existing Halium vendor init starts composer/allocator after their wait_for_prop unblocks. This matches what `init.hal-only.rc` does today.
-2. **`onrestart` between composer and allocator.** Composer depends on allocator (gralloc); we restart allocator if composer dies. Mirrors AOSP convention.
-3. **`audioserver` suppression note** — Phase 13B replaced this entire path with native ALSA, so even if we were to boot full Android, audioserver would be unused. Suppression here is purely an optimisation (RAM, fork time).
+**Conclusion:** we must source Halium's `system_a` + `vendor_a` ourselves and bake them into our `super.img` as additional logical partitions. The launcher then bind-rebinds them post-pivot, and composer_host's `/android/vendor/lib64/hw/...` lookups resolve.
 
 ---
 
-## N5.3 — Pre-seeded properties ✅
+## N5.1 — Source: UBports installer bootstrap zip
 
-The required `setprop` commands are in `init.hal-only.rc` `on init` (above). This works for the squashfs path. For the **block-device path** (bring-up), Halium's existing `init.environ.rc` and `init.mt6789.rc` set the same properties via the bootloader — we don't need to override.
+The UBports installer for Volla X23 (`vidofnir`/`vidofnir_esim`) ships exactly the Halium 12 super content we need, fetched from a public Volla URL:
 
-For mimir (Volla Tablet, Android 13 base), additionally set `ro.product.first_api_level=33` so Phase 9.2's libunwindstack `CallStack` hook trips correctly. This goes into a `mimir`-specific overlay we'll create when Phase 9 work is re-validated under native boot.
+- **URL:** `https://volla.tech/filedump/volla-vidofnir-12.0-ubports-installer-bootstrap-v3.zip`
+- **Size:** ~478 MB
+- **SHA256:** `da18b5498ebae0267be894fff73bfd629be73967cf33f071d571ffc3ef46ce97`
+- **Referenced from:** `https://raw.githubusercontent.com/ubports/installer-configs/master/v2/devices/vidofnir_esim.yml`
 
-**Plan adjustment (mimir): defer to Phase 9 re-validation.**
+Inside the zip, `unpacked/super.img` is the Halium 12 base — an LP-formatted super containing `system_a`, `vendor_a`, and likely `product_a`/`system_ext_a` (we extract only `system_a` + `vendor_a`; the others are not load-bearing for libhybris).
 
----
+> Sourcing from this zip (one-time, host-side) is cleaner than `adb pull /dev/disk/by-partlabel/system_a` from a Halium-running device, because (a) it requires no live X23, (b) the SHA256 in the installer-config pins the exact version, (c) it produces an auditable provenance for the blob in our build pipeline.
 
-## N5.4 — IPC namespace orientation ✅ (analysis)
-
-The plan correctly observed that with `androidd`'s `clone(2)` *not* including `CLONE_NEWIPC`, the child inherits OHOS PID 1's IPC namespace. **Verified in Phase N4.2's source.**
-
-Original LXC config used `lxc.namespace.share.ipc = android` (OHOS sharing Android's IPC ns) — i.e. the inverse direction. The launcher gets the correct direction for free; no string config to get wrong.
-
----
-
-## N5.5 — Property system (Android side) ✅ (analysis)
-
-Android `/dev/__properties__` is created and managed by Android's own `init` when it brings up the property service. The launcher (Phase N4.2) provides the *mount point* — a fresh tmpfs at `/android/dev/__properties__` — but does not seed any properties. They are independent param/property systems and stay independent, communicated cross-namespace only via hwbinder.
-
-The plan claim "no host-side property bind from OHOS to Android — they're independent param/property systems" is correct and verified.
-
----
-
-## Squashfs build script (deferred concrete implementation)
-
-To produce the production rootfs:
+### Host script: `device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh`
 
 ```bash
-# Run from a Halium-booted Volla X23 with both system_a and vendor_a mounted.
-sudo mksquashfs /var/lib/lxc/android/rootfs/system  out/hybris_generic/android-system.sfs \
-    -comp xz -b 1M -no-fragments -no-duplicates
-sudo mksquashfs /var/lib/lxc/android/rootfs/vendor  out/hybris_generic/android-vendor.sfs \
-    -comp xz -b 1M -no-fragments -no-duplicates
+#!/bin/bash
+# Fetch + extract Halium 12 system_a and vendor_a from the UBports
+# bootstrap zip, stash under halium-blobs/ for build_super_img.sh.
 
-# Optional: overlay the trimmed init.rc onto the image
-# (alternatively, leave Halium's init.rc — it works, just wastes ~30s of fork churn)
-sudo unsquashfs -d /tmp/sysroot out/hybris_generic/android-system.sfs
-sudo cp \
-    out/hybris_generic/packages/phone/images/ohos-rootfs/system/etc/halium-overlay/init.hal-only.rc \
-    /tmp/sysroot/init.rc
-sudo mksquashfs /tmp/sysroot out/hybris_generic/android-system-trimmed.sfs \
-    -comp xz -b 1M -no-fragments -no-duplicates -noappend
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BLOBS="$HERE/../../halium-blobs"
+URL="https://volla.tech/filedump/volla-vidofnir-12.0-ubports-installer-bootstrap-v3.zip"
+SHA256="da18b5498ebae0267be894fff73bfd629be73967cf33f071d571ffc3ef46ce97"
+
+mkdir -p "$BLOBS"
+cd "$BLOBS"
+
+if [[ ! -f bootstrap.zip ]]; then
+    curl -L "$URL" -o bootstrap.zip
+fi
+echo "$SHA256  bootstrap.zip" | sha256sum -c -
+
+unzip -p bootstrap.zip unpacked/super.img > halium-super.img
+
+# Convert sparse → raw if needed (the bootstrap zip's super is non-sparse already,
+# but be defensive).
+if file halium-super.img | grep -q "Android sparse image"; then
+    simg2img halium-super.img halium-super.raw.img
+    mv halium-super.raw.img halium-super.img
+fi
+
+# Extract system_a + vendor_a from the LP container.  Use lpunpack from AOSP
+# system/extras/partition_tools, or the standalone Python implementation
+# (see N5.2 for build / fallback).
+lpunpack --partition system_a --partition vendor_a halium-super.img .
+
+# Rename to our convention.
+mv system_a.img halium_system_a.img
+mv vendor_a.img halium_vendor_a.img
+rm -f product_a.img system_ext_a.img odm_a.img halium-super.img
+
+echo "Halium blobs ready:"
+ls -lh halium_system_a.img halium_vendor_a.img
 ```
 
-Then ship the squashfs files inside OHOS `system.img` at `/var/lib/android/system.sfs` and `/var/lib/android/vendor.sfs`. The androidd launcher's loop-mount path picks them up via `ANDROID_ROOTFS_SRC=/var/lib/android/system.sfs`.
+### `.gitignore` entry
 
-Add to `androidd.cfg`:
+Add to `device/board/oniro/hybris_generic/.gitignore` (create if absent):
+
 ```
-"env" : [
-    "ANDROID_ROOTFS_SRC=/var/lib/android/system.sfs",
-    "ANDROID_VENDOR_SRC=/var/lib/android/vendor.sfs"
-]
+# Halium 12 vendor blobs, fetched by utils/host/pull-halium-blobs.sh
+halium-blobs/
 ```
 
-Defer the actual squashfs build script to Milestone 2 (after the launcher is verified booting against the Halium block-device path under a chrooted reproduction).
+These are large (~600 MB combined) and Volla-licensed — not checked in.
 
 ---
 
-## N5 plan adjustments emitted
+## N5.2 — `lpunpack` availability
 
-1. **Two-stage rootfs source.** Block device for bring-up (Halium-active context), squashfs for production (slot-_b boot of OHOS without any Halium dm setup).
-2. **Halium init.rc usage during bring-up.** `init.hal-only.rc` is an *optimisation* applied via overlay onto the squashfs; not a runtime override of the bound Halium init.rc.
-3. **mimir-specific properties** (Android 13 first_api_level=33) deferred to Phase 9 re-validation.
-4. **Squashfs creation script** is concrete but deferred — Milestone 2 dependency only.
+`lpunpack` is not in `kernel/linux/volla-vidofnir/build-dir/downloads/kernel-build-tools/linux-x86/bin/` (we ship `lpmake` there, used by `build_super_img.sh`, but not `lpunpack`). Two viable sources:
 
-## Tasks status
+### Option A — Build from AOSP (preferred)
 
-- ✅ **N5.1** — Two-stage rootfs strategy decided (block dev → squashfs)
-- ✅ **N5.2** — Trimmed `init.hal-only.rc` authored + BUILD.gn target added
-- ✅ **N5.3** — Pre-seeded properties documented (in init.hal-only.rc + Halium fallback)
-- ✅ **N5.4** — IPC namespace orientation verified (no `CLONE_NEWIPC` in Phase N4.2 launcher)
-- ✅ **N5.5** — Property system independence confirmed
-- ⏳ **Squashfs build script** — deferred to Milestone 2
+```bash
+git clone https://android.googlesource.com/platform/system/extras
+cd extras/partition_tools
+# Build using standard AOSP build system, or pull a prebuilt binary
+# from a recent release. lpunpack depends only on liblp.
+```
 
-## Next phase entry condition
+A prebuilt aarch64 / x86_64 binary can be copied into `kernel/linux/volla-vidofnir/build-dir/downloads/kernel-build-tools/linux-x86/bin/lpunpack` alongside `lpmake`. Document in `pull-halium-blobs.sh` how to obtain it.
 
-N6 needs: the launcher's `create_binderfs_device("android-binder")` call (✅ in Phase N4.2), the binderfs mount in init.x23.cfg pre-init (✅ in Phase N3.3), and the `/dev/binder` bind into the Android namespace (✅ in Phase N4.2). N6 is mostly ratification + documentation now.
+### Option B — Standalone Python implementation
+
+The LP super format is fully documented; multiple permissive-licensed Python implementations exist (e.g. `lpunpack.py` floating around on GitHub). For our use we only need the read path. A ~200-line Python script reading `LP_METADATA_GEOMETRY_MAGIC` (0x616c4467) + the partition table is sufficient. Acceptable fallback if AOSP build is awkward.
+
+For the plan: prefer Option A; document both in the script's README block so a developer hitting "lpunpack not found" knows the alternatives.
+
+---
+
+## N5.3 — Bake into our `super.img`
+
+Extend `device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh` to add the Halium partitions, **only when the blobs are present**. Builds without the blobs (pure OHOS-only super) still work — this is important for bring-up developers who don't need graphics yet.
+
+### Patch to `build_super_img.sh`
+
+```bash
+HALIUM_SYS="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/halium_system_a.img"
+HALIUM_VEN="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/halium_vendor_a.img"
+
+LPMAKE_EXTRA=()
+if [[ -f "$HALIUM_SYS" && -f "$HALIUM_VEN" ]]; then
+    HS_SZ=$(stat -c %s "$HALIUM_SYS")
+    HV_SZ=$(stat -c %s "$HALIUM_VEN")
+    echo "halium_system_a.img: $HS_SZ bytes"
+    echo "halium_vendor_a.img: $HV_SZ bytes"
+    LPMAKE_EXTRA+=(
+        --partition "halium_system_a:readonly:$HS_SZ:main_a"
+        --image     "halium_system_a=$HALIUM_SYS"
+        --partition "halium_vendor_a:readonly:$HV_SZ:main_a"
+        --image     "halium_vendor_a=$HALIUM_VEN"
+    )
+else
+    echo "WARN: halium-blobs/ not populated — building OHOS-only super.img"
+    echo "      Run utils/host/pull-halium-blobs.sh to enable graphics."
+fi
+
+"$LPMAKE" \
+    --metadata-size "$METADATA_SIZE" \
+    --metadata-slots "$METADATA_SLOTS" \
+    --block-size "$BLOCK_SIZE" \
+    --device super:"$SUPER_SIZE" \
+    --group main_a:"$GROUP_SIZE" \
+    --partition system_a:readonly:"$SYS_SZ":main_a    --image system_a="$SYSTEM_IMG" \
+    --partition vendor_a:readonly:"$VEN_SZ":main_a    --image vendor_a="$VENDOR_IMG" \
+    --partition sys_prod_a:readonly:"$SP_SZ":main_a   --image sys_prod_a="$SYS_PROD_IMG" \
+    --partition chip_prod_a:readonly:"$CP_SZ":main_a  --image chip_prod_a="$CHIP_PROD_IMG" \
+    "${LPMAKE_EXTRA[@]}" \
+    --sparse \
+    --output "$OUTPUT"
+```
+
+### Group budget
+
+The X23's super is 9.66 GB. We currently use ~4 GB of it (OHOS system 2 GB + vendor 256 MB + sys_prod 50 MB + chip_prod 50 MB + slack). Halium adds ~3 GB raw (~600 MB used) for `system_a` + ~600 MB raw (~150 MB used) for `vendor_a`. Comfortable fit inside `GROUP_SIZE = SUPER_SIZE/2 - 1 MB ≈ 4.83 GB`.
+
+Re-measure on `mimir` (tablet) when porting — different super geometry.
+
+---
+
+## N5.4 — Mount in chainload
+
+Extend `device/board/oniro/hybris_generic/launcher/init-chainload.sh` to mount `halium_system_a` and `halium_vendor_a` at `/root/android/system` and `/root/android/vendor` — **after** OHOS partitions, **before** the bind of `/proc /sys /dev`.
+
+### Patch to `init-chainload.sh` (Stage 3 addition)
+
+```bash
+# ---------------------------------------------------------------------------
+# Stage 3b — mount Halium system + vendor at /root/android/{system,vendor}
+# if the partitions exist.  Optional: a graphics-disabled native build skips
+# the Halium blobs in super, so these mappers won't exist.
+# ---------------------------------------------------------------------------
+if [ -b /dev/mapper/halium_system_a ] && [ -b /dev/mapper/halium_vendor_a ]; then
+    mkdir -p /root/android/system /root/android/vendor
+    mount -t ext4 -o ro /dev/mapper/halium_system_a /root/android/system || \
+        echo "[init-chainload] mount halium_system_a failed (non-fatal)"
+    mount -t ext4 -o ro /dev/mapper/halium_vendor_a /root/android/vendor || \
+        echo "[init-chainload] mount halium_vendor_a failed (non-fatal)"
+else
+    echo "[init-chainload] halium_{system,vendor}_a absent — graphics disabled"
+fi
+```
+
+The chainload's existing wait-loop already waits for `system_a`, `vendor_a`, `sys_prod_a`. We don't add `halium_*` to the wait loop because their absence is non-fatal (the OHOS-only path is valid).
+
+### After-mount layout (inside OHOS root)
+
+```
+/             (= OHOS system_a)
+├── system/                      OHOS bin/lib64/etc
+├── vendor/                      OHOS vendor partition
+├── sys_prod/                    OHOS sys_prod
+├── chip_prod/                   OHOS chip_prod
+├── android/                     (new, mounted via chainload)
+│   ├── system/                  Halium system_a (RO)
+│   └── vendor/                  Halium vendor_a (RO)
+├── proc, sys, dev/              bind from initramfs
+└── ...
+```
+
+The `/android/system` and `/android/vendor` mount points must exist in the OHOS rootfs. Either:
+
+1. Ship empty dirs via `init.x23.cfg` pre-init (`mkdir /android/system 0755 root root`, etc. — already partially present per Phase N3.3 reference).
+2. Bake them into OHOS `system.img` via a `bundle.json` overlay or via the `vendor/oniro/hybris_generic/etc/` install paths.
+
+Option 1 is sufficient; the cfg already creates `/android`. Add the two subdirs.
+
+---
+
+## N5.5 — Trimmed `init.rc`: defer
+
+The previous draft's goal was to author a stripped `init.hal-only.rc` running only the 5 HAL services. Reality check: Halium's existing `system_a` and `vendor_a` ship full `*.rc` files at `/system/etc/init/` and `/vendor/etc/init/` covering all of Android's userspace. Trimming them is an **optimization** (RAM, fork churn) — not a correctness requirement.
+
+For bring-up, **let Halium's init.rc run as-is.** Most of the non-HAL services (zygote, system_server, audioserver, …) will start, may crash because we don't have a `/data` set up for them, and Android init's restart limits will quiesce them. The HAL services we care about (composer, gralloc, hwservicemanager, servicemanager, vndservicemanager) come up cleanly because their dependencies are container-local.
+
+Once Milestone 3 (display) is green and we want to reduce footprint, revisit: author the trimmed cfg under `device/board/oniro/hybris_generic/launcher/android-overlay/init.hal-only.rc`, bind-mount it over `/init.rc` post-pivot.
+
+---
+
+## N5 deliverables
+
+| Item | Path | Status |
+|---|---|---|
+| Host fetcher script | `device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh` | TODO |
+| Gitignore | `device/board/oniro/hybris_generic/.gitignore` | TODO |
+| `build_super_img.sh` Halium support | `device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh` | TODO (patch) |
+| Chainload Halium mount | `device/board/oniro/hybris_generic/launcher/init-chainload.sh` | TODO (patch, Stage 3b) |
+| `/android/{system,vendor}` mkdir | `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` | TODO (extend pre-init) |
+| `lpunpack` prebuilt | `kernel/linux/volla-vidofnir/build-dir/downloads/kernel-build-tools/linux-x86/bin/lpunpack` | TODO (one-time fetch) |
+
+## Entry condition for Phase N4 (androidd)
+
+`/android/system` and `/android/vendor` both populated when OHOS init's `post-fs` trigger runs. Verify with `ls /android/system/bin/hwservicemanager` from an `hdc shell`.

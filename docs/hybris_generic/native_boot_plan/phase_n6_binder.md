@@ -32,7 +32,9 @@ Multiple binder context-managers are already proven in this kernel — both anbo
 
 ## N6.2 — Allocation strategy ✅
 
-**Plan adjustment from N0:** the original plan migrated OHOS samgr to the *default* `/dev/binder` and gave Android a dedicated `android-binder`. We keep OHOS on the existing `ohos-binder` device (or default `binder`, the choice is OHOS samgr's discretion via its existing config) and only add `android-binder` for the guest. This keeps every existing OHOS binder client wire-compatible with the LXC build.
+**Decision (2026-05-12):** OHOS samgr uses the **default** `/dev/binder` (= `/dev/binderfs/binder`). Android's servicemanager uses a dedicated `android-binder` device provisioned by `androidd` via `BINDER_CTL_ADD`.
+
+This differs from the LXC build where OHOS used `ohos-binder` because the host's Android servicemanager already owned `binder`. Native boot has OHOS as PID 1, so it can claim the default — simpler, fewer symlinks. The `/dev/binder` symlink in `init.x23.cfg` pre-init points to `/dev/binderfs/binder` accordingly.
 
 **Resulting binder visibility:**
 
