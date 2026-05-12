@@ -90,27 +90,43 @@ sh /tmp/dyn.sh
 # (which doesn't run here).
 dmsetup mknodes 2>/dev/null
 
-# Wait for system_a and vendor_a nodes to appear.
+# Wait for system_a, vendor_a, and sys_prod_a nodes to appear.  chip_prod_a
+# is soft-required (no load-bearing params on it today) so it's not in the
+# wait loop, but we still try to mount it below.
 i=0
-while { [ ! -b /dev/mapper/system_a ] || [ ! -b /dev/mapper/vendor_a ]; } \
-      && [ "$i" -lt 50 ]; do
+while { [ ! -b /dev/mapper/system_a ] || [ ! -b /dev/mapper/vendor_a ] \
+        || [ ! -b /dev/mapper/sys_prod_a ]; } && [ "$i" -lt 50 ]; do
     sleep 0.1
     i=$((i + 1))
 done
-[ -b /dev/mapper/system_a ] || { echo "[init-chainload] system_a never appeared"; exec /bin/sh; }
-[ -b /dev/mapper/vendor_a ] || { echo "[init-chainload] vendor_a never appeared"; exec /bin/sh; }
+[ -b /dev/mapper/system_a ]   || { echo "[init-chainload] system_a never appeared";   exec /bin/sh; }
+[ -b /dev/mapper/vendor_a ]   || { echo "[init-chainload] vendor_a never appeared";   exec /bin/sh; }
+[ -b /dev/mapper/sys_prod_a ] || { echo "[init-chainload] sys_prod_a never appeared"; exec /bin/sh; }
 
 # ---------------------------------------------------------------------------
-# Stage 3 — mount OHOS system_a + vendor_a read-only into /root and
-# /root/vendor.  Note we trust the mount return code rather than
+# Stage 3 — mount OHOS system_a + vendor_a + sys_prod_a + chip_prod_a
+# read-only into /root.  Note we trust the mount return code rather than
 # `mountpoint -q`: the latter is unreliable in this initramfs (it
 # misclassifies bind/move mounts).
+#
+# sys_prod must be mounted here (NOT via OHOS fstab) because OHOS init's
+# InitLoadParamFiles() scans /sys_prod/etc/param/ before pre-init's
+# `mount_fstab_sp` runs.  Mounting here makes hybris_native.para visible
+# to the initial param scan, so persist.hdc.mode.usb=enable and
+# const.security.developermode.state=true are set without a separate
+# `setparam` workaround in z_hdcd_autostart.cfg.
 # ---------------------------------------------------------------------------
 mount -t ext4 -o ro /dev/mapper/system_a /root || {
     echo "[init-chainload] mount system_a failed"; exec /bin/sh; }
 [ -d /root/vendor ] || mkdir -p /root/vendor 2>/dev/null
 mount -t ext4 -o ro /dev/mapper/vendor_a /root/vendor || {
     echo "[init-chainload] mount vendor_a failed"; exec /bin/sh; }
+[ -d /root/sys_prod ] || mkdir -p /root/sys_prod 2>/dev/null
+mount -t ext4 -o ro /dev/mapper/sys_prod_a /root/sys_prod || {
+    echo "[init-chainload] mount sys_prod_a failed"; exec /bin/sh; }
+[ -d /root/chip_prod ] || mkdir -p /root/chip_prod 2>/dev/null
+mount -t ext4 -o ro /dev/mapper/chip_prod_a /root/chip_prod 2>/dev/null \
+    || echo "[init-chainload] mount chip_prod_a failed (non-fatal)"
 
 [ -x /root/system/bin/init ] || {
     echo "[init-chainload] /root/system/bin/init missing — wrong partition?"
