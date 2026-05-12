@@ -1,132 +1,169 @@
 # Phase N8 — Graphics & Display (Native)
 
-**Status:** ✅ Source-side complete (2026-04-30)
+**Status:** 🔄 Open — rewritten 2026-05-12. Previous draft was marked "✅ Source-side complete" but its prerequisites (`/android/{system,vendor}` populated and a running Halium HAL stack) were never delivered. The earlier source-side claims were source-side-only; nothing reached a working frame on the panel under native boot.
 
-`render_service` lights pixels on the panel, reusing all of Phases 5–8 unchanged.
+> **Goal.** `render_service` lights pixels on the panel under native OHOS, inheriting Phases 5–8 (libhybris, display VDIs, stability fixes) without modification beyond the gating cfg added below.
 
----
+## Dependencies
 
-## N8.1 — Library path strategy ✅
+This phase is **wiring**, not new source. The hard work happens in:
 
-**Plan adjustment from analysis:** the original plan worried about path collisions and proposed two options:
-- (a) Relocate Android-vendor libs to `/system/lib64/hybris_vendor/...` (touches many libhybris source files).
-- (b) Keep `/vendor/lib64/...` bind-mount but mount Android libs at `/vendor/lib64/{egl,hw}_android/`.
+- **N5** — Halium `system_a` + `vendor_a` mounted at `/android/system` + `/android/vendor` by the chainload.
+- **N4** — `androidd` brings up hwservicemanager + servicemanager + vndservicemanager + composer@2.x + gralloc@4.0 in a child namespace, sharing OHOS's `/dev/hwbinder`. Parent sets `param android.composer.ready=1` when composer registers.
+- **N6** — OHOS owns default `/dev/binder`; Android binds `android-binder` as its `/dev/binder` in its namespace; `hwbinder` + `vndbinder` shared.
+- **Phases 5, 6, 7, 8, 11** of the LXC plan — all carry over unchanged.
 
-**Reading the actual libhybris source reveals neither is needed.** Libhybris already has a path-redirect map in `third_party/libhybris/hybris/common/hooks.c:2368`:
-
-```c
-{ "/vendor/lib64/egl", "/android/vendor/lib64/egl" },
-```
-
-And the linker (`hybris/common/q/linker.cpp:119`):
-```c
-static const char* const kVendorLibDir = "/android/vendor/lib64";
-```
-
-So **libhybris already remaps `/vendor/lib64` to `/android/vendor/lib64`** for any Android-vendor library load. The OHOS-side processes (composer_host, render_service, etc.) load Android libs via libhybris, and libhybris finds them under `/android/vendor/lib64/` — zero `/vendor` collision.
-
-**The actual N8 requirement** is therefore:
-1. OHOS host's `/android/system` and `/android/vendor` must be populated before any libhybris-using process starts (composer_host runs in OHOS host mount NS, not inside the Android namespace).
-2. The Android namespace (under androidd) gets its own re-mounts at the same paths plus `/system` and `/vendor` post-pivot_root.
-
-**Implementation:** add to `init.x23.cfg` pre-init:
-```
-exec_start /system/bin/mount -o loop,ro /var/lib/android/system.sfs /android/system
-exec_start /system/bin/mount -o loop,ro /var/lib/android/vendor.sfs /android/vendor
-```
-
-`mount` and `losetup` are toybox symlinks in `/system/bin/` of the OHOS rootfs (verified). The `mount -o loop` toybox option transparently allocates a `/dev/loopN` and mounts. (The androidd launcher does its own loop-mounts inside its child namespace, parallel to this — see Phase N4.2.)
-
-> Updated `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` with the two `mount -o loop,ro …` lines (2026-04-30).
-
-**The N8.1 LXC-bind workaround from Phase 5 (`lxc.mount.entry = /vendor/lib64/egl vendor/lib64/egl …`) is REPLACED — not needed at all natively.** The 2026-03-20 SPHAL-revert incident referenced in the LXC config (`/var/lib/lxc/openharmony/config:71-79`) was caused by Android libs ending up in OHOS's *own* `/vendor/lib64/`. Native boot's `/vendor` *is* OHOS vendor; Android lives at `/android/vendor`; libhybris's path-redirect map keeps them separate.
+If N4/N5 aren't done, **everything in N8 is a no-op**.
 
 ---
 
-## N8.2 — EGL/GLES symlinks ✅ (analysis)
+## N8.1 — Library path resolution: nothing to do
 
-The OHOS-side EGL impl symlinks `/system/lib64/libEGL_impl.so → libhybris EGL.so` etc. are shipped by Phase 6 source (`device/soc/oniro/hybris_generic/hardware/display/`). No change needed for native boot — they live in OHOS system, not vendor.
+libhybris's path-redirect map already remaps `/vendor/lib64 → /android/vendor/lib64` for Android-vendor library loads (`third_party/libhybris/hybris/common/hooks.c:2368`, `hybris/common/q/linker.cpp:119`). OHOS-side processes (composer_host, render_service) using libhybris call into Android HALs via `/android/vendor/lib64/{egl,hw}/...` automatically — no source edits, no special bind mounts.
 
-The Android-side EGL impl (`/vendor/lib64/egl/libEGL_mali.so`) is in the Halium Android rootfs we squashfs from `system_a`/`vendor_a`. Libhybris's linker remap (`/vendor/lib64/egl → /android/vendor/lib64/egl`) finds it after the loop-mount in N8.1.
-
----
-
-## N8.3 — Env vars ✅ (analysis)
-
-`device/board/oniro/hybris_generic/cfg/hybris_graphic_env.cfg` (Phase 6) already sets `HYBRIS_EGLPLATFORM=ohos`, `HYBRIS_LD_LIBRARY_PATH`, and other env vars on the relevant services. **Carries over to native boot unchanged** — the cfg targets services by name, and the services have the same names.
+The 2026-03-20 SPHAL revert documented in `device/board/oniro/hybris_generic/utils/device/lxc/config:71-79` was caused by Android libs leaking into OHOS's *own* `/vendor/lib64/`. Native boot's `/vendor` is OHOS vendor only; Halium content lives at `/android/vendor`. **No collision possible.** The LXC bind-mounts that wired Android libs into OHOS-vendor in the old build are simply not present.
 
 ---
 
-## N8.4 — Composer readiness gate ✅ (specification)
+## N8.2 — EGL/GLES symlinks: inherit from Phase 6
 
-Per Phase N4.4 plan, `composer_host` (the OHOS-side display VDI host) needs to wait for the Android composer service to be registered with `hwservicemanager` before it tries to call `IComposer::createClient`.
+The OHOS-side EGL impl symlinks (`/system/lib64/libEGL_impl.so → libhybris EGL.so`, etc.) are shipped by `device/soc/oniro/hybris_generic/hardware/display/` (Phase 6). These live in OHOS's `system` partition and ride along into native boot without modification.
 
-**Mechanism:**
+The Android-side EGL impl (`/vendor/lib64/egl/libGLES_mali.so`) ships in Halium's `vendor_a` and is reachable at `/android/vendor/lib64/egl/libGLES_mali.so` after N5's chainload mount. Libhybris's linker remap finds it.
 
-1. `androidd` (Phase N4.2 launcher) tracks Android namespace state. After the child reports composer ready (via writing `composer-ready` to `/data/android/`), the parent (still in OHOS context) sets `param android.composer.ready=1`.
-2. `composer_host.cfg` is augmented to wait on this param:
-   ```
-   "start-mode" : "condition",
-   "condition" : "param:android.composer.ready=1"
-   ```
+---
 
-**Concrete polling implementation in androidd:** child opens a Unix datagram socket at `/data/android/composer-ready.sock` and writes "ready\n" once it sees the composer service register. Parent reads from the socket and sets the param. Pseudo-code:
+## N8.3 — Environment variables: already in tree
 
-```c
-/* In android_child(), shortly before execv("/init"): */
-/* (Actually this needs to happen AFTER exec — Android init calls hwservicemanager
- * itself. So instead, the parent polls /android/dev/binder hwservicemanager
- * registration status by stat'ing /data/android/composer-ready, which a
- * lightweight on-init helper inside the Android namespace touches once
- * composer@2.1 is registered.) */
+`device/board/oniro/hybris_generic/cfg/hybris_graphic_env.cfg` and `cfg/z_hybris_hdf_env.cfg` set:
+
+```
+HYBRIS_LD_LIBRARY_PATH = /android/vendor/lib64:/android/system/lib64
+LD_LIBRARY_PATH        = /system/lib64/libhybris:/system/lib64
+HYBRIS_EGLPLATFORM     = ohos
+LIBEGL                 = /android/vendor/lib64/egl/libGLES_mali.so
+LIBGLESV2              = /android/vendor/lib64/egl/libGLES_mali.so
 ```
 
-**This is plumbing-level work; defer concrete coding to Milestone 2 when we can test against the running Android namespace.** For Milestone 1 (boot to hdc shell), no graphics is needed — composer_host stays unstarted, no harm.
+on `composer_host`, `allocator_host`, `render_service`, `bootanimation`. Native boot inherits these unchanged.
+
+> Important: these env vars *only* take effect when `/android/{system,vendor}` actually exist (N5). Without that, libhybris's `dlopen` lookups will fail with ENOENT and composer_host will SIGSEGV (or, with the gate cfg below, never start at all).
 
 ---
 
-## N8.5 — Device-node access ✅
+## N8.4 — Composer-readiness gate (the only new artifact in N8)
 
-Verified in N2.6 — the vendor ueventd.config sets:
+This is the one cfg N8 contributes. Without it, `composer_host` and `allocator_host` start at OHOS init's normal boot trigger and crash because hwservicemanager isn't up yet (the launcher is still running Halium init).
+
+### `device/board/oniro/hybris_generic/cfg/z_composer_host_gate.cfg`
+
+```json
+{
+    "services" : [{
+            "name" : "composer_host",
+            "start-mode" : "condition",
+            "condition"  : "param:android.composer.ready=1"
+        },
+        {
+            "name" : "allocator_host",
+            "start-mode" : "condition",
+            "condition"  : "param:android.composer.ready=1"
+        }
+    ]
+}
 ```
-/dev/mali0       0666 graphics graphics
-/dev/dma_heap/*  0666 graphics graphics
-```
 
-Plus the system-side `/system/etc/ueventd.config` sets `/dev/dri/card0` and `/dev/dri/renderD128` perms.
+The `z_` prefix sorts after the upstream `composer_host.cfg` in `/system/etc/init/`, so OHOS init's cfg-merge applies our `start-mode`/`condition` overrides last.
 
-**No additional N8 work for device-node perms.** Inherits from N2.6.
+Wire into `device/board/oniro/hybris_generic/cfg/BUILD.gn` (sibling to `z_hybris_hdf_env.cfg` etc.). Add to `hybris_generic_cfg_group`.
+
+Parameter source: the parent of `androidd` (Phase N4.4) polls hwservicemanager for `android.hardware.graphics.composer@2.1::IComposer/default` and calls `SystemSetParameter("android.composer.ready", "1")` on success.
+
+### Why not just `wait_other` or `bootevent`?
+
+- `bootevent` watchers are for OHOS-side init events; we need a Halium-side signal crossing the namespace boundary.
+- `wait_other` (waiting on another OHOS service) doesn't apply — `androidd` *is* an OHOS service, but its readiness signal is about a child in another namespace.
+- `param:` condition is the natural fit and already supported by OHOS init's condition parser (used by many existing cfgs).
 
 ---
 
-## Inheritance from Phases 5–8 ✅
+## N8.5 — Device-node access: already covered
 
-| Phase | Carries over unchanged? | Notes |
+ueventd handles `/dev/mali0`, `/dev/dri/*`, `/dev/dma_heap/*` perms via:
+
+- `vendor/oniro/hybris_generic/etc/ueventd/ueventd.config` (existing)
+- `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` (creates the `/android` mount points)
+
+The chainload also pre-creates these on the host `/dev` and the binds inherit. `composer_host` runs uid 3036 (composer_host) + `gid graphics` + `caps SYS_NICE DAC_OVERRIDE` (Phase 11 — for the backlight sysfs writer) — these are unchanged in native.
+
+---
+
+## N8.6 — Expect Phase 8 stability bugs to reproduce
+
+Native boot doesn't change the EGL teardown sequence, the HWC2 spec violations, or the Mali driver's NULL+0x1d8 crash on dropdown close. Specifically:
+
+- **Bug 8.11** — `composer_host` SIGSEGV in `SetLayerAlpha` after ~46 minutes. Reproduces.
+- **Bug 8.17** — Mali NULL+0x1d8 on dropdown close (RSRenderThread). Reproduces. Mitigations from Phase 8.17 (rwlock in libhybris EGL) carry over.
+- **Bug 8.18** — Webview / nweb sandbox fix (`chmod 0644` on appdata-sandbox.json). Need to verify the native rootfs has this fix baked in (it's currently in `deploy-lxc-container.sh` for the LXC build, not in the build pipeline).
+
+Action: port the appdata-sandbox.json chmod into the OHOS image build (or into `init.x23.cfg` as a `chmod` cmd) so it survives the native flash. Track in Phase 8 doc updates.
+
+---
+
+## N8 deliverables
+
+| Item | Path | Status |
 |---|---|---|
-| Phase 5 (libhybris build) | ✅ | Same library binaries; new path resolution via libhybris's remap (no LXC bind needed). |
-| Phase 6 (display VDIs) | ✅ | `composer_host` and `allocator_host` cfg unchanged; composer-ready gate is a new addition (N8.4). |
-| Phase 7 (input) | ✅ | `multimodalinput` `CAP_DAC_OVERRIDE` cfg overlay carries over; `/dev/input/*` perms set by N2.6. |
-| Phase 8.1–8.18 | ⏳ | All carry over; **expect 8.17 Mali NULL+0x1d8 crash to reproduce** since the EGL teardown sequence is unchanged. Track in §8.17. |
-| Phase 11 (backlight) | ✅ | sysfs writer in composer_host already in place. |
-| Phase 12 (sharefs) | ⏳ | LXC bind disappears; replace with N9.10 (kernel port or androidd-side bind). |
+| Composer-ready gate cfg | `device/board/oniro/hybris_generic/cfg/z_composer_host_gate.cfg` | TODO |
+| BUILD.gn entry | `device/board/oniro/hybris_generic/cfg/BUILD.gn` | TODO (extend `hybris_generic_cfg_group`) |
+| Port Bug 8.18 fix to native image | `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` (chmod cmd) or system_patch | TODO |
 
----
+## Bring-up checklist
 
-## N8 plan adjustments emitted
+After N4 + N5 + N8 deploy, from `hdc shell`:
 
-1. **N8.1 simplified** — libhybris already remaps `/vendor/lib64 → /android/vendor/lib64`. No source-level relocation work needed. Just ensure OHOS host has `/android/{system,vendor}` populated (loop-mount squashfs in init.x23.cfg pre-init).
-2. **The 2026-03-20 SPHAL revert** described in the LXC config doesn't reproduce natively because /vendor IS OHOS vendor; no Android libs land there.
-3. **Composer-readiness gate** is a small cross-process signal (Unix socket or param), not a heavy poll loop — defer concrete code to Milestone 2.
-4. **Phase 8.17 Mali crash** expected to reproduce; track in `phase8_system_stability.md` §8.17.
+```sh
+# Halium content present
+ls /android/system/bin/hwservicemanager       # exists
+ls /android/vendor/lib64/hw/                  # populated
+ls /android/vendor/lib64/egl/libGLES_mali.so  # exists
 
-## Tasks status
+# Halium HAL stack alive
+pidof androidd                                # one PID
+nsenter -t $(pidof androidd) -m -p -- /system/bin/lshal | grep IComposer
+# android.hardware.graphics.composer@2.1::IComposer/default ...
 
-- ✅ **N8.1** — Library path: libhybris already handles remapping; loop-mount squashfs at /android/{system,vendor} in pre-init
-- ✅ **N8.2** — EGL/GLES symlinks unchanged (Phase 6 source carries over)
-- ✅ **N8.3** — `hybris_graphic_env.cfg` carries over unchanged
-- ⏳ **N8.4** — Composer readiness gate: spec authored, code deferred to Milestone 2
-- ✅ **N8.5** — Device-node perms set by N2.6 ueventd
+# Ready param flipped
+param get android.composer.ready              # 1
 
-## Next phase entry condition
+# OHOS-side composers up
+pidof composer_host allocator_host render_service
+# three PIDs
 
-N9 needs: WiFi inheritance from Phase 10 (just rfkill unblock + start services — ✅ done in N3.3), audio from Phase 13B (already native — ✅), backlight from Phase 11 (already in composer_host, no LXC dependency — ✅). N9 is mostly ratification + Bluetooth deferral.
+# Boot animation visible on the panel
+hilog -x | grep -E "render_service|bootanim|composer_host" | head
+```
+
+If the screen stays black despite all checks passing:
+
+- `hilog -x | grep -i 'EGL_BAD\|GL_INVALID\|HwcLayer'` — Phase 6/8 stability issues.
+- `/data/log/faultlog/faultlogger/` — service crashes.
+
+## Inheritance map (Phase X → native boot)
+
+| Phase | Inherits? | Notes |
+|---|---|---|
+| Phase 5 (libhybris) | ✅ | No source change. Library binaries identical; path redirection already in libhybris itself. |
+| Phase 6 (display VDIs) | ✅ | `device/soc/oniro/hybris_generic/hardware/display/` unchanged. composer_host cfg gains the gate (N8.4). |
+| Phase 7 (input) | ✅ | `CAP_DAC_OVERRIDE` + `z_multimodalinput_caps.cfg` carry over. `/dev/input/*` perms via ueventd. |
+| Phase 8.1–8.18 | ⏳ | All reproduce. Bug 8.18 chmod needs porting (see N8.6). |
+| Phase 11 (backlight) | ✅ | sysfs writer in `composer_host` works untouched. |
+| Phase 12 (sharefs) | ⏳ | LXC bind disappears; replace with kernel port (Phase N9.10) or an equivalent bind in `init.x23.cfg`. |
+
+## Plan adjustments vs prior draft
+
+1. **Removed the "Source-side complete" claim** — N8 is fundamentally a wiring + gating phase, not source delivery. Its prerequisites (N4 + N5) had not been delivered.
+2. **N8.1 simplified** — no source relocation, no LXC-bind workaround. libhybris's internal path map handles `/vendor → /android/vendor` for us; native boot inherits.
+3. **N8.4 is the only new artifact** — a small cfg overlay gating `composer_host`/`allocator_host` on `android.composer.ready=1`.
+4. **Bug 8.18 port called out explicitly** — was in `deploy-lxc-container.sh`; needs to move into the build / init path for native.
+5. **Removed mention of `lshal` polling from inside `androidd`'s child** — that's an implementation detail of N4.4, not an N8 deliverable.
