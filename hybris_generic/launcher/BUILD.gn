@@ -1,0 +1,38 @@
+# Copyright (c) 2026 Oniro Project
+# Licensed under the Apache License, Version 2.0.
+
+import("//build/ohos.gni")
+
+# Phase N4 — `androidd` Halium-NS launcher.  Pure C, libc only.
+# Source: androidd.c (see phase_n4_androidd.md for the design).
+ohos_executable("androidd") {
+  sources = [ "androidd.c" ]
+  cflags = [
+    "-Wall",
+    "-Wextra",
+    "-Wno-unused-parameter",
+    "-O2",
+  ]
+  install_enable = true
+  install_images = [ "system" ]
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
+# Phase N4 — init service definition.  Started on post-fs-data so that
+# /data/android can be created before the launcher tries to bind-mount
+# it.
+ohos_prebuilt_etc("androidd_cfg") {
+  source = "./androidd.cfg"
+  install_images = [ "system" ]
+  relative_install_dir = "init"
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
+group("androidd_group") {
+  deps = [
+    ":androidd",
+    ":androidd_cfg",
+  ]
+}
