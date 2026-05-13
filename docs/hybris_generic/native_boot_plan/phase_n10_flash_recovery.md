@@ -1,8 +1,59 @@
 # Phase N10 — Flash Tooling, Recovery & Dual-Boot
 
-**Status:** ✅ Source-side complete (2026-04-30); on-device flash gated by user approval
+**Status:** ✅ Source + on-device verified (2026-05-12).  `flash-native.sh` updated for the chainload flow (boot_a.bak → fastbootd → super → boot_a chainload).
 
-Make the experiment safe. Runs in parallel with N1–N9; **gates the first reflash.**
+---
+
+## Final flash flow (chainload, current as of 2026-05-12)
+
+The dual-slot A/B design originally documented below (Halium on `_a`,
+OHOS on `_b`) was **superseded** by the Phase N11 chainload approach.
+The actual flash flow now writes everything to slot `_a` in a specific
+sequence to reach fastbootd (which is needed for `super`):
+
+```
+# 1. Flash Halium boot.img to reach fastbootd
+fastboot flash boot_a /tmp/boot_a.bak
+fastboot reboot fastboot
+
+# 2. Flash OHOS super (in fastbootd)
+fastboot flash super /tmp/super.img
+
+# 3. Back to LK fastboot
+fastboot reboot bootloader
+
+# 4. Flash chainload boot.img
+fastboot flash boot_a /tmp/boot-chainload.img
+
+# 5. Boot
+fastboot reboot
+```
+
+`device/board/oniro/hybris_generic/utils/host/flash-native.sh`
+implements this sequence.  Halium's `boot_a.bak` is stashed at
+`out/hybris_generic/backups/boot_a.bak` (pulled via `adb pull
+/dev/disk/by-partlabel/boot_a` before the first reflash).
+
+**Why Halium first:** our chainload `boot-chainload.img` does not
+contain fastbootd, but flashing `super` requires fastbootd's
+dynamic-partition support.  So we transiently flash Halium's
+boot.img to reach fastbootd, then overwrite it with the chainload
+afterward.  See `phase_n11_chainload.md` for the chainload design.
+
+**Recovery:** reflash `boot_a.bak` → `boot_a` to return to Halium.
+`super` will still be the OHOS super at that point; if Halium needs
+its original `super_a`/`vendor_a`, reflash from the Halium installer
+bootstrap zip.
+
+---
+
+## Historical: A/B dual-slot design (superseded by chainload)
+
+The text below describes the **earlier design** (Halium on `_a`, OHOS
+on `_b`).  It was implemented (`flash-native.sh` had A/B logic) but
+ultimately replaced by the chainload approach because direct OHOS
+boot.img flashing (Phase N1) was rejected by LK.  Kept here as work
+history.
 
 ---
 
