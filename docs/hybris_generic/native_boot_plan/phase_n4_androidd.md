@@ -1,6 +1,6 @@
 # Phase N4 — `androidd` Launcher (Halium HAL Guest Namespace)
 
-**Status:** 🔄 Open — rewritten 2026-05-12. Earlier draft was authored before the chainload pivot and never built or deployed; the `launcher/` dir contains only `init-chainload.sh`. This phase delivers the real launcher.
+**Status:** ✅ Source-side complete (2026-05-12 PM).  Authored, built into the BUILD.gn graph, watchdog inlined into the parent path.  On-device verification deferred to the consolidated bring-up task.
 
 > **Goal.** Run Halium's HIDL HAL services (hwservicemanager + servicemanager + vndservicemanager + composer@2.x + gralloc@4.0) inside a child namespace of OHOS PID 1, so libhybris-using OHOS services (`composer_host`, `allocator_host`, `render_service`) can reach them over the shared `/dev/hwbinder`.
 
@@ -250,11 +250,11 @@ Shipped under Phase N8, not N4. Adds the `start-mode: condition` overlay to `com
 
 | Item | Path | Status |
 |---|---|---|
-| Launcher source | `device/board/oniro/hybris_generic/launcher/androidd.c` | TODO |
-| Service cfg | `device/board/oniro/hybris_generic/launcher/androidd.cfg` | TODO |
-| Build wiring | `device/board/oniro/hybris_generic/launcher/BUILD.gn` | TODO |
-| Group integration | `device/board/oniro/hybris_generic/BUILD.gn` (`hybris_generic_group` deps) | TODO |
-| Composer-ready watchdog | inline in `androidd.c` (parent path) or a sibling helper | TODO |
+| Launcher source | `device/board/oniro/hybris_generic/launcher/androidd.c` | ✅ ~370 LOC, libc only |
+| Service cfg | `device/board/oniro/hybris_generic/launcher/androidd.cfg` | ✅ `start-mode: boot`, `sandbox: 0`, critical kill on 5+ restarts/60 s |
+| Build wiring | `device/board/oniro/hybris_generic/launcher/BUILD.gn` | ✅ `ohos_executable` + `ohos_prebuilt_etc` |
+| Group integration | `device/board/oniro/hybris_generic/BUILD.gn` (`hybris_generic_group` deps) | ✅ `launcher:androidd_group` added |
+| Composer-ready watchdog | inline in `androidd.c` (parent path) | ✅ setns + fork + `lshal --neat | grep IComposer`, calls `/system/bin/param set` on success |
 
 ## Bring-up checklist
 
