@@ -258,3 +258,33 @@ Once Milestone 3 (display) is green and we want to reduce footprint, revisit: au
 ## Entry condition for Phase N4 (androidd) ✅ MET source-side
 
 `/android/system` and `/android/vendor` will be populated when OHOS init's `post-fs` trigger runs (after chainload Stage 3b binds them).  Verify with `ls /android/system/bin/hwservicemanager` from an `hdc shell` once the build + flash lands.
+
+---
+
+## Hard-won lessons
+
+### Halium-12 `android-rootfs.img` is a *full* Android root, not a `/system`-content tar
+
+Inside it: `/init` symlink → `/system/bin/init`, `/bin -> /system/bin`
+(absolute symlink), real binaries at `/system/bin/*`, plus empty
+`/dev`, `/proc`, `/sys`, `/data`, `/vendor` for the runtime to mount
+things on.  Implications:
+
+- Mount it at `/android/system/` (we do).  Halium's real `/system`
+  content is then at `/android/system/system/`.
+- From OHOS (no pivot), `ls /android/system/bin/init` follows the
+  `/bin -> /system/bin` symlink → resolves to **OHOS's**
+  `/system/bin/init`, not halium's.  Use `/android/system/system/bin/`
+  for pre-flight checks.
+- `androidd` must `pivot_root` into `/android/system/`, not
+  `/android/`.  After pivot, `/system/bin/init` resolves correctly.
+
+### Halium `vendor_a` self-contained, but `system_a` in the bootstrap zip is zeroed
+
+`vendor_a` inside the bootstrap super.img is self-contained and works
+as `halium_vendor_a`.  But Halium *system* (`system_a` inside the same
+super.img) is **allocated but zeroed** — UBports installs the real
+system content as a file (`/var/lib/lxc/android/android-rootfs.img`)
+into UT's userdata at `systemimage:install` time.  We source it from
+the system-image `device-*.tar.xz` instead.  See `pull-halium-blobs.sh`
+for the dual-source flow.

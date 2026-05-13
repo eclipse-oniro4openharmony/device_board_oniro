@@ -1,7 +1,7 @@
 # Phase N7 — HDC over USB
 
 **Status:** ✅ **DONE (2026-05-11)** — `hdc shell` over USB works
-end-to-end.  Reproduction recipe: [`REPRODUCTION.md`](REPRODUCTION.md).
+end-to-end.  Reproduction recipe: [`README.md`](README.md).
 aarch64 host setup (Pi as USB rig): [`HDC_AARCH64_HOST.md`](HDC_AARCH64_HOST.md).
 
 ---
@@ -157,13 +157,20 @@ hdc as root or via sudo (the consolidated recipe uses sudo).
 
 The hdc server bind()s its UDS socket inside `/data/hdc/hdc_debug/` on
 the host (the path is hardcoded in OHOS as
-`/data/hdc/hdc_debug/hdc_server`).  The dir must exist with write perms.
+`/data/hdc/hdc_debug/hdc_server`).  The dir must exist with write perms
+(`mkdir -p /data/hdc/hdc_debug && chmod 777 /data/hdc/hdc_debug`).
 
 If the server gets killed without cleaning `~/.HDCServer.pid` or
 `/root/.HDCServer.pid`, the next client invocation reads the stale pid,
 sees `[ -d /proc/$pid ]` is false (process is gone), but the client
 doesn't auto-clean.  The wrapper script in
 [`HDC_AARCH64_HOST.md`](HDC_AARCH64_HOST.md) does the validation.
+
+### `hdc shell` hangs after a recent device reboot
+
+The hdc daemon's USB descriptor handshake races with the device's USB
+re-enumeration.  Wait 5–10 s; on persistent hangs, `fastboot reboot`
+and let it boot fresh.
 
 ---
 

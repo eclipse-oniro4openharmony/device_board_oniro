@@ -2,7 +2,7 @@
 
 **Status:** ✅ **DONE (2026-05-11)** — boots reliably to OHOS userspace.
 USB hdc, see [`phase_n7_hdc_usb.md`](phase_n7_hdc_usb.md).
-Reproduction recipe: [`REPRODUCTION.md`](../REPRODUCTION.md).
+Reproduction recipe: [`README.md`](README.md).
 
 After Phase N10's direct-boot.img-replacement attempt looped in the
 bootloader, we reframed: instead of replacing Halium's boot.img wholesale,
@@ -104,6 +104,25 @@ silently inaccessible from the chrooted child on this kernel.
 init that loops opening `/dev/sdc30` post-chroot — `move` fails 100%,
 `bind` succeeds 100%.
 
+### Bind-mount-over-RO-file iteration trick
+
+For tight iteration on cfgs without rebuilding super: `mount -o bind
+$new_file $path_inside_system_a` overrides a single file on the
+read-only `system_a` mount in the running namespace.  Used heavily
+during bring-up to test cfg changes without a 40-min rebuild +
+re-flash cycle.  Not needed in the consolidated flow (everything's
+baked into the image), but worth remembering for the next
+regression-hunt.
+
+### OHOS init's `mkdir /dir` cmd silently fails on RO `/`
+
+`init.x23.cfg` pre-init lines like `mkdir /android` are no-ops under
+native because the chainload's chrooted `/` is RO `system_a`.  Bake
+the dirs into `system_a` via a brief remount-rw in the chainload's
+Stage 3a (the cleanest place — `system_a` is still "ours" at that
+point).  This is what currently provisions `/android/{system,vendor}`
+mount-points.
+
 ### kmod's `modprobe` needs module *names*, not full paths
 
 The Halium initramfs's modprobe is kmod (via the `/sbin/modprobe → /bin/kmod`
@@ -192,6 +211,18 @@ recorded UID/GID; if `/init` isn't root-owned, suid helpers like
 `/bin/mount` (which we need for devtmpfs) lose privilege and silently
 fail.  GNU cpio's `--owner=+0:+0` rewrites every entry at archive-creation
 time.  Builder uses it.
+
+---
+
+## Recovery (if the device gets stuck)
+
+**Device boots Halium splash and stays there.**  The chain-load `/init`
+panicked or failed before exec-chroot.  Reflash `boot_a.bak` → `boot_a`
+via `fastboot flash boot_a /tmp/boot_a.bak` and the device returns to
+Halium normally.  To diagnose, see the marker channel in older revs of
+`init-chainload.sh` — it writes 128-byte slot records into vendor_boot_a
+which can be fetched back via fastbootd; not enabled in the consolidated
+script to keep it clean.
 
 ---
 
