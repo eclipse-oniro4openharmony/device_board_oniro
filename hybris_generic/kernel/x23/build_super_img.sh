@@ -55,11 +55,43 @@ echo "vendor.img:    $VEN_SZ bytes"
 echo "sys_prod.img:  $SP_SZ bytes"
 echo "chip_prod.img: $CP_SZ bytes"
 
-# Group budget: room for all four _a partitions plus a bit of slack.  The
+# Halium blobs are optional — graphics-disabled builds skip them and
+# produce an OHOS-only super.img.  Run utils/host/pull-halium-blobs.sh
+# to populate halium-blobs/ when graphics support is wanted.
+HALIUM_SYS_IMG="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/halium_system_a.img"
+HALIUM_VEN_IMG="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/halium_vendor_a.img"
+HALIUM_LPMAKE_ARGS=()
+HALIUM_SZ_TOTAL=0
+if [[ -f "$HALIUM_SYS_IMG" && -f "$HALIUM_VEN_IMG" ]]; then
+    HSYS_SZ=$(stat -c %s "$HALIUM_SYS_IMG")
+    HVEN_SZ=$(stat -c %s "$HALIUM_VEN_IMG")
+    echo "halium_system: $HSYS_SZ bytes"
+    echo "halium_vendor: $HVEN_SZ bytes"
+    HALIUM_LPMAKE_ARGS=(
+        --partition halium_system_a:readonly:"$HSYS_SZ":main_a
+        --image     halium_system_a="$HALIUM_SYS_IMG"
+        --partition halium_vendor_a:readonly:"$HVEN_SZ":main_a
+        --image     halium_vendor_a="$HALIUM_VEN_IMG"
+    )
+    HALIUM_SZ_TOTAL=$(( HSYS_SZ + HVEN_SZ ))
+else
+    echo "WARN: halium-blobs/ not populated — building OHOS-only super.img"
+    echo "      run utils/host/pull-halium-blobs.sh to enable native graphics"
+fi
+
+# Group budget: room for all _a partitions plus a bit of slack.  The
 # total must fit inside SUPER_SIZE / METADATA_SLOTS (LP reserves half
-# the super for each A/B slot's metadata).
+# the super for each A/B slot's metadata).  We pre-check against the
+# group budget so lpmake's error message ("group exceeds size") is
+# replaced with a clearer "rebuild OHOS smaller or drop blobs" hint.
 GROUP_SIZE=$(( SUPER_SIZE / 2 - 1024 * 1024 ))
-echo "group budget:  $GROUP_SIZE bytes"
+PART_TOTAL=$(( SYS_SZ + VEN_SZ + SP_SZ + CP_SZ + HALIUM_SZ_TOTAL ))
+echo "group budget:  $GROUP_SIZE bytes (need $PART_TOTAL)"
+if (( PART_TOTAL > GROUP_SIZE )); then
+    echo "ERROR: partition total $PART_TOTAL > group budget $GROUP_SIZE" >&2
+    echo "       reduce OHOS system.img footprint or omit halium blobs" >&2
+    exit 1
+fi
 
 "$LPMAKE" \
     --metadata-size "$METADATA_SIZE" \
@@ -71,6 +103,7 @@ echo "group budget:  $GROUP_SIZE bytes"
     --partition vendor_a:readonly:"$VEN_SZ":main_a --image vendor_a="$VENDOR_IMG" \
     --partition sys_prod_a:readonly:"$SP_SZ":main_a --image sys_prod_a="$SYS_PROD_IMG" \
     --partition chip_prod_a:readonly:"$CP_SZ":main_a --image chip_prod_a="$CHIP_PROD_IMG" \
+    "${HALIUM_LPMAKE_ARGS[@]}" \
     --sparse \
     --output "$OUTPUT"
 
