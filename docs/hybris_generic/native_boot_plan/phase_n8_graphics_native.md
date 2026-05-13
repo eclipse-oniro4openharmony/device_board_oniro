@@ -1,6 +1,6 @@
 # Phase N8 — Graphics & Display (Native)
 
-**Status:** 🔄 Open — rewritten 2026-05-12. Previous draft was marked "✅ Source-side complete" but its prerequisites (`/android/{system,vendor}` populated and a running Halium HAL stack) were never delivered. The earlier source-side claims were source-side-only; nothing reached a working frame on the panel under native boot.
+**Status:** ✅ Source-side complete (2026-05-12 PM).  Composer-ready gate cfg shipped, Bug 8.18 chmod fix moved into the chainload (rather than runtime since /system is RO).  On-device verification deferred to the consolidated bring-up task.
 
 > **Goal.** `render_service` lights pixels on the panel under native OHOS, inheriting Phases 5–8 (libhybris, display VDIs, stability fixes) without modification beyond the gating cfg added below.
 
@@ -114,9 +114,9 @@ Action: port the appdata-sandbox.json chmod into the OHOS image build (or into `
 
 | Item | Path | Status |
 |---|---|---|
-| Composer-ready gate cfg | `device/board/oniro/hybris_generic/cfg/z_composer_host_gate.cfg` | TODO |
-| BUILD.gn entry | `device/board/oniro/hybris_generic/cfg/BUILD.gn` | TODO (extend `hybris_generic_cfg_group`) |
-| Port Bug 8.18 fix to native image | `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` (chmod cmd) or system_patch | TODO |
+| Composer-ready gate cfg | `device/board/oniro/hybris_generic/cfg/z_composer_host_gate.cfg` | ✅ Authored |
+| BUILD.gn entry | `device/board/oniro/hybris_generic/cfg/BUILD.gn` (`hybris_composer_gate_group`) | ✅ Wired into `hybris_generic_group` |
+| Port Bug 8.18 fix to native image | `device/board/oniro/hybris_generic/launcher/init-chainload.sh` Stage 3a | ✅ Remount-rw → chmod 0644 → remount-ro on `system_a` mount in the chainload (init.x23.cfg can't do it — `/system` is RO once OHOS init owns the namespace).  Targets `appdata-sandbox.json` + `appdata-sandbox-isolated.json`. |
 
 ## Bring-up checklist
 
