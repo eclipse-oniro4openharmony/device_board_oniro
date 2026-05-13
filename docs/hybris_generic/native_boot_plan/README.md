@@ -8,40 +8,53 @@ Status, reproduction, and per-phase pointers for booting OHOS natively
 > `phase_nX_*.md` doc.  This README is the entry point — link to the
 > phase docs instead of restating their content here.
 
-## Current state (2026-05-14)
+## Current state (2026-05-14 PM)
 
 ✅ **Native boot + USB hdc work end-to-end on Volla X23.**  The device
 boots OHOS natively, enumerates as `12d1:5000 Phone X23`, and
 `hdc shell` returns a live shell.
 
-✅ **Halium init + HAL service SEGV root-caused and fixed (2026-05-14).**
-`mknod_min(/dev/null, 0666, …)` in `androidd` was running with the
-inherited umask `022`, so `/dev/null` was created mode `0644` instead of
-`0666`.  Every Halium HAL service forks as a non-root uid (system=1000,
-logd=1036, …); the bionic linker's `__libc_init_AT_SECURE` immediately
-calls `open("/dev/null", O_RDWR)`, gets `EACCES`, retries 4× on EINTR,
-then deliberately aborts with abort-code 160 (`pc=…+0xe6c, x8=0xa0` —
-this is the unique signature we saw for every service).  Fix: `umask(0)`
-in `child_main()` before the `mknod_min` calls.  Verified: 0 SIGSEGVs
-in 25 s of crash-loop window post-fix, and a static probe binary forks
-+ setresuid(1000)s + execve(sh) cleanly to `_exit(0)`.
+✅ **All Halium HAL services come up; composer registers; the
+watchdog flips `android.composer.ready=1`.**  Four cascading
+caps/securebits/perms fixes landed today (the next layer below
+yesterday's umask fix):
+- OHOS init's `KeepCapability()` locks `SECBIT_KEEP_CAPS_LOCKED`
+  on every service.  Halium init's child can no longer toggle
+  `SECBIT_KEEP_CAPS` for services with a `capabilities` directive
+  (logd, etc.) → `PR_SET_SECUREBITS` returns `EPERM` → exit code 6.
+  Fix: name-check `androidd` in `KeepCapability()` and skip.
+- `androidd.cfg` was missing four caps Halium HALs need in their
+  inheritable sets (`AUDIT_CONTROL`, `IPC_LOCK`, `NET_BIND_SERVICE`,
+  `SYS_RAWIO`) and one cap `setns(CLONE_NEWNS)` needs
+  (`SYS_CHROOT`).  Added.
+- `binderfs` device nodes default to `0600 root:root`, blocking
+  Halium services that run as uid `system` from opening
+  `/dev/binder` → libbinder `CHECK` → SIGABRT in
+  `service*manager`.  Halium init's `chmod 0666 /dev/binderfs/binder`
+  misses because we only bind the individual devs into
+  `/dev/{binder,hwbinder,vndbinder}`.  androidd now chmods them
+  after the bind.
+- `probe_composer` (the composer-ready watchdog poll) didn't
+  `chroot("/root")` after setns into Halium's mount NS, so
+  `/system/bin/sh` resolved to OHOS sh and `/system/bin/lshal`
+  wasn't found.  Plus Halium/Toybox grep doesn't support BRE `\+`
+  — changed regex to `-Eq '@2[.][0-9]+::IComposer/default'`.
 
-🚧 **Graphics revival blocked on `logd` exit status 6 (next layer).**
-Halium init runs through `early-init`/`init`/`late-init`/`fs`/`post-fs`/`late-fs`,
-no SEGVs anywhere, and `init: starting service 'hwservicemanager' /
-'logd' / 'servicemanager' / 'vndservicemanager'` fires on the 5 s
-restart cadence — but `logd` exits with WEXITSTATUS=6 every cycle.
-Without a working logd, `hwservicemanager` and `servicemanager` can't
-publish their endpoints (they `LOG(FATAL)` on the missing
-`/dev/socket/logd` rendezvous or the missing logd socket pair) and
-composer never has anywhere to register.  Need to diagnose what logd
-is asserting on — most likely candidates are bionic capability
-inheritance, `/dev/kmsg` access (needs `CAP_SYSLOG`, granted to
-`androidd`'s caps + bounding set in `androidd.cfg`), or a logd-specific
-`/data/misc/logd/` path that doesn't exist in our tmpfs `/data`.  Same
-debug-overlay + probe-fork mechanism that nailed the umask bug applies.
-See `phase_n4_androidd.md` "2026-05-14" section for the diagnostic
-workflow.
+End-state: `lshal` inside the Halium NS shows 119 registered HIDL
+services including all three versions (2.1, 2.2, 2.3) of
+`android.hardware.graphics.composer::IComposer/default`,
+`android.hardware.graphics.allocator@4.0::IAllocator/default`, and the
+full set of MTK MT6789 HALs (camera, drm, gnss, audio, sensors,
+thermal, wifi, etc.).
+
+🚧 **Next blocker: OHOS-side `composer_host` doesn't start.**
+`render_service` polls `display_composer_proxy: get IServiceManager failed`
+at 100Hz.  OHOS samgr is up, hdf_devmgr is up, but no `composer_host`
+or `allocator_host` process exists.  In LXC mode the LXC post-start
+hook triggers host startup; native boot needs the equivalent init job
+to launch the OHOS-side hosts when `android.composer.ready=1` fires.
+See `phase_n4_androidd.md` "2026-05-14 PM" section for the layer-chase
+detail, then `phase_n8_graphics_native.md` for the host-startup plan.
 
 ## Phase index
 
@@ -51,7 +64,7 @@ workflow.
 | N1  | [phase_n1_boot_image.md](phase_n1_boot_image.md) | ❌ Superseded by N11 — direct `boot-ohos.img` flash rejected by LK |
 | N2  | [phase_n2_init_native.md](phase_n2_init_native.md) | ✅ DoMkSandbox skip under `OHOS_NATIVE_BOOT=1` |
 | N3  | [phase_n3_fstab.md](phase_n3_fstab.md) | ✅ `fstab.x23` + `init.x23.cfg` deployed via vendor.img |
-| N4  | [phase_n4_androidd.md](phase_n4_androidd.md) | ✅ Halium init runs + HAL services start (2026-05-14, umask fix); 🚧 composer never registers |
+| N4  | [phase_n4_androidd.md](phase_n4_androidd.md) | ✅ All Halium HAL services up + IComposer registers (2026-05-14, umask + securebits + caps + binder-chmod + chroot/regex fixes) |
 | N5  | [phase_n5_android_image.md](phase_n5_android_image.md) | ✅ Halium system_a (UBports system-image) + vendor_a (bootstrap) baked into super.img |
 | N6  | [phase_n6_binder.md](phase_n6_binder.md) | ✅ Default `/dev/binder` for OHOS; `android-binder` for guest via `BINDER_CTL_ADD` |
 | N7  | [phase_n7_hdc_usb.md](phase_n7_hdc_usb.md) | ✅ **DONE.**  `cmode=3` + `developermode=true` setparam + aarch64 hdc cross-build |
@@ -108,16 +121,17 @@ bash device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh
 
 ## Open work
 
-- **`logd` exits with status 6 every restart.**  Now-current blocker
-  after the 2026-05-14 umask fix.  Halium init reaches
-  `class_start core` and forks logd, hwservicemanager, servicemanager,
-  vndservicemanager every 5 s, but logd's `main()` returns 6 and the
-  other three failures cascade.  Likely root cause categories: missing
-  `/data/misc/logd/`, an LSM denial on a kmsg-related operation, or a
-  bionic capability check.  Use `/module_update/halium-debug/probe` +
-  `androidd`'s pre-init probe-fork (already wired) to fork logd under
-  `PTRACE_TRACEME` and capture its dying syscall, similar to the
-  technique that found the /dev/null EACCES.
+- **OHOS-side `composer_host` doesn't start in native boot.**
+  Now-current blocker after today's caps/securebits/binder/chroot
+  cascade.  `render_service` is alive and polling for the OHOS-side
+  composer service at 100Hz; samgr and hdf_devmgr are up; the Halium
+  HIDL `IComposer/default` IS registered and visible via `lshal` inside
+  the Halium NS.  What's missing: the OHOS `composer_host` (and
+  probably `allocator_host`) process that bridges OHOS HDI → Halium
+  HIDL via libhybris.  Check whether the native-boot init.cfg has a
+  job that starts `composer_host` on `android.composer.ready=1` (the
+  LXC config used `lxc.hook.post-start` for this).  See
+  `phase_n8_graphics_native.md` for the original plan.
 - **Phase N9 peripherals beyond WiFi/audio.**  Bluetooth + sensors
   await `androidd`-resolved Android HALs.  See
   [phase_n9_firmware_peripherals.md](phase_n9_firmware_peripherals.md).
