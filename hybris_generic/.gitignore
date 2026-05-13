@@ -1,0 +1,4 @@
+# Halium 12 vendor blobs fetched by utils/host/pull-halium-blobs.sh.
+# Large (~600 MB combined), Volla-licensed; not checked in.  The SHA256
+# pin in pull-halium-blobs.sh provides reproducibility.
+halium-blobs/
