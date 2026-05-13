@@ -118,6 +118,46 @@ done
 # ---------------------------------------------------------------------------
 mount -t ext4 -o ro /dev/mapper/system_a /root || {
     echo "[init-chainload] mount system_a failed"; exec /bin/sh; }
+
+# ---------------------------------------------------------------------------
+# Stage 3a — Bug 8.18 sandbox-perm fix.
+#
+# OHOS upstream's `appdata_sandbox_fixer.py` install path lands
+# /system/etc/sandbox/appdata-sandbox{,-isolated}.json at mode 0640
+# root:root.  In production OHOS images, fs_config rewrites this to
+# 0644 before the system image is packed.  Our OHOS build pipeline
+# preserves the upstream 0640 — and that breaks every spawn that
+# isn't running as root (nwebspawn / appspawn for nweb render).
+#
+# We can't fix this from `init.x23.cfg` because /system is RO once
+# OHOS init runs.  Easiest one-shot fix is here: briefly remount
+# system_a rw, chmod, remount ro before the chroot.  Remounting
+# read-write is safe at this point because OHOS hasn't started yet.
+#
+# See native_boot_plan/phase_n8_graphics_native.md (Bug 8.18 port).
+# ---------------------------------------------------------------------------
+if mount -o remount,rw /root 2>/dev/null; then
+    # /android tree must exist on disk before OHOS init takes over;
+    # init.x23.cfg's `mkdir /android` runs against a RO `/` and fails
+    # silently otherwise.  /android/data is NOT created here — the
+    # androidd launcher mounts a tmpfs there inside its NS (the OHOS
+    # build has no separate userdata partition mounted, so we can't
+    # back it with a real RW dir anyway).
+    mkdir -p /root/android /root/android/system /root/android/vendor \
+             2>/dev/null
+    chmod 0755 /root/android /root/android/system /root/android/vendor \
+               2>/dev/null
+
+    # Bug 8.18 — sandbox configs ship at 0640 from upstream;
+    # nwebspawn (uid 3081) needs 0644 to load them.
+    chmod 0644 /root/system/etc/sandbox/appdata-sandbox.json          2>/dev/null
+    chmod 0644 /root/system/etc/sandbox/appdata-sandbox-isolated.json 2>/dev/null
+
+    mount -o remount,ro /root 2>/dev/null || \
+        echo "[init-chainload] remount ro failed (non-fatal)"
+else
+    echo "[init-chainload] remount rw for /android mkdir + sandbox chmod failed (non-fatal)"
+fi
 [ -d /root/vendor ] || mkdir -p /root/vendor 2>/dev/null
 mount -t ext4 -o ro /dev/mapper/vendor_a /root/vendor || {
     echo "[init-chainload] mount vendor_a failed"; exec /bin/sh; }
@@ -127,6 +167,27 @@ mount -t ext4 -o ro /dev/mapper/sys_prod_a /root/sys_prod || {
 [ -d /root/chip_prod ] || mkdir -p /root/chip_prod 2>/dev/null
 mount -t ext4 -o ro /dev/mapper/chip_prod_a /root/chip_prod 2>/dev/null \
     || echo "[init-chainload] mount chip_prod_a failed (non-fatal)"
+
+# ---------------------------------------------------------------------------
+# Stage 3b — mount Halium system + vendor at /root/android/{system,vendor}
+# when their partitions are present in super.  Optional: a graphics-
+# disabled native build skips the Halium blobs (utils/host/pull-halium-
+# blobs.sh not run), so build_super_img.sh leaves them out and the
+# /dev/mapper entries never appear.  Both mounts are non-fatal — OHOS
+# still boots without them, you just don't get the libhybris HAL
+# stack.  /root/android, /root/android/system, /root/android/vendor
+# were created above (Stage 3a) during the brief remount-rw window;
+# init.x23.cfg's `mkdir /android` runs against a RO / and can't make
+# them itself.
+# ---------------------------------------------------------------------------
+if [ -b /dev/mapper/halium_system_a ] && [ -b /dev/mapper/halium_vendor_a ]; then
+    mount -t ext4 -o ro /dev/mapper/halium_system_a /root/android/system 2>/dev/null \
+        || echo "[init-chainload] mount halium_system_a failed (non-fatal)"
+    mount -t ext4 -o ro /dev/mapper/halium_vendor_a /root/android/vendor 2>/dev/null \
+        || echo "[init-chainload] mount halium_vendor_a failed (non-fatal)"
+else
+    echo "[init-chainload] halium_{system,vendor}_a absent — graphics disabled"
+fi
 
 [ -x /root/system/bin/init ] || {
     echo "[init-chainload] /root/system/bin/init missing — wrong partition?"
