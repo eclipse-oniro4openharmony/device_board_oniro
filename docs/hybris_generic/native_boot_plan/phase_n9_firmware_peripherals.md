@@ -1,6 +1,6 @@
 # Phase N9 — Firmware, Peripherals & Connectivity
 
-**Status:** ✅ Source-side complete (2026-04-30); on-device verification deferred to Milestone 4
+**Status:** 🔄 Partial (2026-05-12).  WiFi (Phase 10) and audio (Phase 13B) are native and inherit cleanly — no Android HAL dependency.  Bluetooth and sensors still need their Android HALs running in `androidd`'s namespace; defer until N4's exec-init SEGV is resolved (see `phase_n4_androidd.md`).
 
 The peripherals Ubuntu Touch was loading transparently come up under OHOS.
 
