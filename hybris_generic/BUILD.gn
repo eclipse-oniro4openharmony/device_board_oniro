@@ -9,5 +9,6 @@ group("hybris_generic_group") {
     "cfg:hybris_container_fixes_group",
     "cfg:hybris_hdf_env_group",
     "audio_alsa/test_audio:test_audio_group",
+    "launcher:androidd_group",
   ]
 }
