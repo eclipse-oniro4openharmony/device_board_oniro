@@ -335,6 +335,18 @@ static int child_main(void *arg)
               NULL, MS_BIND, NULL) < 0)
         die("bind vndbinder: %s", strerror(errno));
 
+    /* binderfs creates device nodes mode 0600 root:root.  Halium's
+     * init.rc tries to chmod 0666 /dev/binderfs/{binder,hwbinder,vndbinder},
+     * but that path doesn't exist inside our NS (we only bind the
+     * individual devices into /dev/{binder,hwbinder,vndbinder}).  Without
+     * 0666, any service running as a non-root uid (servicemanager and
+     * hwservicemanager both run as system=1000) gets EACCES opening
+     * binder and aborts via libbinder's CHECK in initialize().
+     * chmod here propagates through the bind to the underlying inode. */
+    chmod(ANDROID_ROOT "/dev/binder",    0666);
+    chmod(ANDROID_ROOT "/dev/hwbinder",  0666);
+    chmod(ANDROID_ROOT "/dev/vndbinder", 0666);
+
     /* Per-NS property store.  Halium init populates /dev/__properties__
      * with the property-area files; we just provide the empty tmpfs. */
     if (mkdir(ANDROID_ROOT "/dev/__properties__", 0755) < 0 && errno != EEXIST)
@@ -694,10 +706,33 @@ static int probe_composer(pid_t child_pid)
     if (probe < 0) { close(fd_pid); close(fd_mnt); return -1; }
 
     if (probe == 0) {
+        /* setns(CLONE_NEWNS) fails with EINVAL when the calling task's
+         * fs_struct has more than one user — and bionic's pthreads or
+         * a clone()'d child can keep it shared.  unshare(CLONE_FS) is
+         * the bionic-friendly way to detach, but musl is fine without.
+         * Belt-and-braces: call it before the setns. */
+        if (unshare(CLONE_FS) < 0)
+            logmsg("probe: unshare(CLONE_FS): %s", strerror(errno));
+
         /* Enter Halium NSes.  Order: mount NS first (so /proc remounts
-         * correctly), then PID NS for the subsequent fork. */
-        if (setns(fd_mnt, CLONE_NEWNS)  < 0) _exit(3);
-        if (setns(fd_pid, CLONE_NEWPID) < 0) _exit(4);
+         * correctly), then PID NS for the subsequent fork.
+         *
+         * Note: setns(CLONE_NEWNS) swaps the *mount namespace* but does
+         * NOT change the calling task's fs_struct root or cwd.  After
+         * Halium init pivot_roots into /root inside the new mount NS, the
+         * NS still has the underlying initramfs visible at "/" but
+         * Halium's effective root (where /system/bin/sh and lshal live)
+         * is `/root`.  We have to chroot/chdir into it explicitly, else
+         * `/system/bin/sh` resolves to OHOS's sh and `/system/bin/lshal`
+         * isn't found at all. */
+        if (setns(fd_mnt, CLONE_NEWNS)  < 0) {
+            logmsg("probe: setns mnt: %s", strerror(errno));
+            _exit(3);
+        }
+        if (setns(fd_pid, CLONE_NEWPID) < 0) {
+            logmsg("probe: setns pid: %s", strerror(errno));
+            _exit(4);
+        }
         close(fd_pid); close(fd_mnt);
 
         /* Forked grandchild lives in the new PID NS — necessary for any
@@ -705,9 +740,11 @@ static int probe_composer(pid_t child_pid)
         pid_t grand = fork();
         if (grand < 0) _exit(5);
         if (grand == 0) {
+            if (chroot("/root") < 0) _exit(8);
+            if (chdir("/")     < 0) _exit(9);
             execl("/system/bin/sh", "sh", "-c",
                   "/system/bin/lshal --neat 2>/dev/null"
-                  " | grep -q '@2.[0-9]\\+::IComposer/default'",
+                  " | grep -Eq '@2[.][0-9]+::IComposer/default'",
                   (char *)NULL);
             _exit(127);
         }
@@ -719,7 +756,13 @@ static int probe_composer(pid_t child_pid)
     close(fd_pid); close(fd_mnt);
     int s;
     if (waitpid(probe, &s, 0) < 0) return -1;
-    return WIFEXITED(s) ? WEXITSTATUS(s) : -1;
+    int rc = WIFEXITED(s) ? WEXITSTATUS(s) : -1;
+    static int last_rc = -2;
+    if (rc != last_rc) {
+        logmsg("probe_composer: rc=%d (status=0x%x)", rc, s);
+        last_rc = rc;
+    }
+    return rc;
 }
 
 static void watchdog(pid_t child_pid)
