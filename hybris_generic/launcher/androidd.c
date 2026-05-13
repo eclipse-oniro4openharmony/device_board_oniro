@@ -100,16 +100,24 @@ static void logmsg(const char *fmt, ...)
     va_end(ap);
     if (n < 0) return;
     if (n > (int)sizeof buf - 1) n = sizeof buf - 1;
-    /* /dev/kmsg is the most reliable channel during bring-up — OHOS
-     * init does NOT pipe service stderr into hilog by default, but
-     * /dev/kmsg is world-writable and `dmesg` shows it.  Each write is
-     * its own kernel-log line; the kernel adds its own timestamp. */
+    /* /dev/kmsg is the preferred channel — its writes need CAP_SYSLOG, which
+     * is in our caps list.  But for diagnostic resilience also mirror to a
+     * file in /module_update/ (OHOS tmpfs, RW), where reads don't require
+     * any privilege.  Both paths are silent on failure. */
     int fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
     if (fd >= 0) {
         char line[600];
         int ln = snprintf(line, sizeof line, "androidd: %s\n", buf);
         if (ln > 0) (void)!write(fd, line, ln);
         close(fd);
+    }
+    int ffd = open("/module_update/androidd.log",
+                   O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+    if (ffd >= 0) {
+        char line[600];
+        int ln = snprintf(line, sizeof line, "%s\n", buf);
+        if (ln > 0) (void)!write(ffd, line, ln);
+        close(ffd);
     }
     /* Mirror to stderr too — captured by init in some configurations. */
     dprintf(2, "[androidd] %s\n", buf);
@@ -145,6 +153,89 @@ static int mknod_min(const char *path, mode_t mode, dev_t dev)
 {
     if (mknod(path, mode, dev) == 0) return 0;
     return errno == EEXIST ? 0 : -1;
+}
+
+/* Track which apex modules we successfully bound, so apex_info_list_write()
+ * below can emit a matching apex-info-list.xml.  Linkerconfig reads that
+ * XML to discover the apex namespaces it needs to emit in ld.config.txt;
+ * without it, the generated config has no apex namespaces and every
+ * non-bootstrap HAL service SEGVs in its dynamic linker. */
+#define MAX_APEX_BOUND 32
+static const char *g_bound_apex[MAX_APEX_BOUND];
+static int g_bound_apex_n = 0;
+
+/* Bind /system/apex/<name> over /apex/<name> if the source exists and is a
+ * directory.  Halium 12's `system_a` ships flattened APEX modules under
+ * /system/apex/<name>/ (not capsule files), so a bind is exactly what the
+ * bionic linker namespace resolver needs to satisfy /apex/<name>/lib64/
+ * lookups for libc++/libsigchain/libnativebridge/etc.
+ *
+ * Caller is responsible for being in the Halium guest mount NS — paths are
+ * post-pivot (so /system/apex/ resolves to halium's system_a).
+ *
+ * Idempotent: ENOENT on the source and EBUSY/EEXIST on the dest are not
+ * fatal; we want this to be best-effort during bring-up. */
+static void apex_bind(const char *name)
+{
+    char src[PATH_MAX], dst[PATH_MAX];
+    snprintf(src, sizeof src, "/system/apex/%s", name);
+    snprintf(dst, sizeof dst, "/apex/%s",        name);
+    struct stat st;
+    if (stat(src, &st) < 0 || !S_ISDIR(st.st_mode)) return;
+    if (mkdir(dst, 0755) < 0 && errno != EEXIST) {
+        logmsg("apex_bind: mkdir %s: %s", dst, strerror(errno));
+        return;
+    }
+    if (mount(src, dst, NULL, MS_BIND | MS_REC, NULL) < 0) {
+        logmsg("apex_bind: bind %s -> %s: %s", src, dst, strerror(errno));
+        return;
+    }
+    if (g_bound_apex_n < MAX_APEX_BOUND)
+        g_bound_apex[g_bound_apex_n++] = name;
+}
+
+/* Write a minimal /apex/apex-info-list.xml describing every apex we bound
+ * via apex_bind() above.  This is what `linkerconfig` consumes
+ * (system/linkerconfig/modules/apex.cc::ScanActiveApexes) to discover the
+ * apex namespaces it needs to emit in /linkerconfig/<section>/ld.config.txt.
+ *
+ * Schema: system/apex/apexd/aidl/android/apex/ApexInfo.aidl + the matching
+ * XML serializer in apexd_session.cpp.  We omit optional fields (partition,
+ * provideSharedApexLibs, etc.) — linkerconfig only requires moduleName +
+ * modulePath + preinstalledModulePath + isActive.  versionCode is required
+ * by the schema but a stub `1` is accepted in practice.
+ *
+ * On a stock Android boot, apexd writes this file after mounting each
+ * apex; here we skip apexd's role entirely since the binds are stable
+ * and apexd would just bail out on "This device does not support
+ * updatable APEX" anyway. */
+static void apex_info_list_write(void)
+{
+    int fd = open("/apex/apex-info-list.xml",
+                  O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        logmsg("open /apex/apex-info-list.xml: %s", strerror(errno));
+        return;
+    }
+    dprintf(fd, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
+    dprintf(fd, "<apex-info-list>\n");
+    for (int i = 0; i < g_bound_apex_n; ++i) {
+        const char *n = g_bound_apex[i];
+        dprintf(fd,
+            "  <apex-info moduleName=\"%s\""
+            " modulePath=\"/apex/%s\""
+            " preinstalledModulePath=\"/system/apex/%s\""
+            " versionCode=\"1\""
+            " versionName=\"\""
+            " isFactory=\"true\""
+            " isActive=\"true\""
+            " provideSharedApexLibs=\"false\""
+            " />\n",
+            n, n, n);
+    }
+    dprintf(fd, "</apex-info-list>\n");
+    close(fd);
+    logmsg("apex_info_list_write: %d apexes bound", g_bound_apex_n);
 }
 
 /* Provision a binderfs device.  Idempotent: EEXIST is success so a
@@ -195,6 +286,14 @@ static int child_main(void *arg)
     if (mount("tmpfs", ANDROID_ROOT "/dev", "tmpfs", 0,
               "size=8M,mode=755") < 0)
         die("mount tmpfs on %s/dev: %s", ANDROID_ROOT, strerror(errno));
+
+    /* Clear umask BEFORE mknod_min — mknod(2) applies the umask to its mode
+     * argument, so with the inherited umask 022 our `0666` becomes `0644`.
+     * Bionic linker's `open("/dev/null", O_RDWR)` in __libc_init_AT_SECURE
+     * then fails with EACCES for any non-root service (uid 1000, etc.) and
+     * the linker aborts with abort_with_code(160) — the exact crash
+     * signature we observed for every Halium HAL service. */
+    umask(0);
 
     /* Minimal device nodes Halium init expects to find. */
     mknod_min(ANDROID_ROOT "/dev/null",    S_IFCHR | 0666, makedev(1, 3));
@@ -297,6 +396,35 @@ static int child_main(void *arg)
               "size=64M,mode=771,uid=0,gid=0") < 0)
         die("mount tmpfs on %s/data: %s", ANDROID_ROOT, strerror(errno));
 
+    /* Debug overlay: if the OHOS-side directory /module_update/halium-debug/
+     * exists, bind it into the Halium NS at /data/halium-debug/ so we can
+     * push debug payloads from outside (hdc file send) without rebuilding
+     * androidd.  /module_update is the only writable tmpfs on OHOS native
+     * boot.  Post-pivot we read /data/halium-debug/overlay.txt for a list
+     * of "src dst" pairs to bind-mount over Halium paths (eg replace
+     * /system/etc/init/servicemanager.rc with a debug version, or
+     * /system/bin/servicemanager with a wrapper script).
+     *
+     * /module_update is mounted nosuid,noexec,nodev on the host, and bind
+     * mounts inherit those flags.  Remount the bind as suid+exec+dev so
+     * Halium init can exec scripts/binaries from the overlay. */
+    {
+        struct stat st;
+        if (stat("/module_update/halium-debug", &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (mkdir(ANDROID_ROOT "/data/halium-debug", 0755) < 0 && errno != EEXIST) { }
+            if (mount("/module_update/halium-debug",
+                      ANDROID_ROOT "/data/halium-debug",
+                      NULL, MS_BIND | MS_REC, NULL) < 0)
+                logmsg("bind halium-debug: %s (non-fatal)", strerror(errno));
+            else if (mount(NULL, ANDROID_ROOT "/data/halium-debug", NULL,
+                           MS_REMOUNT | MS_BIND, NULL) < 0)
+                logmsg("remount halium-debug exec: %s (non-fatal)",
+                       strerror(errno));
+            else
+                logmsg("halium-debug overlay attached (exec-enabled)");
+        }
+    }
+
     /* Seed Halium boot env.  Android init maps androidboot.* env vars to
      * ro.boot.* properties at second-stage start. */
     setenv("ANDROID_ROOT",   "/system", 1);
@@ -332,12 +460,194 @@ static int child_main(void *arg)
     rmdir("/data/old_root");
 
     /* Redirect stdout/stderr to /dev/kmsg so Halium init's early
-     * messages (before init.rc opens its own log) reach our dmesg. */
+     * messages (before init.rc opens its own log) reach our dmesg.
+     * Done *before* the linkerconfig + apex setup below so any errors
+     * from those steps land in kmsg too. */
     int kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
     if (kfd >= 0) {
         (void)dup2(kfd, 1);
         (void)dup2(kfd, 2);
         if (kfd != 1 && kfd != 2) close(kfd);
+    }
+
+    /* ---------------------------------------------------------------------
+     * /apex first — `linkerconfig` (run further down) reads /apex/
+     * to discover runtime namespaces and emits matching ld.config.txt
+     * stanzas; without the binds in place the generated config has no
+     * com.android.runtime entry and every non-bootstrap binary (every
+     * HAL service) SEGVs in its linker.
+     *
+     * Three layered concerns:
+     *  (a) `SetupMountNamespaces()` in AOSP init does
+     *      `mount(NULL, "/apex", NULL, MS_PRIVATE, NULL)` — fails with
+     *      EINVAL unless /apex is a mount point.
+     *  (b) Bionic resolves runtime-namespace libs (libc++ etc.) via
+     *      /apex/com.android.runtime/lib64/.
+     *  (c) `linkerconfig` enumerates /apex/<name>/apex_manifest.pb to
+     *      build the namespace list.
+     *
+     * Halium 12 ships flattened APEX modules as directories under
+     * /system/apex/<name>/ (post-pivot path).  Tmpfs over /apex then
+     * bind those subdirs in.  Init's apexd would later replace these
+     * binds with the canonical layout, but the binds are sufficient
+     * for the linker and for `SetupMountNamespaces` to succeed.
+     * ------------------------------------------------------------------ */
+    if (mount("tmpfs", "/apex", "tmpfs", 0,
+              "mode=0755,uid=0,gid=0") < 0)
+        logmsg("mount tmpfs on /apex: %s (non-fatal — may already be tmpfs)",
+               strerror(errno));
+    apex_bind("com.android.runtime");
+    apex_bind("com.android.art");
+    apex_bind("com.android.i18n");
+    apex_bind("com.android.conscrypt");
+    apex_bind("com.android.os.statsd");
+    apex_bind("com.android.tzdata");
+    apex_bind("com.android.adbd");
+    apex_bind("com.android.media");
+    apex_bind("com.android.media.swcodec");
+    apex_bind("com.android.resolv");
+    apex_bind("com.android.neuralnetworks");
+    apex_bind("com.android.tethering");
+    apex_bind("com.android.wifi");
+    apex_bind("com.android.extservices");
+    apex_bind("com.android.ipsec");
+    apex_bind("com.android.mediaprovider");
+    apex_bind("com.android.permission");
+    apex_bind("com.android.sdkext");
+    apex_bind("com.android.vndk.current");
+
+    /* The VNDK apex ships its lib lists named *.libraries.<vndk_ver>.txt
+     * (e.g. llndk.libraries.32.txt for Halium 12).  Linkerconfig also
+     * expects the apex to be reachable at /apex/com.android.vndk.v<ver>/
+     * (versioned name).  Without the versioned bind, the variable loader
+     * fails to open the per-version VNDK libraries files and aborts
+     * every VNDK lookup with "SANITIZER_DEFAULT_VENDOR is not defined".
+     *
+     * Bind the same /system/apex/com.android.vndk.current under the
+     * versioned path too.  Halium 12 = Android 12 = VNDK 32; bump this
+     * when porting to a newer Halium. */
+    {
+        const char *src = "/system/apex/com.android.vndk.current";
+        struct stat st;
+        if (stat(src, &st) == 0 && S_ISDIR(st.st_mode)) {
+            mkdir("/apex/com.android.vndk.v32", 0755);
+            if (mount(src, "/apex/com.android.vndk.v32",
+                      NULL, MS_BIND | MS_REC, NULL) < 0)
+                logmsg("bind vndk.current -> vndk.v32: %s", strerror(errno));
+            else if (g_bound_apex_n < MAX_APEX_BOUND)
+                g_bound_apex[g_bound_apex_n++] = "com.android.vndk.v32";
+        }
+    }
+
+    /* Write the apex-info-list.xml that linkerconfig consumes (below).
+     * Without it, linkerconfig prints
+     *  `Failed to scan APEX modules : Can't read /apex/apex-info-list.xml`
+     * and emits a config with NO apex namespaces — every non-bootstrap
+     * binary that DT_NEEDs an apex-namespace lib (libc++ via runtime,
+     * etc.) then SEGVs in its linker on load.
+     *
+     * Init's own apexd would normally generate this file as part of
+     * apex mount, but on a non-updatable-apex device it exits early
+     * with "This device does not support updatable APEX" and writes
+     * nothing.  So we generate it ourselves. */
+    apex_info_list_write();
+
+    /* ---------------------------------------------------------------------
+     * /mnt — `SetupMountNamespaces()` mkdir_recursive's
+     * /mnt/{user,installer,androidwritable} early.  Halium 12's
+     * `system_a` ships `/mnt` as an empty dir on the RO ext4, so the
+     * mkdirs hit EROFS and init aborts with
+     *   `SetupMountNamespaces failed: Read-only file system`.
+     *
+     * Fix: tmpfs over /mnt, then pre-create the three subdirs init
+     * looks for (mode 0755 to match what mkdir_recursive uses).
+     * ------------------------------------------------------------------ */
+    if (mount("tmpfs", "/mnt", "tmpfs", 0,
+              "mode=0755,uid=0,gid=0") < 0) {
+        logmsg("mount tmpfs on /mnt: %s (non-fatal — may already be tmpfs)",
+               strerror(errno));
+    } else {
+        mkdir("/mnt/user",            0755);
+        mkdir("/mnt/installer",       0755);
+        mkdir("/mnt/androidwritable", 0755);
+    }
+
+    /* ---------------------------------------------------------------------
+     * /linkerconfig — tmpfs only; let init's own init.rc do the actual
+     * `linkerconfig` invocation.  We tried running it pre-emptively
+     * here, but on a clean boot `ro.vndk.version` isn't a property yet
+     * and the binary aborts with "SANITIZER_DEFAULT_VENDOR is not
+     * defined" (it expects `ro.vndk.version` set to look up the VNDK
+     * APEX libs lists).  Init's init.rc runs linkerconfig later, when
+     * `init.environ.rc` has set the prop, so it just works.  Halium
+     * ships /linkerconfig as an empty dir; we just provide a writable
+     * tmpfs.
+     * ------------------------------------------------------------------ */
+    mkdir("/linkerconfig", 0755);
+    if (mount("tmpfs", "/linkerconfig", "tmpfs", 0,
+              "mode=0755,uid=0,gid=0") < 0) {
+        logmsg("mount tmpfs on /linkerconfig: %s (non-fatal — may already be tmpfs)",
+               strerror(errno));
+    }
+
+    /* Apply debug-overlay manifest if present.  Each non-empty, non-comment
+     * line is "<src-path> <dst-path>" — src is post-pivot (typically under
+     * /data/halium-debug/, populated via the OHOS-side /module_update bind
+     * above), dst is the Halium path to bind over.  This lets us swap a
+     * single .rc or binary for instrumentation without a full rebuild. */
+    {
+        FILE *fp = fopen("/data/halium-debug/overlay.txt", "r");
+        if (fp) {
+            char line[512];
+            int n_applied = 0;
+            while (fgets(line, sizeof line, fp)) {
+                size_t L = strlen(line);
+                while (L > 0 && (line[L-1] == '\n' || line[L-1] == '\r' ||
+                                 line[L-1] == ' '  || line[L-1] == '\t'))
+                    line[--L] = 0;
+                char *p = line;
+                while (*p == ' ' || *p == '\t') ++p;
+                if (*p == 0 || *p == '#') continue;
+                char *sp = strchr(p, ' ');
+                if (!sp) { logmsg("overlay: bad line: %s", p); continue; }
+                *sp++ = 0;
+                while (*sp == ' ' || *sp == '\t') ++sp;
+                if (mount(p, sp, NULL, MS_BIND, NULL) < 0)
+                    logmsg("overlay bind %s -> %s: %s", p, sp, strerror(errno));
+                else {
+                    logmsg("overlay bind %s -> %s OK", p, sp);
+                    ++n_applied;
+                }
+            }
+            fclose(fp);
+            logmsg("overlay: %d binds applied", n_applied);
+        }
+    }
+
+    /* Diagnostic: if /data/halium-debug/probe exists (deposited by the
+     * overlay), fork+exec it once before exec'ing Halium init.  This lets
+     * us run a known-good static binary inside the Halium NS to confirm
+     * that static binaries work — isolating any "all Halium binaries
+     * SEGV" failure to the dynamic linker / libc path. */
+    {
+        struct stat st;
+        if (stat("/data/halium-debug/probe", &st) == 0 && (st.st_mode & 0111)) {
+            logmsg("forking probe for pre-init diagnostic");
+            pid_t pp = fork();
+            if (pp == 0) {
+                char *probe_argv[] = { (char *)"probe", NULL };
+                execv("/data/halium-debug/probe", probe_argv);
+                logmsg("exec probe: %s", strerror(errno));
+                _exit(127);
+            } else if (pp > 0) {
+                int s;
+                waitpid(pp, &s, 0);
+                logmsg("probe exited (status 0x%x WEXITSTATUS=%d WTERMSIG=%d)",
+                       s, WEXITSTATUS(s), WTERMSIG(s));
+            } else {
+                logmsg("fork for probe: %s", strerror(errno));
+            }
+        }
     }
 
     /* /system/bin/init is Halium's stage-2 init binary.  Halium 12's
