@@ -85,3 +85,21 @@ ohos_prebuilt_etc("hybris_hdf_env") {
 group("hybris_hdf_env_group") {
   deps = [ ":hybris_hdf_env" ]
 }
+
+# Phase N8 — composer-ready gate.  Overlays composer_host/allocator_host
+# with start-mode=condition gated on the OHOS param
+# `android.composer.ready=1`, which the Phase N4 androidd watchdog
+# flips once Halium's HIDL IComposer registers with hwservicemanager.
+# Without this gate, those services start at OHOS init's boot trigger
+# and SIGSEGV because the Halium HAL stack isn't up yet.
+ohos_prebuilt_etc("hybris_composer_gate") {
+  source = "z_composer_host_gate.cfg"
+  relative_install_dir = "init"
+  install_images = [ "system" ]
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
+group("hybris_composer_gate_group") {
+  deps = [ ":hybris_composer_gate" ]
+}
