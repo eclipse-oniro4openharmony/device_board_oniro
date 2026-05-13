@@ -725,3 +725,130 @@ To diagnose any future Halium-binary crash:
   device node mode to be exactly what you passed.  This affects every
   device node `androidd` creates; the lesson generalises to any code
   that does `mknod` for shared device nodes.
+
+## 2026-05-14 PM — logd / HAL services walked through: 4 separate caps/securebits/perms fixes land
+
+### Layer chase (one sentence per blocker)
+
+After the umask fix earlier today let HAL services *start*, the cascade
+underneath surfaced four more layers in quick succession, each
+producing a textbook one-liner failure mode:
+
+1. **`logd` exits with status 6 every restart** — Halium init's
+   `prctl(PR_SET_SECUREBITS) failed for logd: Operation not permitted`
+   on services with a `capabilities` directive.  OHOS init's
+   `KeepCapability()` (`base/startup/init/services/init/adapter/init_adapter.c`)
+   unconditionally locks `SECBIT_KEEP_CAPS_LOCKED` on every service,
+   which permanently bans Halium init's child from toggling
+   `SECBIT_KEEP_CAPS` per linux-5.10 `commoncap.c::PR_SET_SECUREBITS`
+   rules ([1] no changing of locked bits).  Fix: `androidd`-name
+   early-return in `KeepCapability()` — leaves androidd at
+   securebits=0 so Halium init can run its own `PR_GET_SECUREBITS |
+   KEEP_CAPS | KEEP_CAPS_LOCKED` dance.  Confirmed via the
+   `logd_probe` static aarch64 binary (`PR_GET_SECUREBITS=0x20` →
+   `PR_GET_SECUREBITS=0x0` after the patch, `PR_SET_SECUREBITS(0x30)`
+   rc 0).
+2. **`init: cannot set capabilities for logd`** (next layer) —
+   Halium init's `capset(inheritable={SYSLOG, AUDIT_CONTROL})` fails
+   because androidd doesn't have CAP_AUDIT_CONTROL in its permitted
+   set, and the kernel requires inheritable ⊆ permitted ∪ old
+   inheritable.  Fix: add `AUDIT_CONTROL`, `IPC_LOCK`,
+   `NET_BIND_SERVICE`, `SYS_RAWIO` to `androidd.cfg` `caps` array
+   (full list of caps used by Halium HALs surveyed via
+   `grep -h ^[[:space:]]+capabilities /android/system/system/etc/init/*.rc
+   /android/vendor/etc/init/*.rc`).
+3. **All `service*manager`s SIGABRT on start** — libbinder
+   `CHECK`-fails opening `/dev/binder` because `binderfs` creates
+   nodes mode `0600 root:root` by default and `service*manager`s run
+   as uid `system` (1000).  Halium init's `init.rc` does
+   `chmod 0666 /dev/binderfs/binder` but that path doesn't exist in
+   our NS (we only bind the individual binder devs into
+   `/dev/{binder,hwbinder,vndbinder}`).  Fix: chmod 0666 in
+   `child_main` right after the binder bind-mounts; the bind
+   propagates the new mode to the underlying inode.
+4. **Watchdog's composer probe always returns rc=3** — `setns(fd_mnt,
+   CLONE_NEWNS)` returns `EPERM` because the linux-5.10
+   `mntns_install` requires `CAP_SYS_CHROOT` *in addition to*
+   `CAP_SYS_ADMIN` (kernel `fs/namespace.c:4101–4103`).  androidd had
+   ADMIN but not CHROOT.  Fix: add `SYS_CHROOT` to androidd.cfg caps.
+
+Two cosmetic but load-bearing follow-ups in `probe_composer`:
+
+- After `setns(CLONE_NEWNS)`, the calling task's fs_struct root and
+  cwd are NOT changed — Halium init pivots into `/root`, so
+  `/system/bin/sh` resolves to OHOS's sh until we `chroot("/root")` +
+  `chdir("/")` in the grandchild before execve.
+- Halium's grep (Toybox/Android) doesn't honour BRE `\+`.  Changed
+  the regex to `grep -Eq '@2[.][0-9]+::IComposer/default'` (ERE
+  with literal `[.]` and `+`).
+
+### End-state verification
+
+```
+$ tail /module_update/androidd.log
+startup — pid 31048, uid 0, euid 0
+Halium NS launched as host PID 31049
+watchdog: sleeping 10s for Halium init
+bind /dev/mali0 failed (non-fatal): No such file or directory
+probe_composer: rc=0 (status=0x0)
+watchdog: IComposer registered (iter 0)
+
+$ param get android.composer.ready
+1
+
+$ nsenter --mount=/proc/$HALIUM_INIT/ns/mnt --pid=/proc/$HALIUM_INIT/ns/pid -- \
+    sh -c 'chroot /root /system/bin/sh -c "/system/bin/lshal --neat | grep -c default"'
+119                # 119 HIDL services registered in hwservicemanager
+```
+
+All three composer versions (`@2.1`, `@2.2`, `@2.3`) of
+`IComposer/default` register cleanly.  Allocator (`@4.0::IAllocator`),
+gralloc mapper, drm, camera, etc. all visible.
+
+### Hard-won lessons (added)
+
+- **`setns(CLONE_NEWNS)` requires `CAP_SYS_CHROOT` in addition to
+  `CAP_SYS_ADMIN`** (kernel `mntns_install`).  The man page only
+  mentions ADMIN.  Without CHROOT, you get `EPERM` and no useful
+  diagnostic — add both to any service that needs to enter another
+  mount NS.
+- **`setns(CLONE_NEWNS)` does NOT change the calling task's `root`
+  or `cwd`**.  If the target init pivoted into a sub-dir (as
+  Halium 12 pivot_roots into `/root`), the OLD root is still the
+  effective root for `execve` path-resolution.  Add an explicit
+  `chroot()` + `chdir()` between setns and execve — `nsenter -r`
+  does this automatically, but our toybox doesn't have `-r`.
+- **OHOS init's `KeepCapability()` is fundamentally
+  Halium-incompatible.**  Every OHOS service gets
+  `SECBIT_KEEP_CAPS_LOCKED` set in its securebits, which is
+  inherited by all of its children and *cannot be cleared* (locks
+  are one-way per linux capabilities(7)).  Any sub-init you exec
+  from an OHOS service will fail to set its own securebits if it
+  needs to change `SECBIT_KEEP_CAPS`.  This isn't unique to Halium
+  init — any AOSP-derived init or anything that uses
+  `cap_set_mode(CAP_MODE_NOPRIV)` is affected.  Fix at the OHOS
+  init level by name-checking the wrapper service, OR add a
+  generic `caps-skip-lock` cfg attribute if more services need it.
+- **`binderfs` creates `/dev/binderfs/<name>` mode `0600 root:root`
+  by default**, regardless of how you mounted binderfs.  AOSP init's
+  `init.rc` does the chmod inside the Android NS; for a chrooted
+  Halium NS where we bind individual devs from outside, the
+  chmod-in-init.rc misses its target.  Either bind `/dev/binderfs`
+  whole and let Halium init's chmod work, OR explicitly chmod
+  the bind targets in the wrapper (we picked the latter — fewer
+  /dev nodes leak into the Halium NS).
+- **Halium/Toybox grep doesn't support BRE `\+`** (or
+  `\?`/`\{n,m\}`/`\|` for that matter).  Always use `-E` + literal
+  `+`/`?`/`{n,m}`/`|` when targeting that grep.  This bit us hard
+  because the watchdog probe was *executing* fine for ~minutes but
+  always returning rc=1 (grep no-match) despite composer being
+  registered.
+
+### Open: next blocker
+
+`render_service` polls `display_composer_proxy::Get:get IServiceManager failed!`
+at ~100Hz.  OHOS samgr (PID `pidof samgr`) is up and
+hdf_devmgr is alive, but no `composer_host` or `allocator_host`
+process exists.  In LXC mode the lxc.hook.post-start triggers
+host startup; native boot needs the equivalent.  Likely a missing
+init job that should run when `android.composer.ready=1` fires.
