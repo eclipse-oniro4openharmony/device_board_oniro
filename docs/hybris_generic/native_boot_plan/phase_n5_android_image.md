@@ -1,6 +1,6 @@
 # Phase N5 — Halium HAL Image (Native Boot)
 
-**Status:** 🔄 Open — rewritten 2026-05-12 to reflect the chainload reality.
+**Status:** ✅ Source-side complete (2026-05-12 evening).  Authored 2026-05-12, then revised the same day after empirical discovery that the bootstrap zip's `system_a` slot is allocated but zeroed.  Build + on-device verification deferred to the consolidated bring-up task.
 
 > **Goal.** Get Halium 12's Android `system` and `vendor` content onto the device, mounted read-only at `/android/system` and `/android/vendor` inside the native OHOS root, so libhybris's hard-coded `/android/vendor/lib64/{egl,hw}/...` lookups resolve and `androidd` (Phase N4) can launch the HAL services.
 
@@ -23,96 +23,113 @@ Halium's original `system_a` and `vendor_a` are overwritten during the first `fa
 
 ---
 
-## N5.1 — Source: UBports installer bootstrap zip
+## N5.1 — Source(s): TWO blobs, not one (revised 2026-05-12 PM)
 
-The UBports installer for Volla X23 (`vidofnir`/`vidofnir_esim`) ships exactly the Halium 12 super content we need, fetched from a public Volla URL:
+> **Empirical correction.**  The initial draft assumed both `system_a`
+> and `vendor_a` came from the UBports bootstrap zip.  Extracting it on
+> 2026-05-12 showed `system_a`'s 8.1 GB slot is allocated but
+> **zero-filled** — `xxd halium_system_a.img | head` returns all
+> zeros at every offset checked (0, 1 KiB, 1 MiB, 1 GiB, 8 GiB).  The
+> UBports installer flow expects the empty system_a slot to be
+> populated by the recovery-mode `systemimage:install` step, which
+> writes Halium's Android `/system` content as the file
+> `system/var/lib/lxc/android/android-rootfs.img` on the Ubuntu Touch
+> userdata.  So we source the two halves separately:
+
+### Source 1 — Bootstrap zip → `halium_vendor_a.img`
+
+The UBports installer for Volla X23 (`vidofnir`/`vidofnir_esim`):
 
 - **URL:** `https://volla.tech/filedump/volla-vidofnir-12.0-ubports-installer-bootstrap-v3.zip`
 - **Size:** ~478 MB
 - **SHA256:** `da18b5498ebae0267be894fff73bfd629be73967cf33f071d571ffc3ef46ce97`
 - **Referenced from:** `https://raw.githubusercontent.com/ubports/installer-configs/master/v2/devices/vidofnir_esim.yml`
 
-Inside the zip, `unpacked/super.img` is the Halium 12 base — an LP-formatted super containing `system_a`, `vendor_a`, and likely `product_a`/`system_ext_a` (we extract only `system_a` + `vendor_a`; the others are not load-bearing for libhybris).
+Inside it, `super.img` (sparse Android image, 926 MB → 9 GB raw via
+`simg2img`) contains:
 
-> Sourcing from this zip (one-time, host-side) is cleaner than `adb pull /dev/disk/by-partlabel/system_a` from a Halium-running device, because (a) it requires no live X23, (b) the SHA256 in the installer-config pins the exact version, (c) it produces an auditable provenance for the blob in our build pipeline.
+| Partition | Size  | What it is |
+|---|---:|---|
+| `vendor_a` | 930 MB | **The MTK 6789 Halium 12 vendor partition** — Mali EGL (`/vendor/lib64/egl/libGLES_mali.so`), HAL service binaries (`/vendor/bin/hw/android.hardware.graphics.composer@2.3-service`, etc.), `/vendor/etc/init/*.rc` files for HAL services.  This is what we want. |
+| `system_a` | 8.7 GB allocated, **all zeros** | Empty placeholder — installed from the system-image flow on a real UBports install, not from this zip. |
 
-### Host script: `device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh`
+We extract **only** `vendor_a`, rename to `halium_vendor_a.img`.
+
+### Source 2 — UBports system-image stable channel → `halium_system_a.img`
+
+The Halium 12 Android `/system` tree is delivered as a 506 MB ext4
+image embedded inside the per-version `device-<sha>.tar.xz` tarball
+under `system/var/lib/lxc/android/android-rootfs.img`.  Pin to vidofnir_esim
+stable v12 (latest as of 2026-05-12):
+
+- **Channel index:** `https://system-image.ubports.com/20.04/arm64/android9plus/stable/vidofnir_esim/index.json`
+- **Tarball:** `https://system-image.ubports.com/pool/device-37ea68e425f921a10982a5cbd36345dde820b239d0c3962e2ec75adea6759e17.tar.xz`
+- **Tarball size:** 140 MB
+- **Tarball SHA256:** `62306fcc600d7062a9d0e65e60c381c4605fdace17945565f9b0365c4a89b788`
+- **Inner android-rootfs.img:** 506 MB ext4, mounts root → `/system/bin/init`,
+  `/system/bin/hwservicemanager`, `/system/bin/servicemanager`,
+  `/system/lib64/` with bionic + Android 12 core libs, `/system/etc/init/*.rc`.
+  The `/init` symlink → `/system/bin/init` makes it directly executable as
+  Android stage-2 init.
+
+We rename to `halium_system_a.img`.
+
+To bump the pin: `curl -fsSL https://system-image.ubports.com/20.04/arm64/android9plus/stable/vidofnir_esim/index.json | jq '.images[-1].files'` and update `DEVICE_TAR_PATH` + `DEVICE_TAR_SHA256` in `utils/host/pull-halium-blobs.sh`.
+
+> Sourcing both from public Volla / UBports URLs (one-time, host-side)
+> is cleaner than `adb pull /dev/disk/by-partlabel/system_a` from a
+> Halium-running device, because (a) it requires no live X23, (b)
+> SHA256 pins tie the blobs to specific upstream releases, (c) it
+> produces an auditable provenance for the blob in our build pipeline.
+
+### Host script: `device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh` ✅
+
+Authored and verified end-to-end on 2026-05-12.  Downloads both
+sources, verifies SHA256s, extracts vendor_a via our shipped
+`lpunpack.py`, extracts android-rootfs.img via `tar -xJf`.
 
 ```bash
-#!/bin/bash
-# Fetch + extract Halium 12 system_a and vendor_a from the UBports
-# bootstrap zip, stash under halium-blobs/ for build_super_img.sh.
-
-set -euo pipefail
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BLOBS="$HERE/../../halium-blobs"
-URL="https://volla.tech/filedump/volla-vidofnir-12.0-ubports-installer-bootstrap-v3.zip"
-SHA256="da18b5498ebae0267be894fff73bfd629be73967cf33f071d571ffc3ef46ce97"
-
-mkdir -p "$BLOBS"
-cd "$BLOBS"
-
-if [[ ! -f bootstrap.zip ]]; then
-    curl -L "$URL" -o bootstrap.zip
-fi
-echo "$SHA256  bootstrap.zip" | sha256sum -c -
-
-unzip -p bootstrap.zip unpacked/super.img > halium-super.img
-
-# Convert sparse → raw if needed (the bootstrap zip's super is non-sparse already,
-# but be defensive).
-if file halium-super.img | grep -q "Android sparse image"; then
-    simg2img halium-super.img halium-super.raw.img
-    mv halium-super.raw.img halium-super.img
-fi
-
-# Extract system_a + vendor_a from the LP container.  Use lpunpack from AOSP
-# system/extras/partition_tools, or the standalone Python implementation
-# (see N5.2 for build / fallback).
-lpunpack --partition system_a --partition vendor_a halium-super.img .
-
-# Rename to our convention.
-mv system_a.img halium_system_a.img
-mv vendor_a.img halium_vendor_a.img
-rm -f product_a.img system_ext_a.img odm_a.img halium-super.img
-
-echo "Halium blobs ready:"
-ls -lh halium_system_a.img halium_vendor_a.img
+bash device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh
+# Halium blobs ready:
+# -rw-rw-r-- 1 mrfrank 441M halium_system_a.img
+# -rw-rw-r-- 1 mrfrank 930M halium_vendor_a.img
 ```
 
-### `.gitignore` entry
+Dependencies: `curl`, `unzip`, `tar`, `xz`, `sha256sum`, `simg2img`
+(`apt install android-sdk-libsparse-utils`), `python3` (stdlib only).
 
-Add to `device/board/oniro/hybris_generic/.gitignore` (create if absent):
+### `.gitignore` entry ✅
+
+Added to `device/board/oniro/hybris_generic/.gitignore`:
 
 ```
-# Halium 12 vendor blobs, fetched by utils/host/pull-halium-blobs.sh
 halium-blobs/
 ```
 
-These are large (~600 MB combined) and Volla-licensed — not checked in.
+Blobs are ~1.5 GB combined and Volla-licensed — SHA256 pins in the
+script provide reproducibility without checking the bytes into git.
 
 ---
 
-## N5.2 — `lpunpack` availability
+## N5.2 — `lpunpack`: shipped in-tree as `utils/host/lpunpack.py` ✅
 
-`lpunpack` is not in `kernel/linux/volla-vidofnir/build-dir/downloads/kernel-build-tools/linux-x86/bin/` (we ship `lpmake` there, used by `build_super_img.sh`, but not `lpunpack`). Two viable sources:
+Rather than depending on an out-of-tree AOSP build of `lpunpack` (the
+binary is not in `kernel-build-tools/linux-x86/bin/`), we ship a
+pure-Python (stdlib only) implementation at
+`device/board/oniro/hybris_generic/utils/host/lpunpack.py` (~145 LOC).
 
-### Option A — Build from AOSP (preferred)
+Supports LP metadata v1.0 through v1.2 with single-block-device,
+linear-extent layouts — what the UBports bootstrap super.img uses.
+Geometry magic `0x616c4467`, header magic `0x414c5030`, sector size
+512.  Two operations:
 
-```bash
-git clone https://android.googlesource.com/platform/system/extras
-cd extras/partition_tools
-# Build using standard AOSP build system, or pull a prebuilt binary
-# from a recent release. lpunpack depends only on liblp.
+```
+python3 lpunpack.py <super.img>                             # list parts
+python3 lpunpack.py --partition vendor_a <super.img> <dir>  # extract
 ```
 
-A prebuilt aarch64 / x86_64 binary can be copied into `kernel/linux/volla-vidofnir/build-dir/downloads/kernel-build-tools/linux-x86/bin/lpunpack` alongside `lpmake`. Document in `pull-halium-blobs.sh` how to obtain it.
-
-### Option B — Standalone Python implementation
-
-The LP super format is fully documented; multiple permissive-licensed Python implementations exist (e.g. `lpunpack.py` floating around on GitHub). For our use we only need the read path. A ~200-line Python script reading `LP_METADATA_GEOMETRY_MAGIC` (0x616c4467) + the partition table is sufficient. Acceptable fallback if AOSP build is awkward.
-
-For the plan: prefer Option A; document both in the script's README block so a developer hitting "lpunpack not found" knows the alternatives.
+If we ever hit a v1.3+ LP super or a multi-block-device layout, fall
+back to building AOSP's `system/extras/partition_tools/lpunpack`.
 
 ---
 
@@ -229,13 +246,15 @@ Once Milestone 3 (display) is green and we want to reduce footprint, revisit: au
 
 | Item | Path | Status |
 |---|---|---|
-| Host fetcher script | `device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh` | TODO |
-| Gitignore | `device/board/oniro/hybris_generic/.gitignore` | TODO |
-| `build_super_img.sh` Halium support | `device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh` | TODO (patch) |
-| Chainload Halium mount | `device/board/oniro/hybris_generic/launcher/init-chainload.sh` | TODO (patch, Stage 3b) |
-| `/android/{system,vendor}` mkdir | `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` | TODO (extend pre-init) |
-| `lpunpack` prebuilt | `kernel/linux/volla-vidofnir/build-dir/downloads/kernel-build-tools/linux-x86/bin/lpunpack` | TODO (one-time fetch) |
+| Host fetcher script | `device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh` | ✅ Authored + run successfully |
+| `lpunpack.py` (stdlib Python) | `device/board/oniro/hybris_generic/utils/host/lpunpack.py` | ✅ Authored + verified |
+| `.gitignore` | `device/board/oniro/hybris_generic/.gitignore` | ✅ Added |
+| `build_super_img.sh` Halium support | `device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh` | ✅ Patched (conditional on `halium-blobs/`) |
+| Chainload Halium mount | `device/board/oniro/hybris_generic/launcher/init-chainload.sh` | ✅ Stage 3b mounts `halium_{system,vendor}_a` |
+| Bug 8.18 sandbox chmod | `device/board/oniro/hybris_generic/launcher/init-chainload.sh` Stage 3a | ✅ Remount rw → chmod 0644 → remount ro |
+| `/android/{system,vendor}` mkdir | `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` | ✅ Already shipped (lines 12–13) |
+| `lpunpack` external | `kernel/linux/volla-vidofnir/build-dir/downloads/.../lpunpack` | ❌ Not needed — superseded by lpunpack.py |
 
-## Entry condition for Phase N4 (androidd)
+## Entry condition for Phase N4 (androidd) ✅ MET source-side
 
-`/android/system` and `/android/vendor` both populated when OHOS init's `post-fs` trigger runs. Verify with `ls /android/system/bin/hwservicemanager` from an `hdc shell`.
+`/android/system` and `/android/vendor` will be populated when OHOS init's `post-fs` trigger runs (after chainload Stage 3b binds them).  Verify with `ls /android/system/bin/hwservicemanager` from an `hdc shell` once the build + flash lands.
