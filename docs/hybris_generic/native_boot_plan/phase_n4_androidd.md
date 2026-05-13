@@ -321,7 +321,111 @@ state.  The launcher backs `/android/system/data` with a tmpfs.
 
 ---
 
-## Current blocker (2026-05-12 PM)
+## 2026-05-13 PM — Halium init runs; HAL services SEGV on start
+
+**Status:** Source-side fix landed and verified on Volla X23.  Halium
+init now reaches `second_stage`, processes `early-init`, `fs`,
+`post-fs`, and `init` actions, runs `linkerconfig`, runs
+`apexd-bootstrap`, parses every `.rc` file under `/system/etc/init/`,
+`/vendor/etc/init/`, etc.  `/linkerconfig/` is fully populated with
+proper namespace config (`[system]` section with `additional.namespaces
+= com_android_adbd, com_android_art, …`, and per-apex
+`ld.config.txt`).  `/apex/` is populated with all 19+ APEX modules
+(both via our pre-binds and init's own ActivateFlattenedApexesIfPossible).
+`/mnt/{user,installer,androidwritable}` set up by init.
+
+**Remaining blocker:** every HAL service that Halium init tries to
+start SIGSEGVs at startup:
+
+```
+init: Service 'servicemanager' (pid N) received signal 11
+init: Service 'hwservicemanager' (pid N) received signal 11
+init: Service 'vndservicemanager' (pid N) received signal 11
+init: Service 'vendor.gralloc-4-0' (pid N) received signal 11
+init: Service 'vendor.hwcomposer-2-3' (pid N) received signal 11
+init: Service 'logd' (pid N) received signal 11
+init: Service 'bluetooth-1-1' (pid N) received signal 11
+init: Service 'vendor.cas-hal-1-2' (pid N) received signal 11
+init: Service 'vendor.drm-clearkey-hal-1-4' (pid N) received signal 11
+... (basically every service from /system/etc/init/ and /vendor/etc/init/)
+```
+
+Interesting diagnostic: `exec_start vndk-detect` (synchronous one-shot
+exec from `on early-init`) runs successfully and exits 0.  But
+`exec_start chipinfo` (also one-shot, but at `/vendor/bin/`) SEGVs.
+So the SEGV correlates loosely with vendor binaries, but not perfectly
+— pure `/system/bin/` services also SEGV.
+
+**Likely candidates for the SEGV (next-session investigation):**
+
+1. **Our kernel has no SELinux** (`/sys/fs/selinux` doesn't exist,
+   `/proc/filesystems` has no `selinuxfs`).  Halium 12 init's
+   `setcon()` calls for `seclabel` directives in `.rc` files may
+   return errors that bionic libc converts into aborts at service
+   startup.  The fact that ueventd already reports `Cannot get
+   SELinux label on '/dev/...' device: Operation not supported on
+   transport endpoint` confirms SELinux is partially broken.
+   Fix: either add SELinux support to our X23 kernel, or strip
+   `seclabel` from Halium's `.rc` files via a per-service overlay.
+2. **Bionic `/proc/self/exe` check.**  In a `chroot $ROOT
+   /system/bin/sh` test (chroot without /proc bound) bionic libc
+   aborts with `unable to stat "/proc/self/exe": SIGABRT`.  Inside
+   our namespace `/proc` IS mounted (`/proc/<halium_pid>/mountinfo`
+   confirms a fresh proc fs), so this should not fire — but the
+   exact same signature might be hitting under a different cause
+   (selinux denial making stat return EACCES on its own /proc/self/exe?).
+3. **Seccomp policy enforcement.**  Many Halium services have
+   `seccomp_policy /system/etc/seccomp_policy/X.policy` directives.
+   If init successfully loads the BPF filter and the binary then
+   makes an unallowed syscall during bionic startup, the kernel
+   sends SIGSYS — but our reports show SIGSEGV.  So probably not
+   seccomp itself.
+4. **`writepid /dev/cpuset/...` directives** fail because our /dev
+   is a fresh tmpfs without cpuset.  These failures are logged as
+   `Unable to write to file`, not fatal.  Ruled out for the SEGV.
+
+**Next-session debug path:** instead of trying to instrument all the
+services, pick ONE (e.g. `servicemanager`) and:
+- Add a custom `.rc` overlay (binding over `/system/etc/init/servicemanager.rc`
+  via androidd's pre-init mount setup) that adds `setenv LD_DEBUG all`
+  and `stdio_to_kmsg` so bionic linker prints what it's doing.
+- Or run `crash_dump` and check tombstones in `/data/tombstones/` (we have
+  /data as tmpfs).
+- Or kernel-side: enable CONFIG_SECURITY_SELINUX in the X23 kernel,
+  rebuild boot.img.
+
+### Older root cause (already fixed — kept for record)
+
+The linkerconfig + apex-bind fix described below is in tree and
+verified on-device: Halium init reaches its second_stage, parses
+init.environ.rc, sets `ro.product.*` props, runs `restorecon`, opens
+the `property_service` socket — i.e. it gets past the pre-logging SEGV
+window.
+
+The new blocker is one step further in: `SetupMountNamespaces()`
+issues `mount(NULL, "/apex", NULL, MS_PRIVATE, NULL)` to set up the
+APEX mount-namespace propagation, which fails with `EINVAL` because
+`/apex` is just a dir on `halium_system_a`, not a mount point.  Init
+treats it as fatal and calls `InitFatalReboot(signal 6)`.  Stack
+trace from kmsg:
+
+```
+init: Failed to remount /apex as 40000: Invalid argument
+init: SetupMountNamespaces failed: Invalid argument
+init: InitFatalReboot: signal 6
+#04 SecondStageMain(...) +13020
+```
+
+(MS_PRIVATE = 0x40000.)
+
+**Fix in flight (2026-05-13 PM/2):** mount tmpfs at `/apex` in
+`androidd` before the apex_bind calls so init's
+`mount(MS_PRIVATE) /apex` finds a real mount point.  Also expanded
+the apex_bind list to cover the full set Halium ships
+(`adbd/media/media.swcodec/resolv/neuralnetworks/tethering/wifi`)
+beyond the runtime-namespace minimum.
+
+### Original root cause (now fixed — kept for record)
 
 The launcher is wired and reaches `execv("/system/bin/init", ...)` of
 Halium's stage-2 init inside the new PID/mount/UTS namespace.  The
@@ -329,6 +433,92 @@ Halium's stage-2 init inside the new PID/mount/UTS namespace.  The
 producing any output.  Independent confirmation: from `hdc shell`,
 `chroot /android/system /system/bin/init second_stage` exits with
 "Signal 11", no stdout/stderr.
+
+### Root cause (confirmed 2026-05-13, AOSP source review)
+
+We exec `init second_stage` directly, **skipping first_stage_init**.
+First-stage init is what creates `/linkerconfig` as a tmpfs and runs
+`/system/bin/bootstrap/linkerconfig --target /linkerconfig/bootstrap`
+(see AOSP `system/core/rootdir/init.rc` `on early-init`).  Without
+that, when the bionic linker loads `/system/bin/init`'s non-bootstrap
+`DT_NEEDED` libs, it tries to read `/linkerconfig/<section>/ld.config.txt`,
+finds an empty `/linkerconfig` directory, NULL-derefs a section pointer,
+and SEGVs before init's `SecondStageMain` ever runs.
+
+On-device evidence matching the hypothesis:
+- `/android/system/linkerconfig/` is an empty dir on `halium_system_a` (the
+  ext4 image ships it as a mount point for the runtime tmpfs).
+- `/android/system/apex/` is empty too — the flattened APEX modules sit
+  under `/android/system/system/apex/<name>/` (e.g.
+  `com.android.runtime/`, `com.android.art/`).  Even if the linker gets
+  past `/linkerconfig`, bionic resolves runtime-namespace libs through
+  `/apex/com.android.runtime/lib64/` which is empty.
+- `/android/system/system/etc/linker.config.pb` exists (984 bytes) but is
+  consumed by `linkerconfig` to generate `ld.config.txt`, not by the
+  linker directly.
+
+### Final fix (deployed 2026-05-13 PM)
+
+`androidd.c` `child_main()` — after `pivot_root` + stdio→/dev/kmsg
+redirect, **before** `execv("/system/bin/init", ...)`:
+
+1. **`/apex` tmpfs** — `mount("tmpfs", "/apex", "tmpfs", 0,
+   "mode=0755,uid=0,gid=0")`.  `SetupMountNamespaces()` in AOSP init
+   does `mount(NULL, "/apex", NULL, MS_PRIVATE)` and aborts with
+   `EINVAL` if /apex isn't a mount.
+2. **`apex_bind()` each flattened APEX** — for runtime, art, i18n,
+   conscrypt, os.statsd, tzdata, adbd, media, media.swcodec, resolv,
+   neuralnetworks, tethering, wifi, extservices, ipsec, mediaprovider,
+   permission, sdkext, vndk.current.  Each call binds
+   `/system/apex/<name>/` → `/apex/<name>/`.
+3. **`com.android.vndk.v32` versioned bind** — additional bind of
+   `/system/apex/com.android.vndk.current` to
+   `/apex/com.android.vndk.v32` because `linkerconfig`'s VNDK loader
+   reads `/apex/com.android.vndk.v$VENDOR_VNDK_VERSION/etc/*.libraries.32.txt`
+   and Halium 12 = VNDK 32.
+4. **`apex_info_list_write()`** — write `/apex/apex-info-list.xml`
+   listing every bound apex (linkerconfig consumes this to enumerate
+   namespaces).  Init's own apexd later overwrites this with the
+   canonical version; ours is fine as a bootstrap.
+5. **`/mnt` tmpfs + subdirs** — `SetupMountNamespaces` does
+   `mkdir_recursive("/mnt/{user,installer,androidwritable}")` which
+   hits EROFS on the RO halium_system_a `/mnt` dir.  Tmpfs + the
+   three subdirs.
+6. **`/linkerconfig` tmpfs only** — we do NOT run linkerconfig
+   ourselves; init runs it later when `ro.vndk.version=32` (read
+   from /vendor/build.prop by PropertyLoadBootDefaults) is set.
+   Running linkerconfig before init aborts with
+   `Check failed: !"undefined var" SANITIZER_DEFAULT_VENDOR is not
+   defined` since the VNDK loader reads `ro.vndk.version` to find the
+   right APEX path.
+
+Each step is non-fatal so any later regression still produces a clean
+kmsg signature instead of a silent SEGV.
+
+### Deferred-but-related observation
+
+The currently-deployed binary (built before 2026-05-13 08:04) has
+slightly different paths:
+
+- `mkdir(/android/system/old_root)` (older code) fails with `EROFS`
+  because `/android/system` is a RO ext4.  Newer committed source uses
+  `/android/system/data/old_root` *after* mounting tmpfs at
+  `/android/system/data`, which avoids the EROFS.  The current build
+  cycle (the same one that adds the linkerconfig fix above) deploys the
+  new path.
+
+### Previously-considered hypotheses (now ruled out)
+
+- **`/init.environ.rc` missing** — exists at `/android/system/init.environ.rc`
+  and is reachable post-pivot at `/init.environ.rc`.  Read by `LoadBootScripts()`,
+  which runs after `InitKernelLogging` — so a failure there would NOT
+  be silent.
+- **SELinux policy load** — also runs after `InitKernelLogging`; not
+  silent.  And `androidboot.selinux=permissive` is already set.
+- **`/proc/self/exe` resolvability** — works (we mount proc fresh in
+  child NS).
+- **Property service init** — needs `/dev/__properties__` (we have the
+  tmpfs); failure would still be post-kmsg-init.
 
 Candidates for the SEGV (ordered by likelihood):
 
@@ -352,13 +542,20 @@ Candidates for the SEGV (ordered by likelihood):
    `android-binder` for Android's `/dev/binder` so this should be
    fine.
 
-### Next-session debugging path (in order of cost / diagnostic value)
+### Next-session debugging path (only if the fix above doesn't land)
+
+If Halium init still SEGVs after the linkerconfig + apex fix:
 
 - **a.** strace-equivalent: build a tiny C wrapper that exec's init
   and uses `ptrace(PTRACE_TRACEME)` to catch the first signal.  Or
   cross-compile `strace` for aarch64-musl and ship it via `hdc file
   send`.  Either gives us the syscall that returned the address that
-  caused the segfault.
+  caused the segfault.  **Caveat hit on 2026-05-13:** `hdc file send`
+  on this build only transfers files up to ~50 KB reliably — larger
+  binaries (statically-linked aarch64 strace is 8.5 MB) land as 0-byte
+  files even though the command reports success.  Alternative: ship
+  the debug tool as an `ohos_executable` baked into `system.img` so
+  it goes via super (no hdc transfer needed).
 - **b.** Stripped binary — Halium's init binary IS stripped; we won't
   get useful symbols from a core dump.  Pull `linker64`'s mmap log
   via `LD_DEBUG=all` (bionic env var) to see if early loads work.
@@ -370,3 +567,161 @@ Candidates for the SEGV (ordered by likelihood):
   as a sanity check that the bionic environment can load anything at
   all (it won't, because OHOS uses musl — but the SEGV signature would
   shift, isolating where the problem is).
+
+---
+
+## Hard-won lessons (continued, 2026-05-13)
+
+### `hdc file send` silently truncates large transfers to 0 bytes on
+v3.2.0c (aarch64 musl client → OHOS hdcd over USB)
+
+Small text files (16 B) and small binaries (50 KiB) transfer cleanly
+with `FileTransfer finish, Size:N, …` confirmation in stderr.  Files
+of 100 KiB+ produce the same `FileTransfer finish` confirmation OR an
+`[Empty]` line OR `[Fail]ExecuteCommand need connect-key?` — and the
+destination ends up as a 0-byte placeholder.  Sometimes the channel
+itself locks up afterwards (`The communication channel is being
+established`) until a `hdc kill` + reboot.  Workaround: build any
+debug binary you need into the OHOS image (super.img), not as an
+ad-hoc transfer.  Cost: half a session of trying to ship strace.
+
+### Repeated `chroot /android/system /system/bin/init second_stage`
+calls from `hdc shell` can wedge the OHOS hdcd
+
+Running the SEGV repro from a shell several times in succession caused
+the device to stop responding to *all* hdc calls.  `hdc list targets`
+still listed the device, but every `shell`/`file` invocation returned
+`need connect-key`.  Recovery required a long-press power-button
+reboot (no fastboot or USB hardware reset path was effective).  Best
+practice: reproduce the SEGV once, capture the dmesg, then move to
+source-side fixes rather than poking the same crash repeatedly.
+
+---
+
+## 2026-05-14 — HAL service SEGV root-caused: `/dev/null` mode 0644
+
+### Root cause (one sentence)
+
+`mknod_min(/dev/null, 0666, …)` in `child_main()` ran with the inherited
+service umask of `022`, so the device node was created with mode `0644`;
+when Halium init forks a HAL service and `setresuid()`s it to a non-root
+account (`system` 1000, `logd` 1036, etc.), the bionic linker's
+`__libc_init_AT_SECURE` immediately calls `open("/dev/null", O_RDWR)` —
+which returns `EACCES` for any non-root uid against an `0644` node — and
+then calls a parameterised abort helper (`abort_with_code(160)`) that
+deliberately stores to a small-int address so the crash signature
+(`pc=…+0xe6c, x8=0xa0`) uniquely identifies the call site for
+debuggerd.  Every Halium HAL service hit the same path; init never
+reached `on boot` because critical services crash-looped.
+
+### The fix
+
+In `androidd.c` `child_main()`, right before the first `mknod_min(…
+ANDROID_ROOT "/dev/null" …)`:
+
+```c
+umask(0);
+```
+
+That single line removes the masking so `0666` stays `0666` and the
+device node is world-RW the way Halium init expects.
+
+Verified post-fix:
+
+- `dmesg | grep -c "signal 11"` → 0 over a 25 s window after
+  `begetctl service_control start androidd`.
+- A static aarch64 diagnostic binary (probe v2 — see "Debug probe
+  workflow" below) forks a child, `setresuid(1000,1000,1000)`s it, and
+  reports `open(/dev/null,O_RDWR) rc=4` (was rc=-13 EACCES pre-fix).
+- The child then `execve("/system/bin/sh", …)` runs sh's bionic
+  linker through to clean `_exit(0)` (`wait2 status=0x0`) instead of
+  the previous `0xb7f` (`WIFSTOPPED + SIGSEGV`).
+
+Halium init now reaches `late-fs` cleanly (`BOOTPROF: INIT:late-fs` is
+the last visible BOOTPROF — `boot` and `class_start core` lines roll
+out of the kernel ring buffer behind battery-driver spam before we can
+sample, but no crash signatures appear in the buffer).
+
+### Why this signature is uniquely linker-internal
+
+`linker64`'s abort helper at file offset 0xf8e5c is a four-instruction
+prologue:
+
+```
+f8e5c: stp x29, x30, [sp, #-16]!
+f8e60: mov x29, sp
+f8e64: mov w8, w0           ; x8 = caller-supplied code
+f8e68: mov w0, #0x1
+f8e6c: str wzr, [x8]        ; deliberate fault — x8 is in unmapped low memory
+f8e70: bl 0x10d5e0          ; (unreachable) call _exit-equivalent
+```
+
+Each caller passes a constant in `w0` *before* the `bl 0xf8e5c`.
+Direct-disassembly grep against `linker64` shows five callers using
+codes `0x14e` (assertion-style, twice), `0xc3`, `0xb9`, and the one
+that fired here: **`0xa0` (160) at file offset 0xf8c34** — entered
+when an `open(/dev/null, O_RDWR)` returns -1 with `errno != EINTR`.
+
+So whenever the bionic linker SEGVs with `pc=…+0xe6c, x8=0xa0` on a
+non-root halium process, the cause is the same: /dev/null isn't
+openable RW from that uid.  Worth bookmarking — searching the bionic
+source tree for the abort code mapping is harder than it sounds.
+
+### Debug probe workflow
+
+The discovery path used a self-contained static aarch64 binary
+(no libc, raw syscalls) bind-mounted into the Halium NS via a debug
+overlay mechanism inside `androidd`.  This is now a permanent part of
+`androidd.c` and the source tree:
+
+- **Overlay mount**: if `/module_update/halium-debug/` exists on the
+  OHOS side, `androidd` binds it into the Halium NS at
+  `/data/halium-debug/`, then `MS_REMOUNT|MS_BIND`s it to clear the
+  `noexec/nosuid` flags inherited from `/module_update` (otherwise
+  pushed binaries can't be executed).
+- **Manifest replay**: post-pivot, `androidd` reads
+  `/data/halium-debug/overlay.txt` and bind-mounts each `<src> <dst>`
+  pair (used during diagnosis to swap `/system/etc/init/init.disabled.rc`
+  for a custom .rc).
+- **Pre-init probe fork**: if `/data/halium-debug/probe` is present and
+  executable, `androidd` `fork()`+`execv`s it once before the main
+  `execv("/system/bin/init", …)`.  Output (status + register snapshot
+  + `/proc/PID/maps` at PTRACE stops) lands in
+  `/module_update/halium-debug/probe2.log`, which is readable from
+  OHOS without going through hdc.
+
+To diagnose any future Halium-binary crash:
+
+1. Write a probe variant (see source under
+   `device/board/oniro/hybris_generic/launcher/probe/` — to be
+   committed) that forks, optionally drops priv, optionally PTRACE_TRACEMEs
+   then execv's the target binary.  Static-link with
+   `aarch64-linux-gnu-gcc -static -nostdlib -nostartfiles`.
+2. `hdc file send` it to `/module_update/halium-debug/probe`.
+3. `begetctl service_control stop androidd && begetctl service_control
+   start androidd`.
+4. `cat /module_update/halium-debug/probe2.log` on the device gives
+   the full pre-/post-execve register state.
+
+### Hard-won lessons (added)
+
+- **Service caps need `SYSLOG`** if you want `androidd` (or any
+  inherited Halium service) to write to `/dev/kmsg`.  Without it the
+  writes silently `EPERM` and `androidd`'s diagnostic
+  `logmsg()`→`/dev/kmsg` calls vanish.  `androidd.cfg` now lists
+  `SYSLOG` and `DAC_READ_SEARCH`.
+- **`/module_update` is mounted `noexec,nosuid,nodev`** on the host.
+  Bind-mounts inherit those flags; if you `mount(src, dst, MS_BIND)`
+  and then try to exec from `dst`, the exec gets `EACCES`.  Add
+  `mount(NULL, dst, NULL, MS_REMOUNT|MS_BIND, NULL)` (with no flags)
+  to clear them — that's what makes the debug-overlay mechanism work.
+- **`dmesg_restrict=1` and `/dev/kmsg` write permission**.  Even when
+  `dmesg_restrict=0`, writing to `/dev/kmsg` from userspace requires
+  `CAP_SYSLOG`.  Adjusting file mode (`chmod 0666 /dev/kmsg`) is not
+  enough.  Both the read side (dmesg/`cat /proc/kmsg`) and the write
+  side enforce the capability check via the LSM hook.
+- **`mknod()` applies umask** to its mode argument.  Always
+  `umask(0)` (or `chmod` the resulting node) when you want a
+  device node mode to be exactly what you passed.  This affects every
+  device node `androidd` creates; the lesson generalises to any code
+  that does `mknod` for shared device nodes.
