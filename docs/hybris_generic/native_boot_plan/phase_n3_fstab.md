@@ -1,6 +1,6 @@
 # Phase N3 — Filesystem & fstab
 
-**Status:** 🔄 In Progress (2026-04-30)
+**Status:** ✅ Complete (2026-05-14) — userdata mount + token wiring landed in N3.5
 
 Define the OHOS fstab in OHOS-native syntax and align the on-disk layout with what `init_firststage.c` and `init.cfg` expect.
 
@@ -152,13 +152,58 @@ Same applies on rollback to Halium A-slot — Halium will re-encrypt on next boo
 5. **JSON comments**: removed from the cfg file; captured in the phase doc.
 6. **BUILD.gn `relative_install_dir`**: needs to match the `init.cfg` import literal. Fix (drop `init` subdir) emitted below.
 
+## N3.5 — Userdata mount for SetSelfTokenID wiring (2026-05-14) ✅
+
+The N8.10 work added `/dev/access_token_id` via the OHOS-patched kernel, but OHOS userspace tokenIds remained 0 / TOKEN_INVALID. The N8.7 marker-file `CanRequest` bypass had to stay in place. Root cause turned out to be in this phase, not N8:
+
+**Root cause:** `fstab.x23` did not mount `/data` from the `userdata` partition. The OHOS rootfs has `/data` as a directory on the read-only system rootfs (no entry mounting on top). Init's pre-init job order is:
+
+```
+mount_fstab_sp /vendor/etc/fstab.x23       # mounts /misc + /persist only
+mkdir /data/service/el0/access_token       # writes to RO rootfs → fails silently
+load_access_token_id                       # GetAccessTokenId opens nativetoken.json on RO /data → returns 0
+```
+
+With `service->tokenId = 0` for every service, `init_service.c::SetAccessToken` calls `SetSelfTokenID(0)` before exec. Services exec'd with kernel `current->token = 0` → all binder transactions carry tokenId=0 → samgr's `CanRequest()` sees `tokenType = TOKEN_INVALID`, fails the `tokenType != TOKEN_NATIVE` check, and falls through to the `uid == 0 || uid == 1000` fallback. Native-uid services (hdf_devmgr=3044, composer_host=3036, audio_host, etc.) get PERMISSION DENIED. The Halium kernel's *absence* of `/dev/access_token_id` was a *separate* problem — the chainload was already replacing it with the OHOS-patched kernel in N8.10. The fstab gap was the load-bearing fix.
+
+**Fix (committed):**
+
+```diff
++ /dev/block/platform/soc/11270000.ufshci/by-name/userdata \
++     /data           ext4    noexec,nosuid,nodev    wait,nofail
+```
+
+**Device-path convention:** stock Halium ueventd on the X23 doesn't populate `/dev/disk/by-partlabel/*` symlinks — it only creates `/dev/block/platform/soc/11270000.ufshci/by-name/<partlabel>` symlinks (matching the MT6789 UFS controller's of_node path). The same applies for the existing `/misc` and `/persist` entries — corrected in the same change.
+
+**Verification (2026-05-14):**
+
+| Check | Pre-fix | Post-fix |
+|---|---|---|
+| `mount \| grep /data` | `/data` not mounted (rootfs only) | `/dev/block/sdc58 on /data type ext4` |
+| `cat /data/service/el0/access_token/nativetoken.json \| wc -c` | empty | 76594 bytes, all native services present |
+| `atm dump -t -n composer_host` | not found | `{"tokenID":671648039,"processName":"composer_host","apl":2}` |
+| `samgr CanRequest` with marker bypass removed | PERMISSION DENIED at boot | accepts all native-uid services for 30s+ |
+| `dmesg \| grep "magic fail.*TYPE=65"` | n/a | empty (only benign TYPE=84 = isatty noise) |
+
+**Bypass reverts (also committed in this change):**
+
+1. Removed the marker-file fallback from `foundation/systemabilitymgr/samgr/services/samgr/native/source/system_ability_manager_stub.cpp::CanRequest()` (the `access("/dev/.ohos_native_boot", F_OK)` short-circuit and its comment block).
+2. Removed `write /dev/.ohos_native_boot 1` from `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` pre-init.
+
+The fix is X23-specific in this phase doc but the same logic applies to mimir (Phase 9 tablet) when its native-boot port lands — its fstab will need a `userdata` line for the same reason.
+
+**First-boot data wipe interaction:** N3.4 documents that switching between Halium and OHOS rewrites `/data`. With this change, OHOS init now writes nativetoken.json to `/data/service/el0/access_token/` on first boot; that file (and the rest of OHOS's `/data` tree) is what gets wiped on a return to Halium. The wipe is a developer-flow concern only.
+
+---
+
 ## Tasks status
 
 - ✅ **N3.1** — `fstab.x23` authored + BUILD.gn wired
 - ✅ **N3.2** — Post-SwitchRoot root layout verified against built rootfs
 - ✅ **N3.3** — `init.x23.cfg` authored + BUILD.gn wired (`relative_install_dir` fix below)
 - ✅ **N3.4** — First-boot data wipe documented for N10.6
-- ⏳ **First-boot validation** — exact path of `init.x23.cfg` lookup needs on-device confirmation
+- ✅ **N3.5** — Userdata mount added + Halium device-path convention used; unblocks SetSelfTokenID wiring (2026-05-14)
+- ✅ **First-boot validation** — `init.x23.cfg` confirmed loaded from `/vendor/etc/init.x23.cfg`
 
 ## Next phase entry condition
 
