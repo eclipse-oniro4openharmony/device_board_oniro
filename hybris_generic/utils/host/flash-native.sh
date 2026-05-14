@@ -5,12 +5,22 @@
 #
 # Flash a native-boot OHOS build to a Volla X23 currently in fastboot (LK).
 #
-# Two artifacts are flashed:
-#   1. boot-chainload.img → boot_a   (LK boot mode, Halium kernel + our
-#                                     chain-load /init that mounts system_a
-#                                     and exec-chroots into OHOS init).
-#   2. super.img          → super    (fastbootd dynamic-partition flash;
-#                                     contains system_a + vendor_a).
+# Up to three artifacts are flashed:
+#   1. boot-chainload.img → boot_a       (LK boot mode, our chain-load /init
+#                                         that mounts system_a + exec-chroots
+#                                         into OHOS init; kernel is the
+#                                         OHOS-patched kernel when present, or
+#                                         the live Halium kernel otherwise).
+#   2. super.img          → super        (fastbootd dynamic-partition flash;
+#                                         contains system_a + vendor_a +
+#                                         halium_system_a + halium_vendor_a).
+#   3. vendor_boot.img    → vendor_boot_a  (OPTIONAL — when the OHOS-built
+#                                         kernel is in the chainload, this
+#                                         replaces vendor_boot's kernel
+#                                         modules so vermagic matches the
+#                                         running kernel.  Without matching
+#                                         modules, /dev/access_token_id and
+#                                         many other drivers fail to load.)
 #
 # super flashing requires fastbootd (Android userspace fastboot), which
 # we enter via `fastboot reboot fastboot` AFTER flashing a Halium boot.img
@@ -35,6 +45,9 @@ OUT="$OHOS_ROOT/out/hybris_generic"
 CHAINLOAD="$OUT/boot-chainload.img"
 SUPER="$OUT/super.img"
 HALIUM_BOOT="$OUT/backups/boot_a.bak"
+# OHOS-built vendor_boot (with matching kernel modules).  Optional; only
+# flashed when the OHOS-patched kernel is in the chainload.
+OHOS_VENDOR_BOOT="${OHOS_VENDOR_BOOT:-$OHOS_ROOT/kernel/linux/volla-vidofnir/out/vendor_boot.img}"
 
 for f in "$CHAINLOAD" "$SUPER" "$HALIUM_BOOT"; do
     [[ -f "$f" ]] || { echo "Error: $f missing" >&2; exit 1; }
@@ -56,11 +69,16 @@ sleep 8
 fastboot wait-for-device
 fastboot flash super "$SUPER"
 
-echo "[3/3] Back to LK fastboot, flashing chain-load boot.img"
+echo "[3/4] Back to LK fastboot, flashing chain-load boot.img"
 fastboot reboot bootloader
 sleep 5
 fastboot wait-for-device
 fastboot flash boot_a "$CHAINLOAD"
+
+if [[ -f "$OHOS_VENDOR_BOOT" ]]; then
+    echo "[4/4] Flashing OHOS-built vendor_boot.img (matched kernel modules)"
+    fastboot flash vendor_boot_a "$OHOS_VENDOR_BOOT"
+fi
 
 echo
 echo "Done.  Rebooting device into native OHOS."
