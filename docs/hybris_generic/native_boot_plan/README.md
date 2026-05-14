@@ -18,6 +18,11 @@ boots OHOS natively, enumerates as `12d1:5000 Phone X23`, and
 watchdog flips `android.composer.ready=1`.**  See N4 doc for the
 five-layer caps/securebits/perms cascade landed earlier today.
 
+✅ **SetSelfTokenID wiring complete (2026-05-14, N3.5).**  Real
+TokenIDs now propagate to all native services; the N8.7 marker-file
+`CanRequest` bypass has been removed (revert committed).  Root cause
+was a missing `userdata` entry in `fstab.x23` — see N3.5 below.
+
 🔄 **N8.7 + N8.8 + N8.10 landed; `composer_host` alive but service
 not yet registered (N8.9).**
 
@@ -37,10 +42,33 @@ N8.10 — OHOS-patched kernel under the chainload (2026-05-14):
 - Confirmed on device: `/dev/access_token_id` present
   (`crw-rw-rw- access_token:access_token 10:126`), kernel reports
   `5.10.209`, 161 modules loaded (same count as Halium baseline).
-- Note: the N8.7 marker-file `CanRequest` bypass stays in place —
-  the access_tokenid driver is available but OHOS `SetSelfTokenID`
-  isn't fully wired (TokenID still 0 for native services).  Separate
-  userspace bug, tracked outside graphics.
+
+N3.5 — Userdata mount → SetSelfTokenID end-to-end (2026-05-14):
+- After N8.10 the `access_tokenid` driver was present but
+  `SetSelfTokenID` still no-op'd — every native service kept
+  TokenID=0 and the marker bypass had to stay in place.
+- Root cause was *not* the driver: `fstab.x23` had no entry for the
+  `userdata` partition, so `/data` was the read-only system rootfs at
+  the time init's pre-init `load_access_token_id` ran.
+  `GetAccessTokenId()` failed silently on the unwritable
+  `nativetoken.json` path and returned 0 for every service.  Init then
+  called `SetSelfTokenID(0)`, samgr's `CanRequest` saw
+  `TOKEN_INVALID`, and only uid==0/1000 services passed the fallback.
+- Fix: add a `userdata` entry to `fstab.x23` using the Halium
+  device-path convention (`/dev/block/platform/soc/11270000.ufshci/by-name/userdata`,
+  *not* `/dev/disk/by-partlabel/*` — those symlinks aren't populated
+  by stock Halium ueventd on the X23).  Same convention applied to
+  the existing `/misc` and `/persist` entries.
+- Reverted in the same change: marker-file `CanRequest` bypass in
+  `system_ability_manager_stub.cpp::CanRequest()` and the
+  `write /dev/.ohos_native_boot 1` line in `init.x23.cfg`.
+- Verified on device (2026-05-14): `/data` mounts as
+  `/dev/block/sdc58 on /data type ext4`; `nativetoken.json`
+  populated; `atm dump -t -n composer_host` returns
+  `tokenID=671648039`; no `CanRequest` denials in 30+ s of runtime
+  with the bypass removed; all 6 key services
+  (samgr, hdf_devmgr, composer_host, allocator_host, foundation,
+  render_service) running cleanly.
 
 N8.7 — samgr binder access + native-boot bypass:
 - `/dev/binderfs/binder` defaults to mode `0600 root:root` from
@@ -95,12 +123,12 @@ mismatch, or `g_module` dlsym mismatch.  See `phase_n8_graphics_native.md`
 | N0  | [phase_n0_preflight_smoke_test.md](phase_n0_preflight_smoke_test.md) | ✅ historical — risk retired by chainload approach |
 | N1  | [phase_n1_boot_image.md](phase_n1_boot_image.md) | ❌ Superseded by N11 — direct `boot-ohos.img` flash rejected by LK |
 | N2  | [phase_n2_init_native.md](phase_n2_init_native.md) | ✅ DoMkSandbox skip under `OHOS_NATIVE_BOOT=1` |
-| N3  | [phase_n3_fstab.md](phase_n3_fstab.md) | ✅ `fstab.x23` + `init.x23.cfg` deployed via vendor.img |
+| N3  | [phase_n3_fstab.md](phase_n3_fstab.md) | ✅ `fstab.x23` + `init.x23.cfg` deployed via vendor.img; N3.5 (2026-05-14) added `userdata` entry that unblocks SetSelfTokenID wiring (real TokenIDs propagate; samgr bypass removed) |
 | N4  | [phase_n4_androidd.md](phase_n4_androidd.md) | ✅ All Halium HAL services up + IComposer registers (2026-05-14, umask + securebits + caps + binder-chmod + chroot/regex fixes) |
 | N5  | [phase_n5_android_image.md](phase_n5_android_image.md) | ✅ Halium system_a (UBports system-image) + vendor_a (bootstrap) baked into super.img |
 | N6  | [phase_n6_binder.md](phase_n6_binder.md) | ✅ Default `/dev/binder` for OHOS; `android-binder` for guest via `BINDER_CTL_ADD` |
 | N7  | [phase_n7_hdc_usb.md](phase_n7_hdc_usb.md) | ✅ **DONE.**  `cmode=3` + `developermode=true` setparam + aarch64 hdc cross-build |
-| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | 🔄 N8.7+N8.8+N8.10 done (2026-05-14): samgr binder chmod + native-boot bypass; `/halium-system` bind + `/apex` bind for libhybris paths; OHOS-patched kernel + matched vendor_boot.img so `/dev/access_token_id` is now present.  N8.9 open: composer_host alive but display_composer_service not published to hdf_devmgr. |
+| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | 🔄 N8.7+N8.8+N8.10 done (2026-05-14): samgr binder chmod; `/halium-system` bind + `/apex` bind for libhybris paths; OHOS-patched kernel + matched vendor_boot.img so `/dev/access_token_id` is now present.  N8.7 marker bypass *removed* — the N3.5 userdata mount makes SetSelfTokenID work properly.  N8.9 open: composer_host alive but display_composer_service not published to hdf_devmgr. |
 | N9  | [phase_n9_firmware_peripherals.md](phase_n9_firmware_peripherals.md) | 🔄 Partial — WiFi/audio native; BT/sensors need androidd-resolved Android HALs |
 | N10 | [phase_n10_flash_recovery.md](phase_n10_flash_recovery.md) | ✅ `flash-native.sh` follows chainload flow (boot_a.bak → fastbootd → super → boot_a chainload) |
 | N11 | [phase_n11_chainload.md](phase_n11_chainload.md) | ✅ **DONE.**  Halium ramdisk + replaced `/init` chain-loads into OHOS init via `OHOS_NATIVE_BOOT=1 chroot` |
