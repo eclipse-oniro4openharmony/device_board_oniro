@@ -15,46 +15,57 @@ boots OHOS natively, enumerates as `12d1:5000 Phone X23`, and
 `hdc shell` returns a live shell.
 
 ✅ **All Halium HAL services come up; composer registers; the
-watchdog flips `android.composer.ready=1`.**  Four cascading
-caps/securebits/perms fixes landed today (the next layer below
-yesterday's umask fix):
-- OHOS init's `KeepCapability()` locks `SECBIT_KEEP_CAPS_LOCKED`
-  on every service.  Halium init's child can no longer toggle
-  `SECBIT_KEEP_CAPS` for services with a `capabilities` directive
-  (logd, etc.) → `PR_SET_SECUREBITS` returns `EPERM` → exit code 6.
-  Fix: name-check `androidd` in `KeepCapability()` and skip.
-- `androidd.cfg` was missing four caps Halium HALs need in their
-  inheritable sets (`AUDIT_CONTROL`, `IPC_LOCK`, `NET_BIND_SERVICE`,
-  `SYS_RAWIO`) and one cap `setns(CLONE_NEWNS)` needs
-  (`SYS_CHROOT`).  Added.
-- `binderfs` device nodes default to `0600 root:root`, blocking
-  Halium services that run as uid `system` from opening
-  `/dev/binder` → libbinder `CHECK` → SIGABRT in
-  `service*manager`.  Halium init's `chmod 0666 /dev/binderfs/binder`
-  misses because we only bind the individual devs into
-  `/dev/{binder,hwbinder,vndbinder}`.  androidd now chmods them
-  after the bind.
-- `probe_composer` (the composer-ready watchdog poll) didn't
-  `chroot("/root")` after setns into Halium's mount NS, so
-  `/system/bin/sh` resolved to OHOS sh and `/system/bin/lshal`
-  wasn't found.  Plus Halium/Toybox grep doesn't support BRE `\+`
-  — changed regex to `-Eq '@2[.][0-9]+::IComposer/default'`.
+watchdog flips `android.composer.ready=1`.**  See N4 doc for the
+five-layer caps/securebits/perms cascade landed earlier today.
 
-End-state: `lshal` inside the Halium NS shows 119 registered HIDL
-services including all three versions (2.1, 2.2, 2.3) of
-`android.hardware.graphics.composer::IComposer/default`,
-`android.hardware.graphics.allocator@4.0::IAllocator/default`, and the
-full set of MTK MT6789 HALs (camera, drm, gnss, audio, sensors,
-thermal, wifi, etc.).
+🔄 **N8.7 + N8.8 landed; `composer_host` alive but service not yet
+registered (N8.9).**
 
-🚧 **Next blocker: OHOS-side `composer_host` doesn't start.**
-`render_service` polls `display_composer_proxy: get IServiceManager failed`
-at 100Hz.  OHOS samgr is up, hdf_devmgr is up, but no `composer_host`
-or `allocator_host` process exists.  In LXC mode the LXC post-start
-hook triggers host startup; native boot needs the equivalent init job
-to launch the OHOS-side hosts when `android.composer.ready=1` fires.
-See `phase_n4_androidd.md` "2026-05-14 PM" section for the layer-chase
-detail, then `phase_n8_graphics_native.md` for the host-startup plan.
+N8.7 — samgr binder access + native-boot bypass:
+- `/dev/binderfs/binder` defaults to mode `0600 root:root` from
+  binderfs.  samgr runs as uid `samgr (5555)`, so its
+  `open(/dev/binder)` failed → `BINDER_SET_CONTEXT_MGR` returned -1 →
+  `JoinWorkThread error, samgr main exit!` crash-loop.  Fix: `chmod
+  0666 /dev/binderfs/binder` in `init.x23.cfg` pre-init.
+- `samgr CanRequest()` requires `tokenType == TOKEN_NATIVE` or `uid in
+  {0, 1000}`.  Halium 5.10's kernel has no `/dev/access_token_id`, so
+  hdf_devmgr (uid 3044), composer_host (3036), etc. were denied SA
+  registration.  Env vars don't propagate from the chainload to OHOS
+  init's children, so the LXC `OHOS_RUNTIME_CONFIG=1` trick doesn't
+  apply.  Fix: marker file `/dev/.ohos_native_boot` written by
+  `init.x23.cfg`, samgr `CanRequest()` short-circuits on `access(F_OK)`.
+
+N8.8 — chainload mount layout for libhybris:
+- `halium_system_a` is a dynamic-partition image; its actual Android
+  `/system` content lives in the inner `system/` subdir.  Mounting the
+  partition directly at `/android/system` left libhybris's hardcoded
+  `/android/system/lib64` empty → composer_host SIGSEGV on first
+  Android dlopen.  Fix: chainload now mounts `halium_system_a` at
+  `/halium-system` AND bind-mounts `/halium-system/system` over
+  `/android/system` (matching the LXC view).  `androidd.c` `ANDROID_ROOT`
+  switched from `/android/system` to `/halium-system` so its
+  `pivot_root` still lands somewhere with `/system/bin/init`.
+- Bionic libc is shipped via APEX
+  (`/apex/com.android.runtime/lib64/bionic/libc.so`), not
+  `/system/lib64`.  Without `/apex` mounted, every Android dlopen
+  failed with `library "libc.so" not found`.  Fix: chainload mkdirs
+  `/root/apex` in the rw window and binds `/halium-system/system/apex`
+  over `/apex`.
+
+After N8.7 + N8.8: `composer_host` and `allocator_host` are alive
+(pid stable, no SIGSEGV), all Android system libs map in
+(`/proc/$pid/maps` shows libEGL.so, libhwc2_compat_layer.so, libbinder,
+libgralloctypes, etc.), main thread idle and IPC threads parked in
+`binder_wait_for_work`.
+
+🚧 **Next blocker (N8.9):** `composer_host` is up but it has not
+published `display_composer_service` to hdf_devmgr — render_service
+still logs `StubGetService service display_composer_service not
+found` at 100 Hz.  Candidates: SA-registration permission inside the
+HDF driver's `Bind()`, `Bind()` hanging in libhybris HWC2 init, HCS
+mismatch, or `g_module` dlsym mismatch.  See `phase_n8_graphics_native.md`
+§ N8.9 for the four candidates and recommended first probe (add
+`HDF_LOGE` to `hybris_composer_vdi_impl.cpp::Bind`).
 
 ## Phase index
 
@@ -68,7 +79,7 @@ detail, then `phase_n8_graphics_native.md` for the host-startup plan.
 | N5  | [phase_n5_android_image.md](phase_n5_android_image.md) | ✅ Halium system_a (UBports system-image) + vendor_a (bootstrap) baked into super.img |
 | N6  | [phase_n6_binder.md](phase_n6_binder.md) | ✅ Default `/dev/binder` for OHOS; `android-binder` for guest via `BINDER_CTL_ADD` |
 | N7  | [phase_n7_hdc_usb.md](phase_n7_hdc_usb.md) | ✅ **DONE.**  `cmode=3` + `developermode=true` setparam + aarch64 hdc cross-build |
-| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | ✅ Source complete (composer-ready gate cfg + libhybris path-map inherited from LXC) |
+| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | 🔄 N8.7+N8.8 done (2026-05-14): samgr binder chmod + native-boot bypass; `/halium-system` bind + `/apex` bind for libhybris paths.  N8.9 open: composer_host alive but display_composer_service not published to hdf_devmgr. |
 | N9  | [phase_n9_firmware_peripherals.md](phase_n9_firmware_peripherals.md) | 🔄 Partial — WiFi/audio native; BT/sensors need androidd-resolved Android HALs |
 | N10 | [phase_n10_flash_recovery.md](phase_n10_flash_recovery.md) | ✅ `flash-native.sh` follows chainload flow (boot_a.bak → fastbootd → super → boot_a chainload) |
 | N11 | [phase_n11_chainload.md](phase_n11_chainload.md) | ✅ **DONE.**  Halium ramdisk + replaced `/init` chain-loads into OHOS init via `OHOS_NATIVE_BOOT=1 chroot` |
@@ -121,17 +132,19 @@ bash device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh
 
 ## Open work
 
-- **OHOS-side `composer_host` doesn't start in native boot.**
-  Now-current blocker after today's caps/securebits/binder/chroot
-  cascade.  `render_service` is alive and polling for the OHOS-side
-  composer service at 100Hz; samgr and hdf_devmgr are up; the Halium
-  HIDL `IComposer/default` IS registered and visible via `lshal` inside
-  the Halium NS.  What's missing: the OHOS `composer_host` (and
-  probably `allocator_host`) process that bridges OHOS HDI → Halium
-  HIDL via libhybris.  Check whether the native-boot init.cfg has a
-  job that starts `composer_host` on `android.composer.ready=1` (the
-  LXC config used `lxc.hook.post-start` for this).  See
-  `phase_n8_graphics_native.md` for the original plan.
+- **N8.9: composer_host is alive but display_composer_service is not
+  published.**  Now-current blocker after the N8.7 samgr + N8.8 mount
+  fixes.  composer_host has all Android libs mapped in
+  (libEGL/libGLES_mali/libhwc2_compat_layer/libbinder/libgralloctypes/
+  libfmq/…), main thread idle, IPC threads parked in
+  `binder_wait_for_work`.  But hdf_devmgr's `devsvc_manager_stub`
+  reports `display_composer_service not found` at 100 Hz to every
+  render_service poll.  Four candidates documented in
+  `phase_n8_graphics_native.md` § N8.9.  Recommended next probe: add
+  `HDF_LOGE` traces to
+  `device/soc/oniro/hybris_generic/hardware/display/src/display_composer/hybris_composer_vdi_impl.cpp::Bind()`
+  and the dispatcher in `libdisplay_composer_driver_1.0.z.so` to see
+  whether the driver's bind path runs at all in native boot.
 - **Phase N9 peripherals beyond WiFi/audio.**  Bluetooth + sensors
   await `androidd`-resolved Android HALs.  See
   [phase_n9_firmware_peripherals.md](phase_n9_firmware_peripherals.md).
