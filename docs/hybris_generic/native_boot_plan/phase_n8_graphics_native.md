@@ -1,6 +1,6 @@
 # Phase N8 — Graphics & Display (Native)
 
-**Status:** 🔄 In progress.  Composer-ready gate cfg shipped, Bug 8.18 chmod fix moved into the chainload, **N8.7 samgr binder access + native-boot CanRequest bypass landed 2026-05-14** (full detail below).  Awaiting on-device verification that `composer_host` reaches the Halium HIDL composer end-to-end.
+**Status:** 🔄 In progress.  **N8.9 substantively unblocked 2026-05-14: composer_host now publishes display_composer_service** (full detail in § N8.9.1 below).  `render_service`, `com.ohos.systemui`, and `com.ohos.launcher` all see `hybris-hwc2-display` at 720×1560@59Hz and backlight is on.  Remaining blocker: the Android-side `vendor.hwcomposer-2-3` HIDL service cycles every ~5 s (pre-existing, only now visible because composer_host actually reaches it), so `composer_host`'s `IComposer` ref goes stale and the first `getActiveConfig` HIDL call aborts in `libhidlbase::return_status::assertOk` → SIGABRT.  No pixels on the panel yet — the Volla LK splash is still all that's visible.
 
 > **Goal.** `render_service` lights pixels on the panel under native OHOS, inheriting Phases 5–8 (libhybris, display VDIs, stability fixes) without modification beyond the gating cfg added below.
 
@@ -221,6 +221,111 @@ composer_host's HDF driver (`libdisplay_composer_driver_1.0.z.so`) is loaded but
 
 Recommended first probe: add `HDF_LOGE` traces to `hybris_composer_vdi_impl.cpp::CreateHandler` / `Bind()` paths and check whether they're hit.
 
+## N8.9.1 — composer_host stuck in `WaitForProperty` (2026-05-14 evening) — FIXED
+
+The N8.9 hypothesis list above (Bind() not running, HCS mismatch, etc.) turned out to be all wrong.  hiperf revealed the real story: composer_host's HDF driver `Bind()` DID run, called our `HybrisComposerVdiImpl::InitHwc2Device()`, which called `hwc2_compat_device_new()`, which called `HWC2::Device::Device()`, which called `android::Hwc2::Composer::Composer()`, which called `getServiceInternal<BpHwComposer>`, which called `getRawServiceInternal()`, which called **`android::hardware::defaultServiceManager1_2()`** — and that's where the main thread was spinning at 99% CPU forever, inside `android::base::WaitForProperty("hwservicemanager.ready", "true", ...)`.
+
+### Why WaitForProperty never returned
+
+`/dev/__properties__/` is the Android property store directory.  The Halium guest's mount NS (created by `androidd` with `CLONE_NEWNS`) had a **private** tmpfs at `/dev/__properties__/` (mounted by `androidd::child_main`), and Halium init wrote its property-area files (`properties_serial`, `property_info`, per-context files) into that private tmpfs — including the `hwservicemanager.ready=true` flag once hwservicemanager registered.
+
+The OHOS-side `composer_host` runs **outside** the Halium NS — it inherits OHOS's root mount NS, which had **no** `/dev/__properties__/` directory at all.  When `composer_host`'s libhybris loaded Android's `libc.so` (from `/apex/com.android.runtime/lib64/bionic/libc.so`), bionic's `__system_property_init` couldn't find any property files to mmap, so every `__system_property_find("hwservicemanager.ready")` returned `nullptr`.  `WaitForProperty()` then degraded to a hot polling loop on `std::chrono::steady_clock::now()` + `__system_property_wait(nullptr, …)` — burning CPU forever, never returning.
+
+OHOS itself uses `/dev/__parameters__/` for its parameter store (separate name, separate format), so `/dev/__properties__/` is unused real estate on the OHOS side.
+
+### Fix — bind-share `/dev/__properties__/` between the two namespaces
+
+Two edits, no source changes outside the chainload/launcher area:
+
+1. **`vendor/oniro/hybris_generic/etc/init/init.x23.cfg`** (pre-init job) — pre-mount an empty tmpfs at OHOS-side `/dev/__properties__/` so it exists before `androidd` clones:
+
+   ```
+   "mkdir /dev/__properties__ 0755 root root",
+   "mount tmpfs tmpfs /dev/__properties__ noexec,nosuid,nodev mode=0755",
+   ```
+
+2. **`device/board/oniro/hybris_generic/launcher/androidd.c`** (child_main, after the per-NS `/dev` tmpfs is set up) — replace the previous private-tmpfs mount with a bind-mount from OHOS's pre-mounted tmpfs:
+
+   ```c
+   if (mkdir(ANDROID_ROOT "/dev/__properties__", 0755) < 0 && errno != EEXIST)
+       die("mkdir __properties__: %s", strerror(errno));
+   if (mount("/dev/__properties__", ANDROID_ROOT "/dev/__properties__",
+             NULL, MS_BIND, NULL) < 0)
+       die("bind /dev/__properties__: %s", strerror(errno));
+   ```
+
+The child inherits OHOS's mount table at `clone()` time (the OHOS pre-init tmpfs at `/dev/__properties__/` is visible to it via the inherited mount), then `mount(NULL, "/", MS_REC | MS_PRIVATE, NULL)` makes future mount events private — but the existing inode mappings stay shared.  The bind from `/dev/__properties__` (OHOS-side) into `ANDROID_ROOT/dev/__properties__` (Halium-side) gives Halium init's writes a destination that's visible from OHOS too.  Halium init's property store init writes `properties_serial` + `property_info` + the per-context files into the shared tmpfs; `composer_host`'s `__system_property_find()` then reads exactly those files and `hwservicemanager.ready=true` is found.
+
+### Verified end-to-end after the fix (fresh boot, 2026-05-14 evening)
+
+```sh
+# Property files visible from OHOS side
+$ hdc shell 'ls /dev/__properties__/ | wc -l'
+483
+$ hdc shell 'cat /dev/__properties__/properties_serial | head -c 4 | xxd'
+00000000: 5050 5253                                PPRS
+
+# composer_host no longer spins
+$ hdc shell 'cat /proc/$(pidof composer_host)/status | grep -E "State|voluntary"'
+State:  S (sleeping)
+voluntary_ctxt_switches:    51       # was 31 (never returning to userspace)
+nonvoluntary_ctxt_switches: 113      # was 286420 (constant preemption)
+
+# Display registered with render_service + SystemUI + Launcher
+$ hdc shell 'timeout 3 hilog | grep hybris-hwc2-display | head -1'
+... "id":0,"name":"hybris-hwc2-display","width":720,"height":1560,"refreshRate":59 ...
+$ hdc shell 'cat /sys/class/leds/lcd-backlight/brightness'
+223
+$ hdc shell 'pidof com.ohos.systemui com.ohos.launcher'
+4222  4218
+```
+
+The OHOS graphics stack reaches the same point it does in the LXC build, on the same physical device, under native boot.
+
+### Remaining blocker — `vendor.hwcomposer-2-3` cycles, breaking the stale `IComposer` ref
+
+Despite N8.9.1, no pixels reach the panel yet.  Symptoms:
+
+- `composer_host` has a single SIGABRT in its history (early in boot) at `libhwc2_compat_layer::Composer::getActiveConfig` → `libhidlbase::return_status::assertOk()` → `abort()`.  Crash signature: HIDL transport error (the remote service died between `getService()` and the first `getActiveConfig` call).
+- Polling `pidof android.hardware.graphics.composer@2.3-service` over 20 s shows the service has a **new pid every 4–6 s** and is dead in the gaps — a tight restart loop driven by Halium init's `class hal` + `oneshot=false`.
+- `dmesg` reports the corresponding `init: starting service 'vendor.hwcomposer-2-3'...` lines at 5 s cadence.  No explicit "received signal N" line for the composer (unlike `vndservicemanager` which loudly SIGABRTs every 5 s).  The composer simply exits with a non-zero status mid-init.
+- Other Halium services also cycle: `vndservicemanager` (SIGABRT), `wfca` (status 1), `storaged` (SIGABRT).  `loghidlsysservice`, `osi`, `lbs_dbg`, `zygote`, `zygote_secondary` can't even start because their binaries are missing from this Halium 12 system image (it's the UBports image — a stripped Android tree for HAL-only use).  Most of these are not graphics-relevant, but the composer-service one IS.
+- Inside the Halium NS, `/dev/socket/property_service` does exist (so it's not that), and `/dev/__properties__/` is correctly populated.  `/dev/cpuset/` is **missing** in the Halium NS, which makes the `writepid /dev/cpuset/system-background/tasks` in `android.hardware.graphics.composer@2.3-service.rc` no-op (init logs a warning but doesn't kill the service).
+- The watchdog in `androidd.c` only checks `lshal | grep IComposer/default` **once** and flips the `android.composer.ready` param — so a freshly restarted (but still alive on next poll) composer service is enough to satisfy it.  The cycling continues invisibly after.
+
+### N8.9.2 — Next-session investigation plan
+
+1. **Get Halium-side logcat** (the failing service should log its abort reason before dying).  `nsenter -t <halium-init-pid> -m -F -- chroot /root /system/bin/logcat -d -t 200` runs but produces no output on its own — needs deeper investigation.  Probably need to `chroot` properly into the Halium NS view (Halium's mount NS shows `/dev/mapper/halium_system_a on /root type ext4`, not at `/` — Halium init does an additional pivot during its boot that puts halium content at `/root`).  See N8.9.3 below.
+
+2. **Run the composer binary manually with strace inside the Halium NS.**  Once N8.9.3 (proper chroot into Halium) is solved, `strace -f -e trace=openat,connect,ioctl /vendor/bin/hw/android.hardware.graphics.composer@2.3-service` will reveal the failing syscall.
+
+3. **Look for a missing dependency.**  `ldd` the composer binary against Halium's `/system/lib64` + `/vendor/lib64` to spot any libs whose `dlopen` fails (e.g. Mali GLES not linkable from the composer's namespace, missing vendor HAL passthrough lib).
+
+4. **Compare LXC vs native.**  In the LXC build the same composer binary is presumably running fine (it served us under N4 watchdog).  Diff the env vars and namespace setup.  The most likely culprit: in LXC the Halium binaries see OHOS's `/dev` (one shared `/dev` per-container), but in native boot they see a per-NS `/dev` set up by `androidd` — that `/dev` may be missing something LXC has.
+
+5. **Harden composer_host against transient `IComposer` death.**  Independent of fixing the cycle: wrap `hwc2_compat_*` calls in retry-with-getService logic so a single SIGABRT doesn't crash the whole `hdf_devhost`.  Pattern: catch the HIDL transport error before it reaches `assertOk()` (would require a libhybris patch to `libhwc2_compat_layer` since `assertOk` is called inside the compat layer, not user code).
+
+6. **Have the watchdog require N consecutive successful probes.**  Easier mitigation: change `androidd::watchdog` to require, say, 6 × 5 s consecutive `IComposer/default` hits before flipping `android.composer.ready=1`.  Won't fix the cycling, but it'll prevent composer_host from starting until the Halium side stabilises (if it ever does).
+
+### N8.9.3 — Why nsenter into the Halium NS is awkward
+
+Looking at the Halium NS mount table from outside:
+
+```
+none on / type rootfs (rw)
+/dev/mapper/halium_system_a on /root type ext4 (ro,nodev,relatime)
+tmpfs on /root/dev type tmpfs (rw,relatime,size=8192k,mode=755)
+...
+```
+
+`androidd::child_main` does `pivot_root("/halium-system", "/halium-system/data/old_root")` so the post-pivot view should have `/` = halium content.  But Halium init (`/system/bin/init second_stage`) appears to do an ADDITIONAL pivot/chroot itself, putting halium content at `/root` inside its own NS.  Result: `nsenter -t <halium-pid> -m -F -- /system/bin/lshal` looks up `/system/bin/lshal` in the Halium mount NS root, which is the leftover rootfs (just `/root/` and a few stubs), and fails with `No such file or directory`.
+
+Workarounds tried:
+- `nsenter ... -- chroot /root /system/bin/sh`: works for sh, but `logcat`'s buffer setup may need a different context.
+- Read `/proc/<halium-init>/root/system/bin/logcat` directly: visible but exec needs proper cwd/env from Halium init.
+
+Solution candidate: `nsenter -t <halium-init> -a -F -- /bin/bash -c "exec </dev/null >&/dev/null 2>&1; logcat -d"` — try entering all of halium's NSes and using the symlink view (`/bin -> /system/bin`).  Or: drop a small debug binary into `/module_update/halium-debug/` and use `androidd`'s existing debug-overlay path (`/data/halium-debug/overlay.txt`) to bind it into the Halium FS, then run via the probe hook.
+
 ## N8.6 — Expect Phase 8 stability bugs to reproduce
 
 Native boot doesn't change the EGL teardown sequence, the HWC2 spec violations, or the Mali driver's NULL+0x1d8 crash on dropdown close. Specifically:
@@ -240,8 +345,9 @@ Action: port the appdata-sandbox.json chmod into the OHOS image build (or into `
 | Composer-ready gate cfg | `device/board/oniro/hybris_generic/cfg/z_composer_host_gate.cfg` | ✅ Authored |
 | BUILD.gn entry | `device/board/oniro/hybris_generic/cfg/BUILD.gn` (`hybris_composer_gate_group`) | ✅ Wired into `hybris_generic_group` |
 | Port Bug 8.18 fix to native image | `device/board/oniro/hybris_generic/launcher/init-chainload.sh` Stage 3a | ✅ Remount-rw → chmod 0644 → remount-ro on `system_a` mount in the chainload (init.x23.cfg can't do it — `/system` is RO once OHOS init owns the namespace).  Targets `appdata-sandbox.json` + `appdata-sandbox-isolated.json`. |
-| `/dev/binderfs/binder` chmod 0666 + marker file | `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` | ✅ Landed 2026-05-14 (N8.7) — pre-init `chmod 0666` on the three OHOS binder devices + `write /dev/.ohos_native_boot 1`. |
-| samgr `CanRequest()` native-boot bypass | `foundation/systemabilitymgr/samgr/services/samgr/native/source/system_ability_manager_stub.cpp` | ✅ Landed 2026-05-14 (N8.7) — `access("/dev/.ohos_native_boot", F_OK) == 0` short-circuit after the existing `OHOS_RUNTIME_CONFIG` check. |
+| `/dev/binderfs/binder` chmod 0666 | `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` | ✅ Landed 2026-05-14 (N8.7) — pre-init `chmod 0666` on the three OHOS binder devices. The native-boot marker file `/dev/.ohos_native_boot` was REMOVED after N3.5 because real TokenIDs now propagate; the chmod stays. |
+| samgr `CanRequest()` native-boot bypass | `foundation/systemabilitymgr/samgr/services/samgr/native/source/system_ability_manager_stub.cpp` | ✅ Landed 2026-05-14 (N8.7), then REVERTED 2026-05-14 (N3.5) — the userdata mount fix unblocked the real TOKEN_NATIVE path, so the bypass is no longer needed and removing it restores normal SA permissioning. |
+| Property-store share between OHOS and Halium NSes | `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` (pre-init `mount tmpfs /dev/__properties__`) + `device/board/oniro/hybris_generic/launcher/androidd.c` (replaces per-NS private tmpfs with bind from OHOS-side `/dev/__properties__`) | ✅ Landed 2026-05-14 evening (N8.9.1) — composer_host's `WaitForProperty(hwservicemanager.ready)` now resolves; display_composer_service publishes; SystemUI/Launcher detect `hybris-hwc2-display`. |
 
 ## Bring-up checklist
 
