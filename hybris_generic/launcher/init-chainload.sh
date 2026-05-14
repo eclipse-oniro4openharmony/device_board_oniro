@@ -57,6 +57,17 @@ if [ -f modules.load ]; then
         modprobe -a "$1" 2>/dev/null || true
     done < modules.load
 fi
+
+# Load syscon-reboot-mode so OHOS userspace can enter LK fastboot via
+# `reboot bootloader` (or `param set ohos.startup.powerctrl reboot,
+# bootloader`) without the Vol-Down + Power chord.  The driver's notifier
+# matches the cmd string against `mode-*` properties under the watchdog DT
+# node and writes the magic into 0x10007024[3:0]; LK reads that on next
+# boot.  Halium's modules.load doesn't list these because Android uses a
+# different bootloader-handoff path, so we modprobe them explicitly.
+modprobe reboot-mode        2>/dev/null || true
+modprobe syscon-reboot-mode 2>/dev/null || true
+
 cd /
 
 # Halt instead of silent reboot on any kernel panic — easier to diagnose.
