@@ -74,7 +74,21 @@
  * from the OHOS namespace because the mounts remain visible there.
  * The pivot here is only for the Halium guest's view.
  */
-#define ANDROID_ROOT       "/android/system"
+/* ANDROID_ROOT is the OUTER halium_system_a partition root (acct/,
+ * apex/, bin/, system/, ...) — the dynamic-partition image's literal
+ * top-level FHS.  We pivot the Halium NS into ANDROID_ROOT so Halium
+ * init finds itself at /system/bin/init post-pivot (where the inner
+ * system/ subdir becomes /system).  All Halium-NS mount setup (/dev,
+ * /vendor, /data, ...) happens under ANDROID_ROOT pre-pivot.
+ *
+ * Pre-2026-05-14 this was "/android/system" — the chainload mounted
+ * halium_system_a directly there.  We now bind the inner Android
+ * /system content over /android/system (so the OHOS-side libhybris
+ * sees its hardcoded /android/system/lib64 etc., matching the LXC
+ * build convention), and keep the outer partition root mounted at
+ * /halium-system for Halium-NS pivot use.  See init-chainload.sh
+ * Stage 3b for the mount layout. */
+#define ANDROID_ROOT       "/halium-system"
 #define OHOS_HALIUM_VENDOR "/android/vendor"
 #define BINDERFS_CONTROL   "/dev/binderfs/binder-control"
 #define ANDROID_BINDER     "/dev/binderfs/android-binder"

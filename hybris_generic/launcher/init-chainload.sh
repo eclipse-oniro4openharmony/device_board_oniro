@@ -155,9 +155,9 @@ if mount -o remount,rw /root 2>/dev/null; then
     # build has no separate userdata partition mounted, so we can't
     # back it with a real RW dir anyway).
     mkdir -p /root/android /root/android/system /root/android/vendor \
-             2>/dev/null
+             /root/halium-system /root/apex 2>/dev/null
     chmod 0755 /root/android /root/android/system /root/android/vendor \
-               2>/dev/null
+               /root/halium-system /root/apex 2>/dev/null
 
     # Bug 8.18 — sandbox configs ship at 0640 from upstream;
     # nwebspawn (uid 3081) needs 0644 to load them.
@@ -192,10 +192,34 @@ mount -t ext4 -o ro /dev/mapper/chip_prod_a /root/chip_prod 2>/dev/null \
 # them itself.
 # ---------------------------------------------------------------------------
 if [ -b /dev/mapper/halium_system_a ] && [ -b /dev/mapper/halium_vendor_a ]; then
-    mount -t ext4 -o ro /dev/mapper/halium_system_a /root/android/system 2>/dev/null \
+    # halium_system_a is a dynamic-partition image with a Halium-style
+    # FHS at its root (acct/, apex/, bin/, system/, etc.).  The actual
+    # Android `/system` content (lib64/, bin/, etc.) lives in the inner
+    # system/ subdir.  Two consumers want different views of this:
+    #   - libhybris (in OHOS NS) hardcodes /android/system/lib64 etc.;
+    #     LXC's lxc.mount.entry /system→android/system gives it the
+    #     inner view.  Provide the same by binding the inner system/
+    #     over /android/system here.
+    #   - androidd (in its Halium NS) pivots into the *outer* root so
+    #     Halium init can find itself at /system/bin/init (the inner
+    #     system/ becomes /system after pivot).  Keep the outer root
+    #     mounted separately at /halium-system for androidd's use.
+    mount -t ext4 -o ro /dev/mapper/halium_system_a /root/halium-system 2>/dev/null \
         || echo "[init-chainload] mount halium_system_a failed (non-fatal)"
+    if [ -d /root/halium-system/system ]; then
+        mount --bind /root/halium-system/system /root/android/system 2>/dev/null \
+            || echo "[init-chainload] bind halium-system/system→android/system failed"
+    fi
     mount -t ext4 -o ro /dev/mapper/halium_vendor_a /root/android/vendor 2>/dev/null \
         || echo "[init-chainload] mount halium_vendor_a failed (non-fatal)"
+    # libhybris's bionic loader pulls libc.so etc. from /apex/com.android.runtime/
+    # (the Android APEX path).  Expose halium-system/system/apex at /apex so
+    # those lookups resolve — without this composer_host SIGSEGVs early in its
+    # first Android-namespace dlopen (libc.so not found).
+    if [ -d /root/halium-system/system/apex ]; then
+        mount --bind /root/halium-system/system/apex /root/apex 2>/dev/null \
+            || echo "[init-chainload] bind /halium-system/system/apex→/apex failed"
+    fi
 else
     echo "[init-chainload] halium_{system,vendor}_a absent — graphics disabled"
 fi
