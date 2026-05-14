@@ -29,6 +29,14 @@ MKBOOT_DIR="$KERNEL_TREE/build-dir/downloads/android_system_tools_mkbootimg"
 MKBOOTIMG="$MKBOOT_DIR/mkbootimg.py"
 UNPACK_BOOTIMG="$MKBOOT_DIR/unpack_bootimg.py"
 OUTPUT="$OHOS_ROOT/out/hybris_generic/boot-chainload.img"
+# OHOS-patched kernel built by build_kernel.sh (Image.gz inside boot.img).
+# When present, we substitute it for the live boot_a kernel so the running
+# kernel carries our OHOS staging drivers (access_tokenid, hilog, hievent,
+# binder token-id, etc.) — required for proper OHOS security model.  The
+# matching modules MUST also be flashed (vendor_boot.img) or driver loads
+# fail with vermagic mismatch.  Override with OHOS_KERNEL_BOOT_IMG=... or
+# unset to fall back to the live Halium kernel.
+OHOS_KERNEL_BOOT_IMG="${OHOS_KERNEL_BOOT_IMG:-$KERNEL_TREE/out/boot.img}"
 
 if [[ ! -f "$LIVE_BOOT" ]]; then
     echo "Error: $LIVE_BOOT missing — run 'adb pull /dev/disk/by-partlabel/boot_a' first" >&2
@@ -46,6 +54,19 @@ echo "Unpacking live Halium boot.img..."
 "$UNPACK_BOOTIMG" --boot_img "$LIVE_BOOT" --out "$WORK/unpack" > /dev/null
 echo "  kernel:  $(stat -c %s "$WORK/unpack/kernel") bytes"
 echo "  ramdisk: $(stat -c %s "$WORK/unpack/ramdisk") bytes"
+
+# Substitute the OHOS-patched kernel if available.  vendor_boot.img must
+# also be reflashed with a matching modules.tar.gz — the modules built
+# from this same tree carry vermagic=5.10.209 (no scmversion) and load
+# only on this same-vermagic kernel.
+if [[ -n "$OHOS_KERNEL_BOOT_IMG" && -f "$OHOS_KERNEL_BOOT_IMG" ]]; then
+    echo "Substituting OHOS-patched kernel from $OHOS_KERNEL_BOOT_IMG"
+    mkdir -p "$WORK/ohos_unpack"
+    "$UNPACK_BOOTIMG" --boot_img "$OHOS_KERNEL_BOOT_IMG" \
+                      --out "$WORK/ohos_unpack" > /dev/null
+    cp "$WORK/ohos_unpack/kernel" "$WORK/unpack/kernel"
+    echo "  new kernel: $(stat -c %s "$WORK/unpack/kernel") bytes"
+fi
 
 RAMDISK_TYPE=$(file -b "$WORK/unpack/ramdisk" | head -1)
 echo "  ramdisk type: $RAMDISK_TYPE"
