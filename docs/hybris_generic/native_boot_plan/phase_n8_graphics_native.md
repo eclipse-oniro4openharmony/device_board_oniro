@@ -1,6 +1,6 @@
 # Phase N8 — Graphics & Display (Native)
 
-**Status:** ✅ Source-side complete (2026-05-12 PM).  Composer-ready gate cfg shipped, Bug 8.18 chmod fix moved into the chainload (rather than runtime since /system is RO).  On-device verification deferred to the consolidated bring-up task.
+**Status:** 🔄 In progress.  Composer-ready gate cfg shipped, Bug 8.18 chmod fix moved into the chainload, **N8.7 samgr binder access + native-boot CanRequest bypass landed 2026-05-14** (full detail below).  Awaiting on-device verification that `composer_host` reaches the Halium HIDL composer end-to-end.
 
 > **Goal.** `render_service` lights pixels on the panel under native OHOS, inheriting Phases 5–8 (libhybris, display VDIs, stability fixes) without modification beyond the gating cfg added below.
 
@@ -98,6 +98,83 @@ The chainload also pre-creates these on the host `/dev` and the binds inherit. `
 
 ---
 
+## N8.7 — samgr + binder bring-up (2026-05-14)
+
+After N4 (all Halium HAL services up + IComposer registered + `android.composer.ready=1`), starting `composer_host` manually with `begetctl start_service composer_host` resulted in `SERVICE_STOPPED` (status 5).  Two cascading root causes uncovered:
+
+### 1. `/dev/binderfs/binder` is mode 0600 root:root (kernel binderfs default)
+
+Symptom: `dmesg | grep SAMGR` shows samgr crash-looping every ~1 s:
+```
+SAMGR: main called, enter System Ability Manager
+SAMGR: System Ability Manager enter init
+SAMGR: set context fail!
+SAMGR: set samgr ready ret : succeed
+SAMGR: JoinWorkThread error, samgr main exit!
+```
+samgr runs as `uid samgr (5555)` and could not open `/dev/binder` → `BINDER_SET_CONTEXT_MGR` failed → `JoinWorkThread` exit, restart.  hwbinder/vndbinder/android-binder were already 0666 because `androidd` (Phase N4) chmods its bind-mount targets; `/dev/binderfs/binder` was not touched because OHOS uses it directly, not through the androidd bind.
+
+**Fix:** add `chmod 0666 /dev/binderfs/{binder,hwbinder,vndbinder}` to `init.x23.cfg` pre-init job (the hwbinder/vndbinder chmods are belt-and-suspenders — androidd does them too, but it's cheap and survives if androidd's bind ordering ever changes).
+
+### 2. `samgr CanRequest()` rejects every native-uid caller
+
+With samgr alive, manual `begetctl start_service composer_host` produces a running pid, but `render_service` keeps logging `failed to get sa hdf service manager` / `display_composer_proxy: Get:get IServiceManager failed!` indefinitely.
+
+Root cause traced via `dmesg | grep SAMGR`:
+```
+SAMGR: CanRequest callingTkid:3044, tokenType:0
+SAMGR: AddSystemAbilityInner PERMISSION DENIED!
+```
+
+`hdf_devmgr` (uid 3044) is denied when registering SA 5100 (HDF service manager).  `system_ability_manager_stub.cpp::CanRequest()` checks tokenType for `TOKEN_NATIVE`; on this Halium 5.10 kernel `/dev/access_token_id` doesn't exist (the OHOS staging driver isn't in the chainload's kernel — the chainload uses `boot_a.bak`'s Halium kernel, not our patched `kernel/linux/volla-vidofnir/out/boot.img`).  Every caller has `tokenType=TOKEN_INVALID` and `tid==uid`.  The existing uid-fallback only allows `0` and `1000`, so service-uid callers (`hdf_devmgr=3044`, `composer_host=3036`, etc.) hit `return false` and registration fails.
+
+The LXC build solves this by exporting `OHOS_RUNTIME_CONFIG=1`; LXC env-var injection makes it visible to samgr.  Native init does NOT propagate env (`/proc/1/environ` shows only `bootopt=` from the kernel cmdline — our `env OHOS_NATIVE_BOOT=1 chroot` in `init-chainload.sh` does not carry to OHOS init's children).
+
+**Fix:** marker-file mechanism rather than env, since it doesn't depend on env propagation:
+- `init.x23.cfg` pre-init writes `/dev/.ohos_native_boot` (1 byte, mode 0600).
+- Patched `CanRequest()` in `foundation/systemabilitymgr/samgr/services/samgr/native/source/system_ability_manager_stub.cpp` adds an `access("/dev/.ohos_native_boot", F_OK) == 0` short-circuit immediately after the existing `OHOS_RUNTIME_CONFIG` check.
+- Remove when the OHOS-patched kernel (`kernel/linux/volla-vidofnir/out/boot.img`) replaces `boot_a.bak`'s kernel under the chainload and `/dev/access_token_id` appears — then tokenType will be `TOKEN_NATIVE` and the bypass is unneeded.
+
+### Why not use the patched kernel today?
+
+`build_boot_img_chainload.sh` unpacks `out/hybris_generic/backups/boot_a.bak` and reuses its kernel.  Reusing the Halium kernel guarantees that the (huge) Halium kernel-module set on `system_a` matches.  Switching to our OHOS-patched kernel requires either (a) rebuilding all Halium modules against the new kernel version-magic, or (b) merging the OHOS staging-driver patches (`ohos_adaptation.patch`) into the *same* tree the Halium kernel built from, then rebuilding both Image.gz + modules.tar.gz from there.  Tracked as Phase N9.x — out of scope for the immediate graphics bring-up.
+
+## N8.8 — chainload mount layout for libhybris (2026-05-14 evening, continued from N8.7)
+
+With samgr alive (N8.7) the manual `begetctl start_service composer_host` brought composer_host up, but it immediately SIGSEGV'd.  Two more cascading mount-path issues uncovered:
+
+### A. `/android/system/lib64` did not contain the Android libs
+
+The chainload was mounting `halium_system_a` directly at `/android/system`.  But `halium_system_a` is a dynamic-partition image with a Halium-style outer FHS (`acct/`, `apex/`, `bin/`, `system/`, …) — the actual Android `/system` content (lib64/, bin/, etc.) lives in the *inner* `system/` subdir.  So `/android/system/lib64/libhardware.so` did not exist; it was at `/android/system/system/lib64/libhardware.so`.
+
+libhybris hardcodes `/android/system/lib64` as a search path in its bionic linker (`hybris/common/q/linker.cpp`, `hybris/common/mm/linker.cpp`, …) and in its path-redirect map (`hybris/common/hooks.c` maps `/system/` → `/android/system/`).  Without the inner content at `/android/system`, every Android-namespace dlopen failed.
+
+**Fix:** chainload now mounts `halium_system_a` at `/halium-system` AND bind-mounts `/halium-system/system` over `/android/system`.  This gives libhybris the LXC-style view (`/android/system/lib64/...` works) while keeping the outer halium root mounted separately for `androidd`'s pivot-root needs.  `androidd.c` `ANDROID_ROOT` macro changed from `"/android/system"` to `"/halium-system"` so its mount-setup + `pivot_root` go to the outer root (where `/system/bin/init` resolves correctly post-pivot).
+
+### B. `/apex/com.android.runtime/lib64/bionic/libc.so` not found
+
+After fix A, manual launch of `composer_host` produced `library "libc.so" not found` in `/module_update/composer_run.log` and the SIGSEGV moved one layer in (early in the bionic linker's libc lookup).  Halium 12 ships `libc.so` from APEX (`/apex/com.android.runtime/lib64/bionic/libc.so`), not from `/system/lib64`.  LXC binds host `/apex` into the container; native boot had no `/apex` at all.
+
+**Fix:** chainload mkdirs `/root/apex` in the rw window and bind-mounts `/halium-system/system/apex` over `/apex` after mounting `halium_system_a`.
+
+### Current status after A + B (2026-05-14 evening)
+
+- `composer_host` (pid alive, no SIGSEGV) — main thread idle, two IPC threads in `binder_wait_for_work`.
+- `allocator_host` — same.
+- `/proc/$(pidof composer_host)/maps` shows the full Android lib stack loaded: `libEGL.so`, `libGLESv2.so`, `libhwc2_compat_layer.so`, `libgralloctypes.so`, `libbinder.so`, `libbinder_ndk.so`, `libfmq.so`, `libcutils.so`, `android.hardware.graphics.{allocator,common,mapper,bufferqueue}@*.so`, and our `/vendor/lib64/passthrough/libdisplay_composer_vdi_impl.z.so` and `/vendor/lib64/libdisplay_composer_driver_1.0.z.so`.
+- **But:** `hdf_devmgr` still logs `StubGetService service display_composer_service not found` at 100 Hz.  composer_host has loaded the driver but hasn't *registered* `display_composer_service` with hdf_devmgr.  This is the next debugging layer (N8.9).
+
+## N8.9 — Open: composer_host loaded but service not registered
+
+composer_host's HDF driver (`libdisplay_composer_driver_1.0.z.so`) is loaded but its `Bind()` either hasn't run, hasn't completed, or completed without publishing the service to hdf_servmgr.  Candidates to investigate next session:
+
+1. **`hdf_servmgr_client` cannot reach hdf_devmgr from composer_host.**  composer_host uid is 3036; binder is 0666; samgr accepts the `CanRequest` bypass — but the SA registration may need a different ATM check.  Check `dmesg | grep PERMISSION` for fresh denials.
+2. **The driver's `Bind()` is hanging on libhybris EGL/HWC init.**  Without the OHOS panel/display init, `IDisplayComposerVdi::CreateHandler` may block.  Add `hilog` traces to `device/soc/oniro/hybris_generic/hardware/display/src/display_composer/hybris_composer_vdi_impl.cpp::Bind()` (or the dispatcher in `libdisplay_composer_driver`).
+3. **HCS not loaded for composer_host's host instance.**  `device_info.hcs` lists `composer_device` under `display_composer :: host`; verify the compiled `device_info.hcb` on the device matches.  `cat /vendor/etc/hdfconfig/device_info.hcb | strings | grep composer` to confirm.
+4. **`g_module` symbol resolution failure.**  HDF driver modules export a `g_module` (or `HdfDriverEntry`) struct via dlsym.  If the libdisplay_composer_driver_1.0.z.so on device differs in symbol naming from what hdf_devhost expects, the bind step silently no-ops.
+
+Recommended first probe: add `HDF_LOGE` traces to `hybris_composer_vdi_impl.cpp::CreateHandler` / `Bind()` paths and check whether they're hit.
+
 ## N8.6 — Expect Phase 8 stability bugs to reproduce
 
 Native boot doesn't change the EGL teardown sequence, the HWC2 spec violations, or the Mali driver's NULL+0x1d8 crash on dropdown close. Specifically:
@@ -117,6 +194,8 @@ Action: port the appdata-sandbox.json chmod into the OHOS image build (or into `
 | Composer-ready gate cfg | `device/board/oniro/hybris_generic/cfg/z_composer_host_gate.cfg` | ✅ Authored |
 | BUILD.gn entry | `device/board/oniro/hybris_generic/cfg/BUILD.gn` (`hybris_composer_gate_group`) | ✅ Wired into `hybris_generic_group` |
 | Port Bug 8.18 fix to native image | `device/board/oniro/hybris_generic/launcher/init-chainload.sh` Stage 3a | ✅ Remount-rw → chmod 0644 → remount-ro on `system_a` mount in the chainload (init.x23.cfg can't do it — `/system` is RO once OHOS init owns the namespace).  Targets `appdata-sandbox.json` + `appdata-sandbox-isolated.json`. |
+| `/dev/binderfs/binder` chmod 0666 + marker file | `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` | ✅ Landed 2026-05-14 (N8.7) — pre-init `chmod 0666` on the three OHOS binder devices + `write /dev/.ohos_native_boot 1`. |
+| samgr `CanRequest()` native-boot bypass | `foundation/systemabilitymgr/samgr/services/samgr/native/source/system_ability_manager_stub.cpp` | ✅ Landed 2026-05-14 (N8.7) — `access("/dev/.ohos_native_boot", F_OK) == 0` short-circuit after the existing `OHOS_RUNTIME_CONFIG` check. |
 
 ## Bring-up checklist
 
