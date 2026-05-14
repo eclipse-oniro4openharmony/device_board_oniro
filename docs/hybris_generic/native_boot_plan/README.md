@@ -8,7 +8,7 @@ Status, reproduction, and per-phase pointers for booting OHOS natively
 > `phase_nX_*.md` doc.  This README is the entry point — link to the
 > phase docs instead of restating their content here.
 
-## Current state (2026-05-14 PM)
+## Current state (2026-05-14 evening)
 
 ✅ **Native boot + USB hdc work end-to-end on Volla X23.**  The device
 boots OHOS natively, enumerates as `12d1:5000 Phone X23`, and
@@ -23,8 +23,33 @@ TokenIDs now propagate to all native services; the N8.7 marker-file
 `CanRequest` bypass has been removed (revert committed).  Root cause
 was a missing `userdata` entry in `fstab.x23` — see N3.5 below.
 
-🔄 **N8.7 + N8.8 + N8.10 landed; `composer_host` alive but service
-not yet registered (N8.9).**
+✅ **N8.9 substantively unblocked 2026-05-14 evening (§N8.9.1).**
+composer_host now publishes `display_composer_service`;
+render_service + `com.ohos.systemui` + `com.ohos.launcher` all see
+`hybris-hwc2-display` at 720×1560@59 Hz; backlight is on at 223/255.
+Root cause: composer_host's libhybris+bionic was spinning at 99 % CPU
+in `WaitForProperty(hwservicemanager.ready)` because Halium's
+`/dev/__properties__/` lived inside the Halium guest's mount NS and
+was invisible from OHOS.  Fix: pre-mount a tmpfs on OHOS-side
+`/dev/__properties__/` in `init.x23.cfg` pre-init, and have
+`androidd::child_main` bind-mount that into the Halium NS (replacing
+its previous per-NS private tmpfs).  Halium init's property writes
+now land in the shared tmpfs and OHOS-side bionic reads them
+directly.
+
+🚧 **New blocker (N8.9.2): `vendor.hwcomposer-2-3` cycles every
+4–6 s on the Android side**, so composer_host's `IComposer` ref goes
+stale and the first `getActiveConfig` HIDL call SIGABRTs in
+`libhidlbase::return_status::assertOk`.  Pre-existing instability in
+our Halium 12 (UBports) system image (other services like
+`vndservicemanager`, `wfca`, `storaged` are also restart-looping in
+our NS) — only now visible because composer_host actually reaches
+the IComposer call path post-N8.9.1.  **No pixels on the panel yet
+— the Volla LK splash is still all that's visible.**  Next-session
+plan in `phase_n8_graphics_native.md` §N8.9.2 + §N8.9.3 (get
+Halium-side logcat working, strace the composer binary, compare LXC
+vs native NS setup, harden composer_host against transient
+`IComposer` death).
 
 N8.10 — OHOS-patched kernel under the chainload (2026-05-14):
 - `build_kernel.sh` rebuilds the volla-vidofnir kernel with
@@ -107,14 +132,11 @@ After N8.7 + N8.8: `composer_host` and `allocator_host` are alive
 libgralloctypes, etc.), main thread idle and IPC threads parked in
 `binder_wait_for_work`.
 
-🚧 **Next blocker (N8.9):** `composer_host` is up but it has not
-published `display_composer_service` to hdf_devmgr — render_service
-still logs `StubGetService service display_composer_service not
-found` at 100 Hz.  Candidates: SA-registration permission inside the
-HDF driver's `Bind()`, `Bind()` hanging in libhybris HWC2 init, HCS
-mismatch, or `g_module` dlsym mismatch.  See `phase_n8_graphics_native.md`
-§ N8.9 for the four candidates and recommended first probe (add
-`HDF_LOGE` to `hybris_composer_vdi_impl.cpp::Bind`).
+~~🚧 **Next blocker (N8.9):** `composer_host` is up but it has not
+published `display_composer_service` to hdf_devmgr.~~  **Solved
+2026-05-14 evening (§N8.9.1).**  composer_host's HDF Bind() did run;
+the real blocker was a 99 %-CPU spin in `WaitForProperty` inside
+`defaultServiceManager1_2()` (see "Current state" above for the fix).
 
 ## Phase index
 
@@ -128,7 +150,7 @@ mismatch, or `g_module` dlsym mismatch.  See `phase_n8_graphics_native.md`
 | N5  | [phase_n5_android_image.md](phase_n5_android_image.md) | ✅ Halium system_a (UBports system-image) + vendor_a (bootstrap) baked into super.img |
 | N6  | [phase_n6_binder.md](phase_n6_binder.md) | ✅ Default `/dev/binder` for OHOS; `android-binder` for guest via `BINDER_CTL_ADD` |
 | N7  | [phase_n7_hdc_usb.md](phase_n7_hdc_usb.md) | ✅ **DONE.**  `cmode=3` + `developermode=true` setparam + aarch64 hdc cross-build |
-| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | 🔄 N8.7+N8.8+N8.10 done (2026-05-14): samgr binder chmod; `/halium-system` bind + `/apex` bind for libhybris paths; OHOS-patched kernel + matched vendor_boot.img so `/dev/access_token_id` is now present.  N8.7 marker bypass *removed* — the N3.5 userdata mount makes SetSelfTokenID work properly.  N8.9 open: composer_host alive but display_composer_service not published to hdf_devmgr. |
+| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | 🔄 N8.7+N8.8+N8.9.1+N8.10 done (2026-05-14): samgr binder chmod; `/halium-system` bind + `/apex` bind for libhybris paths; OHOS-patched kernel + matched vendor_boot.img so `/dev/access_token_id` is now present; **N8.9.1 shares `/dev/__properties__/` between OHOS and Halium NSes via OHOS-side pre-mounted tmpfs + androidd bind-mount — composer_host now publishes display_composer_service, render_service/SystemUI/Launcher all see `hybris-hwc2-display`**.  N8.7 marker bypass *removed* — the N3.5 userdata mount makes SetSelfTokenID work properly.  **Open: N8.9.2 — `vendor.hwcomposer-2-3` cycles every 4–6 s, composer_host's IComposer ref goes stale, first getActiveConfig SIGABRTs.  No pixels on the panel yet.** |
 | N9  | [phase_n9_firmware_peripherals.md](phase_n9_firmware_peripherals.md) | 🔄 Partial — WiFi/audio native; BT/sensors need androidd-resolved Android HALs |
 | N10 | [phase_n10_flash_recovery.md](phase_n10_flash_recovery.md) | ✅ `flash-native.sh` follows chainload flow (boot_a.bak → fastbootd → super → boot_a chainload) |
 | N11 | [phase_n11_chainload.md](phase_n11_chainload.md) | ✅ **DONE.**  Halium ramdisk + replaced `/init` chain-loads into OHOS init via `OHOS_NATIVE_BOOT=1 chroot` |
