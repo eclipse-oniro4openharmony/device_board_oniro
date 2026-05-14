@@ -361,13 +361,30 @@ static int child_main(void *arg)
     chmod(ANDROID_ROOT "/dev/hwbinder",  0666);
     chmod(ANDROID_ROOT "/dev/vndbinder", 0666);
 
-    /* Per-NS property store.  Halium init populates /dev/__properties__
-     * with the property-area files; we just provide the empty tmpfs. */
+    /* Shared property store.  Halium init populates /dev/__properties__/
+     * with the property-area files (properties_serial, property_info, and
+     * per-context files).  We bind-mount it from the OHOS namespace (where
+     * init.x23.cfg pre-init pre-mounted a tmpfs at /dev/__properties__/)
+     * so libhybris consumers running OUTSIDE the Halium NS — composer_host,
+     * allocator_host, render_service via the EGL stack, etc. — see the
+     * same property files Halium init writes.
+     *
+     * Without this share, libbase's android::base::WaitForProperty() —
+     * called from defaultServiceManager1_2() inside hwc2_compat_device_new
+     * — spins forever on `hwservicemanager.ready=true`, because Halium's
+     * property writes land in a per-NS tmpfs the OHOS side cannot see.
+     *
+     * OHOS itself uses /dev/__parameters__/ for its parameter store, so
+     * a tmpfs at /dev/__properties__/ does not collide with anything
+     * native.  Inheritance: at clone time the child saw OHOS's mount
+     * table including the pre-init tmpfs at /dev/__properties__/; that
+     * mount point is what we bind from here, regardless of the child's
+     * subsequent rprivate flip. */
     if (mkdir(ANDROID_ROOT "/dev/__properties__", 0755) < 0 && errno != EEXIST)
         die("mkdir __properties__: %s", strerror(errno));
-    if (mount("tmpfs", ANDROID_ROOT "/dev/__properties__", "tmpfs", 0,
-              "mode=755") < 0)
-        die("mount tmpfs on __properties__: %s", strerror(errno));
+    if (mount("/dev/__properties__", ANDROID_ROOT "/dev/__properties__",
+              NULL, MS_BIND, NULL) < 0)
+        die("bind /dev/__properties__: %s", strerror(errno));
 
     /* GPU + DMA-BUF + DRM passthrough — bind the host kernel objects so
      * Halium's composer sees the same Mali / DMA-BUF nodes OHOS does.
