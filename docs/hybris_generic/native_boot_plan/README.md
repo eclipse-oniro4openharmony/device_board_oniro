@@ -18,8 +18,29 @@ boots OHOS natively, enumerates as `12d1:5000 Phone X23`, and
 watchdog flips `android.composer.ready=1`.**  See N4 doc for the
 five-layer caps/securebits/perms cascade landed earlier today.
 
-🔄 **N8.7 + N8.8 landed; `composer_host` alive but service not yet
-registered (N8.9).**
+🔄 **N8.7 + N8.8 + N8.10 landed; `composer_host` alive but service
+not yet registered (N8.9).**
+
+N8.10 — OHOS-patched kernel under the chainload (2026-05-14):
+- `build_kernel.sh` rebuilds the volla-vidofnir kernel with
+  `ohos_adaptation.patch` (adds access_tokenid, hilog, hievent,
+  blackbox, binder token-id staging drivers) and `openharmony.config`.
+- Patch updated: drop `-Wundef`/`-Werror=strict-prototypes` from
+  `KBUILD_CFLAGS` (HDF USB headers don't include `<stdbool.h>`,
+  fail with `-Wundef -Werror`).
+- `build_boot_img_chainload.sh` substitutes the patched kernel from
+  `kernel/linux/volla-vidofnir/out/boot.img` into the chainload boot
+  (env override `OHOS_KERNEL_BOOT_IMG`).
+- `flash-native.sh` also flashes `vendor_boot_a` with the matched
+  modules.tar.gz from the same build, so the 181 vendor modules carry
+  the same `vermagic=5.10.209` (no scmversion) as the kernel.
+- Confirmed on device: `/dev/access_token_id` present
+  (`crw-rw-rw- access_token:access_token 10:126`), kernel reports
+  `5.10.209`, 161 modules loaded (same count as Halium baseline).
+- Note: the N8.7 marker-file `CanRequest` bypass stays in place —
+  the access_tokenid driver is available but OHOS `SetSelfTokenID`
+  isn't fully wired (TokenID still 0 for native services).  Separate
+  userspace bug, tracked outside graphics.
 
 N8.7 — samgr binder access + native-boot bypass:
 - `/dev/binderfs/binder` defaults to mode `0600 root:root` from
@@ -79,7 +100,7 @@ mismatch, or `g_module` dlsym mismatch.  See `phase_n8_graphics_native.md`
 | N5  | [phase_n5_android_image.md](phase_n5_android_image.md) | ✅ Halium system_a (UBports system-image) + vendor_a (bootstrap) baked into super.img |
 | N6  | [phase_n6_binder.md](phase_n6_binder.md) | ✅ Default `/dev/binder` for OHOS; `android-binder` for guest via `BINDER_CTL_ADD` |
 | N7  | [phase_n7_hdc_usb.md](phase_n7_hdc_usb.md) | ✅ **DONE.**  `cmode=3` + `developermode=true` setparam + aarch64 hdc cross-build |
-| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | 🔄 N8.7+N8.8 done (2026-05-14): samgr binder chmod + native-boot bypass; `/halium-system` bind + `/apex` bind for libhybris paths.  N8.9 open: composer_host alive but display_composer_service not published to hdf_devmgr. |
+| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | 🔄 N8.7+N8.8+N8.10 done (2026-05-14): samgr binder chmod + native-boot bypass; `/halium-system` bind + `/apex` bind for libhybris paths; OHOS-patched kernel + matched vendor_boot.img so `/dev/access_token_id` is now present.  N8.9 open: composer_host alive but display_composer_service not published to hdf_devmgr. |
 | N9  | [phase_n9_firmware_peripherals.md](phase_n9_firmware_peripherals.md) | 🔄 Partial — WiFi/audio native; BT/sensors need androidd-resolved Android HALs |
 | N10 | [phase_n10_flash_recovery.md](phase_n10_flash_recovery.md) | ✅ `flash-native.sh` follows chainload flow (boot_a.bak → fastbootd → super → boot_a chainload) |
 | N11 | [phase_n11_chainload.md](phase_n11_chainload.md) | ✅ **DONE.**  Halium ramdisk + replaced `/init` chain-loads into OHOS init via `OHOS_NATIVE_BOOT=1 chroot` |

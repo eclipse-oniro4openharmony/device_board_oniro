@@ -135,9 +135,55 @@ The LXC build solves this by exporting `OHOS_RUNTIME_CONFIG=1`; LXC env-var inje
 - Patched `CanRequest()` in `foundation/systemabilitymgr/samgr/services/samgr/native/source/system_ability_manager_stub.cpp` adds an `access("/dev/.ohos_native_boot", F_OK) == 0` short-circuit immediately after the existing `OHOS_RUNTIME_CONFIG` check.
 - Remove when the OHOS-patched kernel (`kernel/linux/volla-vidofnir/out/boot.img`) replaces `boot_a.bak`'s kernel under the chainload and `/dev/access_token_id` appears — then tokenType will be `TOKEN_NATIVE` and the bypass is unneeded.
 
-### Why not use the patched kernel today?
+### Why not use the patched kernel today? — superseded 2026-05-14 (see below)
 
-`build_boot_img_chainload.sh` unpacks `out/hybris_generic/backups/boot_a.bak` and reuses its kernel.  Reusing the Halium kernel guarantees that the (huge) Halium kernel-module set on `system_a` matches.  Switching to our OHOS-patched kernel requires either (a) rebuilding all Halium modules against the new kernel version-magic, or (b) merging the OHOS staging-driver patches (`ohos_adaptation.patch`) into the *same* tree the Halium kernel built from, then rebuilding both Image.gz + modules.tar.gz from there.  Tracked as Phase N9.x — out of scope for the immediate graphics bring-up.
+Originally `build_boot_img_chainload.sh` unpacked `out/hybris_generic/backups/boot_a.bak` and reused its kernel because reusing the Halium kernel guaranteed module-set compatibility.  As of 2026-05-14, this is being lifted via Phase N8.10 below — Halium kernel modules are now rebuilt against our patched tree (same vermagic both sides), so we can ship the OHOS-patched kernel under the chainload and let `/dev/access_token_id` come up naturally.
+
+## N8.10 — Replacing the chainload kernel with the OHOS-patched build (2026-05-14)
+
+The marker-file `CanRequest()` bypass landed in N8.7 is a security-degraded workaround for the missing `/dev/access_token_id`.  The proper fix is to flip the chainload kernel to our OHOS-patched build, which carries the access_tokenid staging driver (plus hilog, hievent, blackbox, binder token-id).
+
+### Mechanics
+
+Halium 12 splits the boot image:
+- `boot_a` (the `boot.img` partition) = generic ramdisk + kernel.
+- `vendor_boot_a` (separate partition) = vendor ramdisk **containing `/lib/modules/<vermagic>/`** + DTB blob.
+
+At boot, the kernel decompresses both ramdisks into `/`.  Halium's initramfs `init` runs `modprobe -a` against the modules in `/lib/modules/`, bringing up UFS / display / WiFi / camera / etc.  Our chainload's Stage 1 does the same (`modprobe -a` over `modules.load`), so module loading still works post-swap as long as kernel and modules share vermagic.
+
+### The same-vermagic guarantee
+
+`build_kernel.sh` (in our tree) checks out `kernel-volla-mt6789` and applies `ohos_adaptation.patch` + `openharmony.config`.  Modules built from that tree carry `vermagic=5.10.209 SMP preempt mod_unload modversions aarch64` — note: no `-ga4ec076d798b` scmversion suffix, because the build tree has no `.git` (the Halium build pipeline copies sources into a tmp workspace before compiling).
+
+The live Halium kernel reports `5.10.209-ga4ec076d798b` (suffix from `scripts/setlocalversion`), but its module set was *also* built without `.git` against the same upstream — Halium modules' `/sys/module/<name>/scmversion` shows `ga4ec076d798b` only because the kernel's `init/version.c` stamps it.  Module vermagic is matched against the kernel's `MODULE_VERMAGIC_STR` at insert, which is the base `5.10.209` + flags, **not** the scmversion.  So:
+
+- OHOS-patched kernel: `vermagic=5.10.209 SMP preempt mod_unload modversions aarch64`
+- OHOS-built modules: `vermagic=5.10.209 SMP preempt mod_unload modversions aarch64`
+
+Match.  Existing Halium modules (with their own different scmversion) would have failed only if the OHOS patch had altered `CONFIG_MODULE_SCMVERSION` or `CONFIG_LOCALVERSION` — it doesn't.  We rebuild both sides to belt-and-braces this.
+
+### Deliverables
+
+| Item | Status |
+|---|---|
+| `build_boot_img_chainload.sh` — substitute OHOS-patched kernel (env override `OHOS_KERNEL_BOOT_IMG`, defaults to `$KERNEL_TREE/out/boot.img`) | ✅ Landed |
+| `flash-native.sh` — also flash `vendor_boot_a` from `kernel/linux/volla-vidofnir/out/vendor_boot.img` when present | ✅ Landed |
+| `ohos_adaptation.patch` — drop `-Wundef` / `-Werror=strict-prototypes` from `KBUILD_CFLAGS` (HDF USB headers don't include `<stdbool.h>`) | ✅ Landed |
+| Build OHOS-patched kernel + matched vendor_boot.img + modules.tar.gz | ✅ Done 2026-05-14 |
+| Verify `/dev/access_token_id` appears on first boot | ✅ Confirmed 2026-05-14: `crw-rw-rw- access_token:access_token 10:126 /dev/access_token_id` |
+| 161 Halium kernel modules load against OHOS-patched kernel (same `vermagic=5.10.209`) | ✅ Confirmed (matches Halium baseline module count) |
+| Revert N8.7 marker-file bypass | ❌ Cannot revert yet — the access_tokenid kernel driver is present but the `SetSelfTokenID` userspace path is not fully wired (dmesg shows `access_tokenid_ioctl: access tokenid magic fail, TYPE=84` from unknown callers; OHOS native services still get `tokenType=TOKEN_INVALID` so samgr `CanRequest` still rejects them without the marker).  The marker bypass stays as a workaround.  Tracked as a separate userspace TokenID-population issue, out of scope for graphics. |
+
+### What N8.10 unlocks vs what's still pending
+
+✅ Functional after N8.10:
+- Halium kernel modules load against our patched kernel — no `vermagic` mismatch (proved with `lsmod | wc -l` = 161, same as the Halium baseline).
+- `/dev/access_token_id` exists; kernel driver accepts the OHOS `ACCESS_TOKEN_ID_IOCTL_BASE='A'` ioctls.
+- All OHOS staging drivers from `ohos_adaptation.patch` are available: hilog, hievent, accesstokenid, blackbox, binder token-id, binder transaction tracking.
+
+⏳ Still pending (not blocked by kernel):
+- OHOS userspace `init` doesn't actually populate `service->tokenId` correctly on this build — `SetSelfTokenID` is a no-op-equivalent.  Investigate in a separate phase.
+- N8.9 (display_composer_service not published) is unchanged — it's a libhybris HDF Bind issue, not a token issue.
 
 ## N8.8 — chainload mount layout for libhybris (2026-05-14 evening, continued from N8.7)
 
