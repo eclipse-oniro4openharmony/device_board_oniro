@@ -138,13 +138,45 @@ echo "  spliced ramdisk: $(stat -c %s "$SPLICED") bytes"
 
 # Header version 4 is what Volla X23 / mimir LK accepts.
 # Kernel byte-identical to live boot_a so vbmeta_a's chain-of-trust stays
-# valid; only the ramdisk content differs.  cmdline init=/init forces our
-# script to run rather than the kernel's default /sbin/init search.
+# valid; only the ramdisk content differs.
+#
+# Cmdline notes:
+#   - init=/init      — force our chainload script (kernel default search
+#                       would pick /sbin/init from the Halium ramdisk).
+#   - panic=0         — no auto-reboot on init crash so we can debug.
+#   - lsm=...selinux...
+#                     — LK's base cmdline pins `security=apparmor`, which
+#                       leaves SELinux uninitialized and `/sys/fs/selinux/`
+#                       absent.  Halium's `vndservicemanager` then SIGABRTs
+#                       on `Check failed: selinux_status_open(true) >= 0`,
+#                       which cascades into a class-hal restart loop —
+#                       composer@2.3-service ends up cycling every 4–6 s
+#                       (see phase_n8_graphics_native.md §N8.9.2).  `lsm=`
+#                       (Linux 5.10+) overrides `security=` and lets us
+#                       enable SELinux instead of (not alongside —
+#                       exclusive LSMs conflict) AppArmor.  Native boot
+#                       has no Ubuntu Touch host so dropping AppArmor is
+#                       free; OHOS itself was already built with
+#                       `build_selinux=false` so it doesn't care which
+#                       major LSM is active.
+# CRITICAL — Volla X23 LK cmdline-truncation quirk: LK strips the FIRST
+# 20 chars of the boot.img cmdline AND keeps only up to the first space
+# after that — i.e. exactly ONE space-free token survives (observed
+# empirically — see phase_n8_graphics_native.md §N8.9.2-fix).  We pad
+# the front with a 20-char no-op token (`PAD=xxxxxxxxxxxxxxx`, a dummy
+# kernel parameter the kernel ignores) so `lsm=selinux` — the one token
+# we actually need — arrives intact.  The trailing
+# `androidboot.selinux=permissive` is therefore DROPPED by LK and never
+# reaches the kernel; it is kept in the string only as documentation of
+# intent.  It is not needed: with `lsm=selinux` and no SELinux policy
+# loaded, `/sys/fs/selinux/enforce` reads 0 (permissive) and every
+# access check passes — Halium boots with `init second_stage` (not
+# `selinux_setup`) so it never loads a policy anyway.
 mkdir -p "$(dirname "$OUTPUT")"
 "$MKBOOTIMG" \
     --kernel  "$WORK/unpack/kernel" \
     --ramdisk "$SPLICED" \
-    --cmdline "init=/init panic=0" \
+    --cmdline "PAD=xxxxxxxxxxxxxxx lsm=selinux androidboot.selinux=permissive" \
     --header_version 4 \
     --os_version 12.0.0 \
     --os_patch_level 2025-09 \
