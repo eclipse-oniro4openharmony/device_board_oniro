@@ -1,7 +1,7 @@
 From 1a2a5ddda9f73a1ce9f8145e8795126ba9159e57 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:36:50 +0000
-Subject: [PATCH 2/5] init: skip privileged cmds, cgroup writes, and SELinux in
+Subject: [PATCH 2/6] init: skip privileged cmds, cgroup writes, and SELinux in
  container mode
 
 Additional LXC container adaptations building on the existing InContainerMode()
