@@ -5,34 +5,33 @@
 #
 # Flash a native-boot OHOS build to a Volla X23 currently in fastboot (LK).
 #
-# Up to three artifacts are flashed:
-#   1. boot-chainload.img → boot_a       (LK boot mode, our chain-load /init
-#                                         that mounts system_a + exec-chroots
-#                                         into OHOS init; kernel is the
-#                                         OHOS-patched kernel when present, or
-#                                         the live Halium kernel otherwise).
-#   2. super.img          → super        (fastbootd dynamic-partition flash;
-#                                         contains system_a + vendor_a +
-#                                         halium_system_a + halium_vendor_a).
+# Up to three artifacts are flashed, all in a single LK-fastboot pass:
+#   1. super.img          → super         (system_a + vendor_a +
+#                                          sys_prod_a + chip_prod_a +
+#                                          halium_system_a + halium_vendor_a).
+#   2. boot-chainload.img → boot_a        (LK boot mode, our chain-load /init
+#                                          that mounts system_a + exec-chroots
+#                                          into OHOS init).
 #   3. vendor_boot.img    → vendor_boot_a  (OPTIONAL — when the OHOS-built
-#                                         kernel is in the chainload, this
-#                                         replaces vendor_boot's kernel
-#                                         modules so vermagic matches the
-#                                         running kernel.  Without matching
-#                                         modules, /dev/access_token_id and
-#                                         many other drivers fail to load.)
+#                                          kernel is in the chainload, this
+#                                          replaces vendor_boot's kernel
+#                                          modules so vermagic matches the
+#                                          running kernel.  Without matching
+#                                          modules, /dev/access_token_id and
+#                                          many other drivers fail to load.)
 #
-# super flashing requires fastbootd (Android userspace fastboot), which
-# we enter via `fastboot reboot fastboot` AFTER flashing a Halium boot.img
-# (boot_a.bak — the pristine boot.img pulled before any modifications).
-# Our chain-load boot.img has no fastbootd inside; if it's flashed at this
-# point, `fastboot reboot fastboot` falls back to LK.
+# No fastbootd switch.  `super` is flashed as a whole — it is an ordinary
+# *physical* partition in the GPT, and build_super_img.sh produces a
+# complete lpmake image (LP metadata + every sub-partition baked in), so
+# LK fastboot can write it raw.  fastbootd is only needed to flash an
+# *individual logical* partition (`fastboot flash system_a …`), which this
+# script never does.  Skipping fastbootd also avoids the Halium-boot
+# splash hang that can leave the device unable to reach userspace fastboot.
 #
 # Pre-requisites on the host:
 #   - `fastboot` available (Android platform-tools).
-#   - Device in LK fastboot mode.
-#   - $OHOS_ROOT/out/hybris_generic/backups/boot_a.bak (Halium boot.img,
-#     pulled before reflashing — `adb pull /dev/disk/by-partlabel/boot_a`).
+#   - Device in LK fastboot mode (`hold Volume-Down + Power`, or
+#     `reboot bootloader` from a device shell).
 #
 # Usage:  ./flash-native.sh
 
@@ -44,40 +43,31 @@ OUT="$OHOS_ROOT/out/hybris_generic"
 
 CHAINLOAD="$OUT/boot-chainload.img"
 SUPER="$OUT/super.img"
-HALIUM_BOOT="$OUT/backups/boot_a.bak"
 # OHOS-built vendor_boot (with matching kernel modules).  Optional; only
 # flashed when the OHOS-patched kernel is in the chainload.
 OHOS_VENDOR_BOOT="${OHOS_VENDOR_BOOT:-$OHOS_ROOT/kernel/linux/volla-vidofnir/out/vendor_boot.img}"
 
-for f in "$CHAINLOAD" "$SUPER" "$HALIUM_BOOT"; do
+for f in "$CHAINLOAD" "$SUPER"; do
     [[ -f "$f" ]] || { echo "Error: $f missing" >&2; exit 1; }
 done
 
 if ! fastboot devices | grep -q .; then
-    echo "Error: no fastboot device.  Reboot phone into fastboot:" >&2
+    echo "Error: no fastboot device.  Reboot phone into LK fastboot:" >&2
     echo "  hold Volume-Down + Power" >&2
     exit 1
 fi
 
-# Flash Halium boot.img first so we can enter fastbootd to flash super.
-echo "[1/3] Flashing Halium boot.img to boot_a (transient — needed for fastbootd)"
-fastboot flash boot_a "$HALIUM_BOOT"
-
-echo "[2/3] Rebooting into fastbootd and flashing super"
-fastboot reboot fastboot
-sleep 8
-fastboot wait-for-device
+echo "[1/3] Flashing super"
 fastboot flash super "$SUPER"
 
-echo "[3/4] Back to LK fastboot, flashing chain-load boot.img"
-fastboot reboot bootloader
-sleep 5
-fastboot wait-for-device
+echo "[2/3] Flashing chain-load boot.img to boot_a"
 fastboot flash boot_a "$CHAINLOAD"
 
 if [[ -f "$OHOS_VENDOR_BOOT" ]]; then
-    echo "[4/4] Flashing OHOS-built vendor_boot.img (matched kernel modules)"
+    echo "[3/3] Flashing OHOS-built vendor_boot.img (matched kernel modules)"
     fastboot flash vendor_boot_a "$OHOS_VENDOR_BOOT"
+else
+    echo "[3/3] No OHOS vendor_boot.img — skipping (set OHOS_VENDOR_BOOT to override)"
 fi
 
 echo

@@ -1,49 +1,50 @@
 # Phase N10 — Flash Tooling, Recovery & Dual-Boot
 
-**Status:** ✅ Source + on-device verified (2026-05-12).  `flash-native.sh` updated for the chainload flow (boot_a.bak → fastbootd → super → boot_a chainload).
+**Status:** ✅ Source + on-device verified.  `flash-native.sh` flashes
+the chainload build in a single LK-fastboot pass (no fastbootd switch).
 
 ---
 
-## Final flash flow (chainload, current as of 2026-05-12)
+## Final flash flow (chainload, current as of 2026-05-15)
 
 The dual-slot A/B design originally documented below (Halium on `_a`,
 OHOS on `_b`) was **superseded** by the Phase N11 chainload approach.
-The actual flash flow now writes everything to slot `_a` in a specific
-sequence to reach fastbootd (which is needed for `super`):
+The flash flow writes everything to slot `_a`, entirely from LK
+fastboot:
 
 ```
-# 1. Flash Halium boot.img to reach fastbootd
-fastboot flash boot_a /tmp/boot_a.bak
-fastboot reboot fastboot
-
-# 2. Flash OHOS super (in fastbootd)
-fastboot flash super /tmp/super.img
-
-# 3. Back to LK fastboot
-fastboot reboot bootloader
-
-# 4. Flash chainload boot.img
-fastboot flash boot_a /tmp/boot-chainload.img
-
-# 5. Boot
+# All three partitions flashed from LK fastboot — no mode switch.
+fastboot flash super         /tmp/super.img
+fastboot flash boot_a        /tmp/boot-chainload.img
+fastboot flash vendor_boot_a /tmp/vendor_boot.img   # optional
 fastboot reboot
 ```
 
 `device/board/oniro/hybris_generic/utils/host/flash-native.sh`
-implements this sequence.  Halium's `boot_a.bak` is stashed at
-`out/hybris_generic/backups/boot_a.bak` (pulled via `adb pull
-/dev/disk/by-partlabel/boot_a` before the first reflash).
+implements this sequence.
 
-**Why Halium first:** our chainload `boot-chainload.img` does not
-contain fastbootd, but flashing `super` requires fastbootd's
-dynamic-partition support.  So we transiently flash Halium's
-boot.img to reach fastbootd, then overwrite it with the chainload
-afterward.  See `phase_n11_chainload.md` for the chainload design.
+**Why no fastbootd:** fastbootd (Android userspace fastboot) is only
+needed to flash an *individual logical* partition (`fastboot flash
+system_a …`) — it understands the LP metadata that packs the logical
+partitions inside `super`.  This flow never does that.  `super` is an
+ordinary *physical* GPT partition, and `build_super_img.sh` produces a
+complete `lpmake` image (LP metadata + every sub-partition baked in),
+so LK fastboot writes it raw in one shot.  `boot_a` and `vendor_boot_a`
+are likewise plain physical partitions LK handles directly.
 
-**Recovery:** reflash `boot_a.bak` → `boot_a` to return to Halium.
-`super` will still be the OHOS super at that point; if Halium needs
-its original `super_a`/`vendor_a`, reflash from the Halium installer
-bootstrap zip.
+Skipping fastbootd also dodges a real failure mode on the rig: the
+transient Halium `boot.img` used to *reach* fastbootd can hang at the
+Volla splash and never bring userspace fastboot up — see
+`feedback`/troubleshooting notes.
+
+**Recovery:** reflash `boot_a.bak` → `boot_a` to return to Halium
+(`boot_a.bak` is the pristine Halium boot.img, pulled via `adb pull
+/dev/disk/by-partlabel/boot_a` before the first reflash and stashed at
+`out/hybris_generic/backups/boot_a.bak`).  `super` will still be the
+OHOS super at that point; if Halium needs its original
+`super_a`/`vendor_a`, reflash from the Halium installer bootstrap zip.
+Note `boot_a.bak` is also a build input — `build_boot_img_chainload.sh`
+unpacks the Halium ramdisk from it.
 
 ---
 
