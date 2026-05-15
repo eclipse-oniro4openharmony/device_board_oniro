@@ -80,13 +80,10 @@ Recently resolved — full root-cause detail in the linked phase docs:
 
 ## Reproduction
 
-Prerequisites: OHOS source checkout, build container, Halium `boot_a.bak`
-stashed at `out/hybris_generic/backups/boot_a.bak` (pull via
-`adb pull /dev/disk/by-partlabel/boot_a` from a live Halium device
-before the first reflash). `boot_a.bak` is a build input for
-`build_boot_img_chainload.sh` (it supplies the Halium ramdisk) and the
-fallback for recovering the device back to Halium — it is no longer
-flashed in the normal flow.
+Prerequisites: OHOS source checkout, build container, and the Halium
+blobs under `device/board/oniro/hybris_generic/halium-blobs/`, populated
+by `pull-halium-blobs.sh`. One of them, `halium_boot_a.img`, supplies the
+Halium ramdisk reused by `build_boot_img_chainload.sh`.
 
 ```
 # Build
