@@ -8,7 +8,7 @@ Status, reproduction, and per-phase pointers for booting OHOS natively
 > `phase_nX_*.md` doc.  This README is the entry point — link to the
 > phase docs instead of restating their content here.
 
-## Current state (2026-05-15)
+## Current state (2026-05-16)
 
 ✅ **Native boot + USB hdc work end-to-end on Volla X23.**  The device
 boots OHOS natively, enumerates as `12d1:5000 Phone X23`, and
@@ -42,12 +42,14 @@ blockers were cleared in one session — full detail in
    `/vendor/lib64/hw/...`; `allocator_host` SIGABRTed.  Fix: bind the
    Halium HAL dirs over OHOS-side `/vendor/lib64/{hw,egl}`.
 
-🚧 **Open: touch input.**  The Goodix `GT9966` touchscreen kernel
-driver (`gt9966.ko`) was missing — `/dev/input/` had only power-key,
-keypad and a virtual keyboard, no touch panel.  Fix (same pattern as
-the Mali modules — bundle + `insmod` at pre-init) has landed in-tree
-(`phase_n8_graphics_native.md` §N8.13); on-device verification
-pending the next flash.
+✅ **Touch input working (2026-05-16).**  The X23 touch is a
+`chipone-tddi` controller (ICNL9911C) on SPI (720×1560).  Brought up
+the same way as the Mali stack (§N8.13): build the `chipone-tddi`
+driver (`gx4.config`'s `CONFIG_TOUCHSCREEN_MTK_TOUCH`), bundle
+`chipone-tddi.ko` in the `vendor_boot` overlay, `insmod` it at
+pre-init.  Verified on device: driver bound to SPI, chip ID read,
+sensor scanning, `mtk-tpd` on `/dev/input/event2`, open by OHOS
+`multimodalinput`.
 
 ### Historical (2026-05-14): N8.9.1 — composer_host property-store share
 
@@ -164,7 +166,7 @@ the real blocker was a 99 %-CPU spin in `WaitForProperty` inside
 | N5  | [phase_n5_android_image.md](phase_n5_android_image.md) | ✅ Halium system_a (UBports system-image) + vendor_a (bootstrap) baked into super.img |
 | N6  | [phase_n6_binder.md](phase_n6_binder.md) | ✅ Default `/dev/binder` for OHOS; `android-binder` for guest via `BINDER_CTL_ADD` |
 | N7  | [phase_n7_hdc_usb.md](phase_n7_hdc_usb.md) | ✅ **DONE.**  `cmode=3` + `developermode=true` setparam + aarch64 hdc cross-build |
-| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | ✅ **Display working (2026-05-15) — OHOS lockscreen on the physical panel.**  Five blockers cleared: SELinux (`lsm=selinux`), `/mnt`+`/storage` tmpfs, Mali GPU 21-module load, `/vendor/lib64/{hw,egl}` bind for the gralloc mapper, + earlier N8.9.1 property-store share.  🚧 Open: touch input — `gt9966.ko` fix landed, on-device verification pending. |
+| N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | ✅ **Display working (2026-05-15) — OHOS lockscreen on the physical panel.**  Five blockers cleared: SELinux (`lsm=selinux`), `/mnt`+`/storage` tmpfs, Mali GPU 21-module load, `/vendor/lib64/{hw,egl}` bind for the gralloc mapper, + earlier N8.9.1 property-store share.  ✅ Touch input working (2026-05-16) — `chipone-tddi` (ICNL9911C) SPI touch driver bundled + loaded at pre-init; § N8.13, verified on device. |
 | N9  | [phase_n9_firmware_peripherals.md](phase_n9_firmware_peripherals.md) | 🔄 Partial — WiFi/audio native; BT/sensors need androidd-resolved Android HALs |
 | N10 | [phase_n10_flash_recovery.md](phase_n10_flash_recovery.md) | ✅ `flash-native.sh` follows chainload flow (boot_a.bak → fastbootd → super → boot_a chainload) |
 | N11 | [phase_n11_chainload.md](phase_n11_chainload.md) | ✅ **DONE.**  Halium ramdisk + replaced `/init` chain-loads into OHOS init via `OHOS_NATIVE_BOOT=1 chroot` |
@@ -217,10 +219,13 @@ bash device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh
 
 ## Open work
 
-- **Touch input.**  `gt9966.ko` (Goodix GT9966 touchscreen) fix has
-  landed in-tree (bundled in the `vendor_boot` overlay + `insmod` at
-  `init.x23.cfg` pre-init) but needs an on-device flash to verify.
-  See `phase_n8_graphics_native.md` § N8.13.
+- **`super.img` rebuild (housekeeping).**  The touch fix's only
+  OHOS-side change is the `init.x23.cfg` `insmod` line.  It was
+  hand-patched into the on-device `vendor_a` partition for fast
+  verification; the in-tree source already carries the same change,
+  so the next full `build.sh` + `build_super_img.sh` regenerates an
+  identical image.  A clean super rebuild+flash is optional — the
+  running device is already functionally equivalent.
 - **Phase 8 stability bugs reproduce under native boot.**  The Mali
   NULL+0x1d8 dropdown crash (8.17), `SetLayerAlpha` UAF (8.11), etc.
   carry over unchanged — see `phase_n8_graphics_native.md` § N8.6.
