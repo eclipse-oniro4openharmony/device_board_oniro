@@ -1,6 +1,22 @@
 # Phase N8 — Graphics & Display (Native)
 
-**Status:** 🔄 In progress.  **N8.9 substantively unblocked 2026-05-14: composer_host now publishes display_composer_service** (full detail in § N8.9.1 below).  `render_service`, `com.ohos.systemui`, and `com.ohos.launcher` all see `hybris-hwc2-display` at 720×1560@59Hz and backlight is on.  Remaining blocker: the Android-side `vendor.hwcomposer-2-3` HIDL service cycles every ~5 s (pre-existing, only now visible because composer_host actually reaches it), so `composer_host`'s `IComposer` ref goes stale and the first `getActiveConfig` HIDL call aborts in `libhidlbase::return_status::assertOk` → SIGABRT.  No pixels on the panel yet — the Volla LK splash is still all that's visible.
+**Status:** ✅ **Display working — OHOS lockscreen renders on the physical Volla X23 panel under native boot (2026-05-15).**  The full libhybris + Halium graphics stack is up: Halium HAL services stable, Mali GPU loaded, `render_service` composites via GPU, `allocator_host` allocates buffers, `composer_host` drives `hybris-hwc2-display` 720×1560@59 Hz.  Five distinct blockers were cleared this session — see § N8.9.2-fix through § N8.13 below.  **Open:** touch input (touchscreen kernel driver `gt9966.ko` was missing — fix landed § N8.13, on-device verification pending).
+
+## Session 2026-05-15 — five blockers to first pixels
+
+The path from "composer_host alive but no pixels" to "lockscreen on panel" went through five independent root causes, each documented in its own section:
+
+1. **§ N8.9.2-fix — SELinux absent → Halium HAL restart loop.**  Kernel cmdline pinned `security=apparmor`; SELinux never initialised, `/sys/fs/selinux` absent, Halium's `vndservicemanager` SIGABRTed on `selinux_status_open`, cascading into a `class hal` restart loop (composer\@2.3 cycling every 4–6 s).  Fixed by `lsm=selinux` on the chainload cmdline + mounting `selinuxfs` in both namespaces.
+2. **§ N8.10b — `/mnt` + `/storage` on RO root → launcher crash-loop.**  Native boot skips `FirstStageMain`, so `MountBasicFs()` never ran; `/mnt` stayed read-only, `mkdir /mnt/sandbox` failed, every app-spawn sandbox bind hit ENOENT.  Fixed by tmpfs mounts in the chainload.
+3. **§ N8.11 — Mali GPU driver not loaded.**  `/dev/mali0` absent — `mali_kbase` + 20 dependency modules were not in `vendor_boot`.  Fixed by bundling the 52-module GPU+touch closure and loading it at OHOS `pre-init`.
+4. **§ N8.12 — `/vendor/lib64/{hw,egl}` absent → `allocator_host` SIGABRT.**  Android `libui` `GraphicBufferMapper` `access()`-checks a hardcoded `/vendor/lib64/hw/...` path; it didn't exist, the gralloc mapper failed to load, `allocator_host` aborted, `render_service` got no buffers.  Fixed by binding the Halium HAL dirs over OHOS-side `/vendor/lib64/{hw,egl}`.
+5. **§ N8.13 — touchscreen driver not loaded.**  `gt9966.ko` (Goodix GT9966) missing — same class as N8.11.  Fix landed.
+
+---
+
+## Historical (pre-2026-05-15): N8.9 — composer_host published display_composer_service
+
+**N8.9 substantively unblocked 2026-05-14: composer_host now publishes display_composer_service** (full detail in § N8.9.1 below).  `render_service`, `com.ohos.systemui`, and `com.ohos.launcher` all see `hybris-hwc2-display` at 720×1560@59Hz and backlight is on.
 
 > **Goal.** `render_service` lights pixels on the panel under native OHOS, inheriting Phases 5–8 (libhybris, display VDIs, stability fixes) without modification beyond the gating cfg added below.
 
@@ -325,6 +341,84 @@ Workarounds tried:
 - Read `/proc/<halium-init>/root/system/bin/logcat` directly: visible but exec needs proper cwd/env from Halium init.
 
 Solution candidate: `nsenter -t <halium-init> -a -F -- /bin/bash -c "exec </dev/null >&/dev/null 2>&1; logcat -d"` — try entering all of halium's NSes and using the symlink view (`/bin -> /system/bin`).  Or: drop a small debug binary into `/module_update/halium-debug/` and use `androidd`'s existing debug-overlay path (`/data/halium-debug/overlay.txt`) to bind it into the Halium FS, then run via the probe hook.
+
+## N8.9.2-fix — SELinux absent → Halium `class hal` restart loop (2026-05-15)
+
+**Symptom.**  `vendor.hwcomposer-2-3` (and `allocator@4.0`, `vndservicemanager`, `muxreport`, `storaged`, …) cycled every 4–6 s.  Halium-side tombstones (`/data/tombstones/` in the Halium NS, reachable as `/proc/<halium-init>/root/data/tombstones/`) showed `vndservicemanager` aborting with:
+
+```
+Abort message: 'Check failed: selinux_status_open(true ) >= 0 '
+```
+
+**Root cause.**  `vndservicemanager` is the binder context manager for `vndbinder`.  Its `Access` ctor does `CHECK(selinux_status_open(true) >= 0)`.  libselinux needs `selinuxfs` mounted; `selinuxfs` is only registered if the SELinux LSM initialised.  The Volla X23 LK pins `security=apparmor` on the kernel cmdline — that selects AppArmor as the sole "major" LSM, SELinux never initialises, `selinuxfs` is never registered, `/sys/fs/selinux/` does not exist.  `vndservicemanager` aborts → `vndbinder` context manager dies → every HAL in `class hal` that talks vndbinder fails and init restart-loops the whole class.  This is why composer\@2.3 cycled (N8.9.2's "pre-existing instability" was *this*).
+
+**Fix.**
+- `build_boot_img_chainload.sh` — chainload boot.img cmdline gains `lsm=selinux`.  Linux 5.10's `lsm=` overrides the legacy `security=`; SELinux and AppArmor are mutually-exclusive exclusive-LSMs, and native boot has no Ubuntu Touch host so dropping AppArmor is free (OHOS was already built `build_selinux=false`).
+- **LK cmdline truncation quirk:** the X23 LK strips the **first 20 bytes** of the boot.img cmdline and keeps only up to the first space after that.  Only one space-free token survives.  `build_boot_img_chainload.sh` pads with a 20-char dummy `PAD=xxxxxxxxxxxxxxx` so `lsm=selinux` arrives intact.  `androidboot.selinux=permissive` could **not** be threaded through (second token) — not needed: with `lsm=selinux` and no policy loaded, `/sys/fs/selinux/enforce` reads 0 (permissive) and all access checks pass.
+- `androidd.c::child_main` — mounts `selinuxfs` on the Halium-NS `/sys/fs/selinux` (after the fresh per-NS `sysfs` mount).  Without this the Halium NS — which gets its own `sysfs` — has no `selinuxfs` even though the kernel registered it.
+- `init-chainload.sh` Stage 4b — `mount -t selinuxfs none /sys/fs/selinux` on the chainload `/sys` (bind-inherited into OHOS's `/root/sys`).
+
+After this: `vndservicemanager`, `hwservicemanager`, `composer@2.3-service`, `allocator@4.0-service-mediatek` all stable; no restart loop.
+
+## N8.10b — `/mnt` + `/storage` left on RO root → launcher crash-loop (2026-05-15)
+
+**Symptom.**  `composer@2.3` stable, render_service up, but launcher crash-looped: `appspawn` logged `DoAppSandboxMountOnce section app-base failed` / `errno:2` on every bind under `/mnt/sandbox/100/com.ohos.launcher/...`.  `/mnt/sandbox` did not exist.
+
+**Root cause.**  `/mnt`, `/mnt/data`, `/storage` are set up as tmpfs by `MountBasicFs()` in `base/startup/init/services/init/standard/device.c`, which runs **only from `FirstStageMain` → `SystemPrepare`**.  The chainload `exec`s OHOS init directly with `--second-stage`, so `FirstStageMain` never runs.  `/mnt` stayed a directory on the RO `system_a` rootfs; `appspawn.cfg`'s boot-job `mkdir /mnt/sandbox` silently failed; every app-spawn sandbox bind then hit ENOENT.
+
+**Fix.**  `init-chainload.sh` Stage 4b pre-mounts the tmpfs that `MountBasicFs()` would have: `tmpfs` on `/root/mnt` (+`--make-slave`), `tmpfs` on `/root/mnt/data` (+`--make-shared`), `tmpfs` on `/root/storage`.  `/storage` is mkdir'd in the Stage 3a rw-window (it doesn't exist on `system_a`).  After this `appspawn` builds `/mnt/sandbox/<uid>/<bundle>/` correctly and launcher + SystemUI start.
+
+## N8.11 — Mali GPU stack: bundle + load 21 modules (2026-05-15)
+
+**Symptom.**  Launcher/SystemUI ran and saw `hybris-hwc2-display`, but nothing painted.  `render_service` + apps had no `/dev/mali0`; `/dev/mali0` did not exist; `lsmod` had no `mali`.
+
+**Root cause.**  `mali_kbase_mt6789.ko` and its dependency modules are **not** in Halium's `vendor_boot` `modules.load` (Halium 12 on this device never loaded Mali from the kernel ramdisk — stock Ubuntu Touch loads it later via udev coldplug from the Ubuntu rootfs's `/lib/modules`, which native boot doesn't have).
+
+**Investigation dead-ends (recorded so they aren't repeated):**
+- Adding `mali_*` to `modules.load` with the **stock** `modules.dep` → kernel panic / device drops to MT65xx Preloader (modprobe loads `mali_kbase` with no dep info).
+- Regenerating the whole `modules.dep` → **also panics**: the curated 180-entry `vendor-ramdisk-overlay/lib/modules/modules.dep` is special; a structurally-different regenerated file breaks early-boot module loading (UFS etc.).  **Never regenerate that file wholesale.**
+- Loading the Mali stack during the chainload (before OHOS userspace) is unrecoverable on panic.
+
+**What works.**  The 21-module GPU closure loads cleanly **post-boot, in topological order, with all dependencies satisfied** — no panic, `mali_kbase`'s probe just `-EPROBE_DEFER`s until its DT-runtime supply chain is up (`mali → ged-supply → soc:ged → gpufreq-supply → 13fbf000.gpufreq → fhctl-supply → fhctl → mcupm`).  Required platform modules not in the link-time dep graph: `mtk_gpufreq_mt6789.ko` (the MT6789 gpufreq platform driver — registers the `gpufreq` regulator), `fhctl.ko`, `mcupm.ko`.
+
+**Fix (deliverables):**
+- 52 `.ko` files (Mali GPU closure + `gt9966`) copied into `kernel/linux/volla-vidofnir/vendor-ramdisk-overlay/lib/modules/`.  The overlay is copied wholesale into `vendor_boot`, so the files ship **without** being in `modules.load` (no early chainload load, no panic risk).
+- `init-chainload.sh` — Stage 1 modprobe loop `case`-skips `mali_*`; Stage 4b stashes the whole `/lib/modules` into an OHOS-visible tmpfs at `/mnt/kmodules`.
+- `init.x23.cfg` pre-init — 21 `insmod /mnt/kmodules/<mod>.ko` lines in topological order (`mali_mgm_` → … → `ged` → `mali_kbase_mt6789`).  pre-init runs before `render_service`/`composer_host`, so `/dev/mali0` exists when they start.
+
+Verified: clean boot, `/dev/mali0` present, no GPU device in `/sys/kernel/debug/devices_deferred`, `render_service` + launcher + SystemUI open `/dev/mali0` and GPU-render.
+
+## N8.12 — `/vendor/lib64/{hw,egl}` absent → `allocator_host` SIGABRT (2026-05-15)
+
+**Symptom.**  With Mali up, `render_service` spammed `get hdi service allocator_service failed` and nothing presented.  `allocator_host` SIGABRTed (faultlog) in:
+
+```
+android::GraphicBufferMapper::GraphicBufferMapper()  →  __android_log_assert → abort
+  ← hybris_gralloc_allocate ← HybrisBufferVdiImpl::AllocMem ← AllocatorService::AllocMem
+```
+
+**Root cause.**  Android `libui`'s `GraphicBufferMapper` ctor `LOG_ALWAYS_FATAL`s if no Gralloc4/3/2 mapper loads.  The mapper passthrough is loaded from a **hardcoded** `/vendor/lib64/hw/android.hardware.graphics.mapper@4.0-impl*.so`, and the loader does an `access()` existence check on that literal path before `dlopen`.  libhybris remaps the *dlopen* `/vendor → /android/vendor` but does **not** hook `access()`; OHOS-side `/vendor/lib64/hw` did not exist → check fails → no mapper → abort.  N8.1's claim that native boot needs no `/vendor` binds was wrong — the LXC build's `lxc.mount.entry` binds of `/vendor/lib64/{hw,egl}` exist for exactly this.
+
+**Fix.**  `init-chainload.sh` Stage 3b — briefly remount `vendor_a` rw to `mkdir /vendor/lib64/{hw,egl}`, then bind `/android/vendor/lib64/hw` and `/android/vendor/lib64/egl` over them.  Only those two subdirs are bound (not all of `/vendor/lib64`) so Android libs don't poison OHOS's vendor linker namespace — same containment as the LXC config.  After this `allocator_host` stays alive, `render_service` gets buffers, **the OHOS lockscreen renders on the physical panel.**
+
+## N8.13 — touchscreen: panel is GT9886, driver not built (2026-05-15) — OPEN
+
+**Symptom.**  Lockscreen visible, but touch input dead.  `/dev/input/` had only `event0` (mtk-pmic-keys), `event1` (mtk-kpd), `event2` (Selection VKeyboard) — no touch panel.
+
+**Investigation.**
+- First guess `gt9966.ko` (the only Goodix touchscreen `.ko` the build produces) — bundled it + added `insmod` to `init.x23.cfg`.  It **loads** but creates no input device.
+- The touch controller is on **i2c bus 0 @ 0x5d**, device name `gt9886`, DT compatible **`goodix,gt9886`** — i.e. a Goodix **GT9886**, *not* GT9966.  The `gt9966` driver's `of_match` doesn't bind `goodix,gt9886`.  Wrong driver.
+- The kernel source **has** a GT9886 driver: `drivers/input/touchscreen/GT9886/` (`goodix_ts_core.c`, `goodix_ts_i2c.c`, …; its Makefile builds `gt9886.ko`).
+- It is **not built**.  `drivers/input/touchscreen/Makefile` builds the MTK touch dirs from the string list `CONFIG_TOUCHSCREEN_MTK_TOUCH`, and the Volla `gx4.config` pins it to **`"chipone-tddi"`** only (the line above it, commented out, is the stock `"GT9886 GT9896S NT36672C GT9916P"`).  Our X23 unit ships the Goodix GT9886 panel; Volla's config targets a chipone-panel batch.
+
+**Fix landed (2026-05-15).**
+1. `openharmony.config` (OHOS adaptation layer, merged last after `gx4.config`) sets `CONFIG_TOUCHSCREEN_MTK_TOUCH="GT9886"`.  **Only one MTK touch driver may be selected** — GT9886 and `chipone-tddi` both export `tpd_enter_tui`, so listing both fails `modpost` with *"exported twice"*.  Our X23 unit is GT9886-only.
+2. Kernel rebuilt → produces `gt9886.ko`; bundled in the `vendor_boot` overlay.
+3. `init.x23.cfg` pre-init `insmod /mnt/kmodules/gt9886.ko` (the wrong `gt9966.ko` line was removed; `gt9966.ko` removed from the overlay).  `gt9886.ko` link-deps: `mtk_disp_notify.ko` + `mtk_panel_ext.ko` — both already loaded by then (`mtk_panel_ext` is pulled in by the Mali stack at pre-init; `mtk_disp_notify` is in the chainload's 161-module set).
+
+**On-device result (2026-05-15):** `gt9886.ko` loads and **binds** to the touch controller — `/sys/bus/i2c/devices/0-005d/driver → .../i2c/drivers/GT9886`.  But `/dev/input/` still gains **no** touch `event` node and the driver emits no `dmesg`.
+
+**Still open — likely the `rt5133` GPIO-expander dependency.**  `/sys/kernel/debug/devices_deferred` lists `soc:odm:rt5133-gpio1/2/3` (a Richtek RT5133 regulator+GPIO-expander) and `mtk_ctd`.  The `touch` DT node declares `goodix,eint-gpio` + `goodix,reset-gpio`; if those GPIOs route through the rt5133 expander, the GT9886 probe cannot acquire its IRQ/reset lines and silently makes no input device.  `rt5133-regulator.ko` exists in the module tree — next step: trace the touch `eint-gpio`/`reset-gpio` phandles (eint-gpio = phandle 0x49) to their GPIO controller, load `rt5133-regulator.ko` (+ whatever resolves the `rt5133-gpio*` deferred probes), then re-check for the touch `event` node.  Same dependency-chain pattern as the Mali bring-up (§ N8.11).
 
 ## N8.6 — Expect Phase 8 stability bugs to reproduce
 
