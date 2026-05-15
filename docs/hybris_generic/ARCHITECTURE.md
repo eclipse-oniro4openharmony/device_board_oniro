@@ -50,7 +50,7 @@ Two pieces make this work:
     • modprobe vendor kernel modules
     • parse-android-dynparts → /dev/mapper/{system_a,vendor_a,…}
     • mount OHOS system_a at /root, vendor_a at /root/vendor
-    • mount Halium system/vendor at /root/android/{system,vendor}
+    • mount Halium system at /root/android, vendor at /root/android/vendor
     • bind /proc /sys /dev into /root
     • exec env OHOS_NATIVE_BOOT=1 chroot /root /system/bin/init …
         │
@@ -104,8 +104,8 @@ the initramfs. In order:
    `/dev/mapper/vendor_a`, etc.
 4. Mount OHOS `system_a` at `/root` (read-only) and `vendor_a` at
    `/root/vendor`.
-5. Mount the Halium `system`/`vendor` partitions at
-   `/root/android/{system,vendor}` (and `/halium-system`) — see §5.
+5. Mount the Halium `system` partition at `/root/android` and the
+   Halium `vendor` partition at `/root/android/vendor` — see §5.
 6. Pre-create `/root/dev/disk/by-partlabel/*` symlinks so OHOS init
    doesn't block waiting on ueventd.
 7. Bind-mount `/proc`, `/sys`, `/dev` into `/root`.
@@ -169,22 +169,26 @@ userspace roots:
 ├── system/  vendor/  sys_prod/  chip_prod/   OHOS partitions
 ├── data/                                     OHOS userdata (ext4)
 ├── dev/  proc/  sys/                          bound from initramfs
-├── halium-system/                            Halium Android root (full)
-└── android/
-    ├── system/   ← bind of /halium-system/system  (Halium /system content)
-    └── vendor/   ← Halium vendor_a                 (MTK HAL binaries)
+└── android/                                  Halium Android root (full)
+    ├── system/   ← inner Halium /system content (libhybris lib path)
+    └── vendor/   ← Halium vendor_a overmount    (MTK HAL binaries)
 ```
 
-Why both `/halium-system` *and* `/android/system`:
+The Halium `android-rootfs.img` is a *full* Android root — `system/`,
+`vendor/`, `init`, `data/`, etc. at its top level, with the real
+`/system` content one level down at `system/`. The chainload mounts
+that partition **once** at `/android`, which serves both consumers:
 
 - libhybris hardcodes `/android/system/lib64`, `/android/vendor/lib64`
   as Android-library search paths. OHOS-side services (`composer_host`,
-  `render_service`, …) that use libhybris find Android libs there.
-- The Halium `android-rootfs.img` is a *full* Android root — its real
-  `/system` content sits one level down at `system/`. So we mount the
-  partition at `/halium-system` and bind `/halium-system/system` over
-  `/android/system`. `androidd` later `pivot_root`s into
-  `/halium-system` (where `/system/bin/init` resolves correctly).
+  `render_service`, …) that use libhybris find Android libs there —
+  the partition's inner `system/` lands exactly at `/android/system`.
+- `androidd` `pivot_root`s the Halium guest NS into `/android`, so the
+  inner `system/` becomes `/system` and `/system/bin/init` resolves.
+
+`halium_vendor_a` overmounts the partition's own `/android/vendor`
+dir, so the MTK HALs are at `/android/vendor` from the OHOS side and
+at `/vendor` after the pivot.
 
 Additionally, `/vendor/lib64/{hw,egl}` on the OHOS side are bound from
 `/android/vendor/lib64/{hw,egl}` — Android's `libui` does a literal
@@ -201,8 +205,10 @@ two vendor cfg overlays imported by the stock `init.cfg`:
 
 - **`/vendor/etc/init.x23.cfg`** (`pre-init` job) — mounts `binderfs`,
   creates the `/dev/binder*` symlinks, `chmod 0666` the binder nodes,
-  creates the `/android/*` mount points, `insmod`s the 21-module Mali
-  GPU stack and the touch driver, `rfkill unblock all`.
+  mounts the property tmpfs, `insmod`s the 21-module Mali GPU stack
+  and the touch driver, `rfkill unblock all`. (The `/android` mount
+  point itself is created by `init-chainload.sh` before the chroot —
+  `/` is read-only by the time OHOS init runs.)
 - **`/vendor/etc/init.x23.usb.cfg`** — USB gadget / FunctionFS setup
   for hdc (see §10).
 
