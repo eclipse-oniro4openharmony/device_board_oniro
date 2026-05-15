@@ -45,7 +45,7 @@ vbmeta_a's chain-of-trust stays valid.
 | `device/board/oniro/hybris_generic/launcher/init-chainload.sh` | The chain-load `/init` (~150 LOC). |
 | `device/board/oniro/hybris_generic/kernel/x23/build_boot_img_chainload.sh` | Builder.  Inputs: `out/hybris_generic/backups/boot_a.bak` + the init script.  Output: `out/hybris_generic/boot-chainload.img`. |
 | `device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh` | Builds `out/hybris_generic/super.img` (system_a + vendor_a in LP format) using `lpmake`. |
-| `device/board/oniro/hybris_generic/utils/host/flash-native.sh` | Host-side: flash super (via fastbootd) + flash chainload (via LK fastboot). |
+| `device/board/oniro/hybris_generic/utils/host/flash-native.sh` | Host-side: flash super + boot_a chainload + (optional) vendor_boot_a, all from LK fastboot. |
 | `base/startup/init/services/init/standard/init_cmds.c` | `DoMkSandbox` skip under `OHOS_NATIVE_BOOT=1` — see below. |
 
 ---
@@ -196,12 +196,16 @@ ramdisk.  `cpio -idm` reads only one archive (stops at first
 `TRAILER!!!`), so the builder splits the LZ4 stream at every legacy frame
 magic and extracts each frame's cpio into the same staging dir.
 
-### Halium boot.img has fastbootd; our chainload doesn't
+### Flashing `super` does not need fastbootd
 
-To flash `super` (which requires fastbootd's dynamic-partition support):
-flash a Halium boot.img first → `fastboot reboot fastboot` → flash super
-→ `fastboot reboot bootloader` → flash chainload.  Encoded in
-`flash-native.sh`.
+`super` is a physical GPT partition, and `build_super_img.sh` emits a
+complete `lpmake` image (LP metadata + every sub-partition), so LK
+fastboot writes it raw — `fastboot flash super super.img` straight from
+LK fastboot.  fastbootd is only required to flash an *individual logical*
+partition (`fastboot flash system_a …`), which the flash flow never does.
+`flash-native.sh` therefore flashes `super`, `boot_a`, and `vendor_boot_a`
+in a single LK-fastboot pass, with no `reboot fastboot`/`reboot
+bootloader` round-trips.
 
 ### force `root:root` ownership in the repacked cpio
 
