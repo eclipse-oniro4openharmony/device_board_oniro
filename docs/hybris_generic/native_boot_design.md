@@ -46,11 +46,11 @@ A surprising amount of the heavy lifting is already done for `hybris_generic`. B
 | Kernel cmdline already carries `hardware=x23`, `ohos.boot.sn=...` | `device/board/oniro/hybris_generic/kernel/x23/patch/linux-5.10/volla-vidofnir.patch:12` | OHOS init second-stage already finds `/vendor/etc/fstab.x23` via `${ohos.boot.hardware}`. |
 | `selinux=false`, `seccomp=false` | `vendor/oniro/hybris_generic/config.json:12-13` | Native boot inherits this; no further action. |
 | 29 `InContainerMode()` guards in init | `base/startup/init/` (count from `grep -rn`, not 27 as old plan claimed) | All 29 default-take the *native* path when the `container=` env is unset; inverting the boot mode auto-runs them. |
-| Phase 10 WiFi via HDI WPA + `chip_interface_service` | `phase10_wifi_support.md` | N9.2 collapses to "load wlan/bt firmware + start `wpa_host` + `chip_interface_service`"; no new Android WiFi HAL needed. |
-| Phase 13B native ALSA via `libasound`+`audio_host` | `phase13_audio_support.md` | N9.5 collapses to "ensure `/dev/snd/*` exists + start `audio_host`"; no Android Audio HAL needed. |
-| Backlight via sysfs from `composer_host` (Phase 11 Fix 1) | `phase11_power_off_and_backlight_plan.md` | Works untouched on native boot; no LXC bind required. |
-| Power-button → power manager (Phase 8.15) | `phase8_system_stability.md` §8.15 | The `systemd-logind HandlePowerKey=ignore` workaround disappears — no Ubuntu Touch logind to fight. Pure win. |
-| `/storage/Users` sharefs workaround (Phase 12) | `phase12_sharefs_user_files.md` | LXC bind disappears; replace with the *proper* port of `fs/sharefs/` to the X23/mimir kernel — a Phase-2-style kernel patch — see N9.10. |
+| Phase 10 WiFi via HDI WPA + `chip_interface_service` | `legacy_wifi_support.md` | N9.2 collapses to "load wlan/bt firmware + start `wpa_host` + `chip_interface_service`"; no new Android WiFi HAL needed. |
+| Phase 13B native ALSA via `libasound`+`audio_host` | `legacy_audio_support.md` | N9.5 collapses to "ensure `/dev/snd/*` exists + start `audio_host`"; no Android Audio HAL needed. |
+| Backlight via sysfs from `composer_host` (Phase 11 Fix 1) | `legacy_power_off_and_backlight.md` | Works untouched on native boot; no LXC bind required. |
+| Power-button → power manager (Phase 8.15) | `legacy_system_stability.md` §8.15 | The `systemd-logind HandlePowerKey=ignore` workaround disappears — no Ubuntu Touch logind to fight. Pure win. |
+| `/storage/Users` sharefs workaround (Phase 12) | `legacy_sharefs_user_files.md` | LXC bind disappears; replace with the *proper* port of `fs/sharefs/` to the X23/mimir kernel — a Phase-2-style kernel patch — see N9.10. |
 
 Net: **the residual native-boot work is Phase N1 (`boot.img` repack), N2 (validate first-stage on bare metal), N3 (write fstab), N4 (replace LXC with a 200-line launcher), N6 (binder device flip), N7 (HDC), N10 (recovery)**. Phases N5/N8 are mostly cfg + path adjustments, not new code. Phase N9 is now mostly firmware loading + the host-side daemons whose work Ubuntu Touch was hiding.
 
