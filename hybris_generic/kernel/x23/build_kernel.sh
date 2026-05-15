@@ -102,6 +102,44 @@ cd "$KERNEL_TREE"
 export PRODUCT_PATH=vendor/oniro/hybris_generic
 ./build.sh -b build-dir -k
 
+# ---------------------------------------------------------------------------
+# Stage the extra GPU + touch kernel modules into the vendor_boot overlay.
+#
+# These modules (Mali GPU stack, MTK coprocessors, GT9886 touch) are NOT
+# in Halium's `modules.load`, so `make-bootimage.sh`'s dep-resolution
+# never copies them into vendor_boot.  We need them bundled anyway —
+# OHOS init.x23.cfg `insmod`s them from /mnt/kmodules at pre-init (the
+# chainload stashes vendor_boot's /lib/modules there).  See
+# native_boot_plan/phase_n8_graphics_native.md §N8.11 / §N8.13.
+#
+# The module *list* (extra-modules.list) is tracked in git; the .ko
+# binaries are NOT — they are build artifacts, regenerated here every
+# build so their vermagic always matches the freshly-built kernel.
+# Two-pass: the first `./build.sh -k` above compiled the kernel + a
+# vendor_boot WITHOUT these .ko; we copy them into the overlay now and
+# re-run so the second-pass vendor_boot includes them (kernel is cached,
+# so the second pass only re-assembles the boot images — fast).
+OVERLAY_MODS="$KERNEL_TREE/vendor-ramdisk-overlay/lib/modules"
+EXTRA_LIST="$HERE/extra-modules.list"
+BUILT_MODS="$(find "$KERNEL_TREE/build-dir/tmp/system/lib/modules" \
+                   -maxdepth 1 -type d -name '5.*' | head -1)"
+if [ -f "$EXTRA_LIST" ] && [ -n "$BUILT_MODS" ]; then
+    echo "Staging extra GPU/touch modules into vendor_boot overlay..."
+    staged=0
+    while read -r mod; do
+        case "$mod" in ''|'#'*) continue ;; esac
+        src="$(find "$BUILT_MODS" -name "$mod" -type f | head -1)"
+        if [ -n "$src" ]; then
+            cp -f "$src" "$OVERLAY_MODS/$mod"
+            staged=$((staged + 1))
+        else
+            echo "  WARNING: extra module $mod not found in build output"
+        fi
+    done < "$EXTRA_LIST"
+    echo "  staged $staged extra modules; re-assembling vendor_boot..."
+    ./build.sh -b build-dir -k
+fi
+
 echo "Copying artifacts to $OUT_DIR..."
 mkdir -p "$OUT_DIR"
 cp "$KERNEL_TREE/build-dir/tmp/partitions/boot.img" "$OUT_DIR/"

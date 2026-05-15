@@ -54,6 +54,13 @@ if [ -f modules.load ]; then
         set -- $line
         [ "$1" = "#" ] && continue
         [ -n "$1" ] || continue
+        # Skip the Mali GPU stack here — loading mali_kbase this early
+        # (before OHOS userspace) panics the kernel.  The .ko files stay
+        # bundled in /lib/modules; OHOS loads them post-boot via
+        # androidd once the system is up (see phase_n8 §N8.11).
+        case "$1" in
+            mali_*|mali-*) continue ;;
+        esac
         modprobe -a "$1" 2>/dev/null || true
     done < modules.load
 fi
@@ -155,9 +162,9 @@ if mount -o remount,rw /root 2>/dev/null; then
     # build has no separate userdata partition mounted, so we can't
     # back it with a real RW dir anyway).
     mkdir -p /root/android /root/android/system /root/android/vendor \
-             /root/halium-system /root/apex 2>/dev/null
+             /root/halium-system /root/apex /root/storage 2>/dev/null
     chmod 0755 /root/android /root/android/system /root/android/vendor \
-               /root/halium-system /root/apex 2>/dev/null
+               /root/halium-system /root/apex /root/storage 2>/dev/null
 
     # Bug 8.18 — sandbox configs ship at 0640 from upstream;
     # nwebspawn (uid 3081) needs 0644 to load them.
@@ -220,6 +227,34 @@ if [ -b /dev/mapper/halium_system_a ] && [ -b /dev/mapper/halium_vendor_a ]; the
         mount --bind /root/halium-system/system/apex /root/apex 2>/dev/null \
             || echo "[init-chainload] bind /halium-system/system/apex→/apex failed"
     fi
+
+    # Expose the Android gralloc/EGL HAL dirs at OHOS-side /vendor/lib64/{hw,egl}.
+    # Android's libui GraphicBufferMapper (used by allocator_host's libhybris
+    # gralloc bridge) loads the passthrough mapper from a HARDCODED
+    # /vendor/lib64/hw/android.hardware.graphics.mapper@4.0-impl*.so and does
+    # an access() existence check on that literal path *before* dlopen.
+    # libhybris remaps the dlopen to /android/vendor/... but does NOT hook
+    # access(), so without the path physically existing the check fails,
+    # GraphicBufferMapper finds no Gralloc4/3/2 mapper and LOG_ALWAYS_FATAL
+    # aborts allocator_host (SIGABRT in GraphicBufferMapper ctor) — every
+    # render_service AllocMem then fails with "allocator_service not found"
+    # and nothing reaches the panel.  The LXC build solved this with
+    # lxc.mount.entry binds of /vendor/lib64/{hw,egl}; native boot needs the
+    # equivalent.  Only these two SUBDIRS are bound (not all of
+    # /vendor/lib64) so Android libs don't poison OHOS's own vendor linker
+    # namespace — same containment the LXC config relies on.
+    mount -o remount,rw /root/vendor 2>/dev/null && {
+        mkdir -p /root/vendor/lib64/hw /root/vendor/lib64/egl 2>/dev/null
+        mount -o remount,ro /root/vendor 2>/dev/null
+    }
+    if [ -d /root/vendor/lib64/hw ] && [ -d /root/android/vendor/lib64/hw ]; then
+        mount --bind /root/android/vendor/lib64/hw /root/vendor/lib64/hw 2>/dev/null \
+            || echo "[init-chainload] bind vendor/lib64/hw failed"
+    fi
+    if [ -d /root/vendor/lib64/egl ] && [ -d /root/android/vendor/lib64/egl ]; then
+        mount --bind /root/android/vendor/lib64/egl /root/vendor/lib64/egl 2>/dev/null \
+            || echo "[init-chainload] bind vendor/lib64/egl failed"
+    fi
 else
     echo "[init-chainload] halium_{system,vendor}_a absent — graphics disabled"
 fi
@@ -242,6 +277,47 @@ for ueventf in /sys/class/block/*/uevent; do
     [ -n "$partname" ] && [ -n "$devname" ] && \
         ln -sf "/dev/$devname" "/root/dev/disk/by-partlabel/$partname"
 done
+
+# ---------------------------------------------------------------------------
+# Stage 4b — pre-mount tmpfs + selinuxfs that OHOS init's FirstStageMain
+# would normally set up via MountBasicFs() (base/startup/init/services/
+# init/standard/device.c).  We exec'd into second_stage, so FirstStageMain
+# never ran — without these, /mnt and /storage stay on the RO root FS,
+# `mkdir /mnt/sandbox` (appspawn.cfg boot job) fails, and every app spawn
+# bind-mount under /mnt/sandbox/<userId>/<bundleName>/ hits ENOENT.  The
+# launcher then crash-loops in appspawn's DoAppSandboxMountOnce and OHOS
+# never paints over the LK splash.
+#
+# selinuxfs at /sys/fs/selinux — kernel cmdline `lsm=selinux` (set in
+# build_boot_img_chainload.sh) registers SELinux but does NOT auto-mount
+# selinuxfs.  We mount it on chainload-side /sys (which then bind-binds
+# into /root/sys below); libselinux's selinuxfs_exists() in OHOS-side
+# processes can then find it.  The Halium NS gets its own selinuxfs
+# mount via androidd.c::child_main (since androidd makes a fresh sysfs
+# mount for the Halium NS, that path isn't shared with the OHOS view).
+# ---------------------------------------------------------------------------
+mount -t tmpfs -o nosuid,mode=0755 tmpfs /root/mnt       2>/dev/null \
+    || echo "[init-chainload] mount tmpfs /mnt failed (non-fatal)"
+mount --make-slave /root/mnt 2>/dev/null
+mkdir /root/mnt/data 2>/dev/null
+mount -t tmpfs -o nosuid,mode=0755 tmpfs /root/mnt/data  2>/dev/null \
+    || echo "[init-chainload] mount tmpfs /mnt/data failed (non-fatal)"
+mount --make-shared /root/mnt/data 2>/dev/null
+mount -t tmpfs -o nosuid,noexec,nodev,mode=0755 tmpfs /root/storage 2>/dev/null \
+    || echo "[init-chainload] mount tmpfs /storage failed (non-fatal)"
+
+# Stash the vendor_boot kernel modules into an OHOS-visible tmpfs.  The
+# chainload's /lib/modules lives in the initramfs and is unreachable
+# after the chroot; OHOS-side code that needs to insmod modules
+# post-boot (the Mali GPU stack — see Stage 1 skip) loads them from
+# here.  /root/mnt is a tmpfs we just mounted, visible as /mnt in OHOS.
+mkdir /root/mnt/kmodules 2>/dev/null
+cp -a /lib/modules/. /root/mnt/kmodules/ 2>/dev/null \
+    && echo "[init-chainload] stashed kernel modules in /mnt/kmodules" \
+    || echo "[init-chainload] stash kmodules failed (non-fatal)"
+
+mount -t selinuxfs none /sys/fs/selinux 2>/dev/null \
+    || echo "[init-chainload] mount selinuxfs failed — was lsm=selinux in cmdline?"
 
 # ---------------------------------------------------------------------------
 # Stage 5 — bind-mount /proc /sys /dev into the chroot.
