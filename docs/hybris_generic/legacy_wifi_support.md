@@ -1,5 +1,11 @@
 # Phase 10: WiFi Support
 
+> **Legacy (LXC-era) document.** Describes the original OHOS-as-LXC-container
+> path, which is **no longer maintained** — the project now boots OHOS
+> natively (no Ubuntu Touch host, no LXC). Kept as a reference for the HAL /
+> driver bring-up detail (libhybris, graphics, audio, WiFi, …) that still
+> applies under native boot. For current status start at [README.md](README.md).
+
 ## Status: ✅ Complete
 
 ---

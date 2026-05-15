@@ -1,5 +1,11 @@
 # Phase 2: Kernel Adaptation (Volla X23)
 
+> **Legacy (LXC-era) document.** Describes the original OHOS-as-LXC-container
+> path, which is **no longer maintained** — the project now boots OHOS
+> natively (no Ubuntu Touch host, no LXC). Kept as a reference for the HAL /
+> driver bring-up detail (libhybris, graphics, audio, WiFi, …) that still
+> applies under native boot. For current status start at [README.md](README.md).
+
 ### 2.1 Initialize Kernel Workspace
 - [x] **Action:** Clone the Volla X23 kernel repository into the kernel tree and prepare the build environment.
 - **Commands:**

@@ -1,5 +1,11 @@
 # Power Off & Backlight Control — Investigation and Plan
 
+> **Legacy (LXC-era) document.** Describes the original OHOS-as-LXC-container
+> path, which is **no longer maintained** — the project now boots OHOS
+> natively (no Ubuntu Touch host, no LXC). Kept as a reference for the HAL /
+> driver bring-up detail (libhybris, graphics, audio, WiFi, …) that still
+> applies under native boot. For current status start at [README.md](README.md).
+
 Two related bugs observed after the Phase 8.15 power-button fix:
 
 1. **Screen goes black on power button press, but the panel backlight stays on.**
@@ -194,7 +200,7 @@ The plan treated the `WriteBacklight(0)` call inside `SetDisplayPowerStatus(POWE
        ```
    - Persist these on the writable data partition using the same bind-mount pattern as `ohos-logind-powerkey.service` in Phase 8.15.
 
-5. **Documentation:** add a Bug 8.19 entry to `phase8_system_stability.md` once deployed, and update `MEMORY.md`'s `project_hybris_stability_status.md` accordingly.
+5. **Documentation:** add a Bug 8.19 entry to `legacy_system_stability.md` once deployed, and update `MEMORY.md`'s `project_hybris_stability_status.md` accordingly.
 
 **Why this is safe:**
 - If OHOS crashes instead of cleanly shutting down, the flag file is empty → post-stop script exits 0 → host stays up. Good.
@@ -236,7 +242,7 @@ All of Fix 2 code written and `librebootmodule.z.so` built cleanly via `./build.
    - Power menu → Restart → host reboots.
    - `hdc shell "kill -9 1"` → host stays up.
    - Host `sudo lxc-stop -k -n openharmony` → host stays up.
-4. If all four pass: add a Bug 8.19 entry to `phase8_system_stability.md`, update `MEMORY.md`'s `project_hybris_stability_status.md`, and flip the status line at the top of this file to "implemented, deployed, and verified".
+4. If all four pass: add a Bug 8.19 entry to `legacy_system_stability.md`, update `MEMORY.md`'s `project_hybris_stability_status.md`, and flip the status line at the top of this file to "implemented, deployed, and verified".
 
 **Safety notes for the first test run:**
 - Unplug anything plugged into the device you don't want cycled. First test will either power the phone off (success) or hang the container (failure).
@@ -250,4 +256,4 @@ All of Fix 2 code written and `librebootmodule.z.so` built cleanly via `./build.
 1. ~~Wait for the current background build to finish.~~
 2. ~~**Fix 1 (backlight) first**~~ — **done 2026-04-10.** See "Outcome" block under Fix 1 above.
 3. ~~**Fix 2 (shutdown propagation) next**~~ — **code written and built 2026-04-10.** See "Outcome" block under Fix 2 above. Touches init + LXC config + deploy script; on-device test still pending (holds the phone's power state, wants user sign-off before the first run).
-4. After Fix 2 on-device verification: update `phase8_system_stability.md` (add Bug 8.19 entry) + memory index. Fix 1 is small enough that its record lives in this plan doc; it does not need its own bug number unless the mimir tablet verification surfaces a follow-up.
+4. After Fix 2 on-device verification: update `legacy_system_stability.md` (add Bug 8.19 entry) + memory index. Fix 1 is small enough that its record lives in this plan doc; it does not need its own bug number unless the mimir tablet verification surfaces a follow-up.
