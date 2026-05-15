@@ -11,51 +11,64 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# Roll back the commits created by do_patch.sh, driven by the
+# .patch_state file it wrote (repo<TAB>pre_sha<TAB>post_sha per line).
+#
+# For each repo this verifies, BEFORE touching anything, that:
+#   * the working tree is clean (reset --hard would discard dirty work);
+#   * HEAD still equals the recorded post-patch SHA (i.e. nothing was
+#     committed or amended on top since do_patch.sh ran).
+# If any repo has diverged the script aborts without changing a thing.
+# When all checks pass it resets each repo to its recorded pre-patch SHA.
 
-PATCH_DIR=$(cd $(dirname $0);pwd)/patches
-SOURCE_ROOT_DIR=$PATCH_DIR/../../../../../../
+set -e
 
-# Initialize an empty array to store the paths of found .patch files
-declare -a patch_files
+SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
+PATCH_DIR="$SCRIPT_DIR/patches"
+SOURCE_ROOT_DIR="$(cd "$PATCH_DIR/../../../../../../"; pwd)"
+STATE_FILE="$SCRIPT_DIR/.patch_state"
 
-# Use the find command to search for all .patch files in the current directory and its subdirectories
-# and add their relative paths to the array
-while IFS= read -r -d '' file; do
-    patch_files+=("$file")
-done < <(find $PATCH_DIR -type f -name "*.patch" -print0 | sort)
+if [[ ! -s "$STATE_FILE" ]]; then
+    echo "ERROR: no $STATE_FILE — do_patch.sh has not been run (nothing to undo)" >&2
+    exit 1
+fi
 
-# Iterate through the array and output the relative path of each .patch file
-for path in "${patch_files[@]}"; do
-    # Use realpath --relative-to to compute the relative path (if available)
-    if command -v realpath &> /dev/null && realpath --relative-to="$PATCH_DIR" "$path" 2>/dev/null; then
-        relative_path="$(realpath --relative-to="$PATCH_DIR" $(dirname $path))"
-    else
-        # If realpath --relative-to is not available, compute the relative path manually
-        # Note: This method may be less accurate than realpath, especially when dealing with symlinks
-        common_prefix=""
-        # Find the common prefix of the base directory and the path (simplified case, assumes no symlinks)
-        while [[ "$path" != "$PATCH_DIR" && "$path" != "${path%/*}" ]]; do
-            if [[ "$PATCH_DIR" == "${PATCH_DIR%/*}"*"${path##*/}" ]]; then
-                # The common prefix is the base directory minus its last directory level
-                common_prefix="${PATCH_DIR%/*}"
-                break
-            fi
-            path="${path%/*}"
-        done
-        # Compute the relative path by removing the common prefix and adding appropriate ../
-        relative_parts=()
-        while [[ "$path" != "$common_prefix" ]]; do
-            relative_parts+=("../")
-            path="${path%/*}"
-        done
-        # Combine to form the final relative path
-        relative_path="${relative_parts[*]#/}"
-        # Remove extra leading ../ if the base directory is the path itself
-        relative_path="${relative_path#../}"
+# Pass 1 — verify every repo; mutate nothing.
+errors=0
+while IFS=$'\t' read -r repo_rel pre_sha post_sha; do
+    [[ -z "$repo_rel" ]] && continue
+    repo_path="$SOURCE_ROOT_DIR/$repo_rel"
+
+    if [[ ! -d "$repo_path/.git" && ! -f "$repo_path/.git" ]]; then
+        echo "ERROR: $repo_path is not a git repository" >&2
+        errors=1; continue
     fi
-    # Output the relative path
-    echo "patching $path"
-    cd $SOURCE_ROOT_DIR/$relative_path
-    patch -R -p1 < $path
-done
+    if [[ -n "$(git -C "$repo_path" status --porcelain)" ]]; then
+        echo "ERROR: $repo_rel has uncommitted changes — reset --hard would discard them" >&2
+        errors=1; continue
+    fi
+    cur="$(git -C "$repo_path" rev-parse HEAD)"
+    if [[ "$cur" != "$post_sha" ]]; then
+        echo "ERROR: $repo_rel HEAD has moved since do_patch.sh ran" >&2
+        echo "       expected ${post_sha:0:12}, found ${cur:0:12}" >&2
+        echo "       (new commits or an amend on top — resolve manually)" >&2
+        errors=1; continue
+    fi
+done < "$STATE_FILE"
 
+if [[ "$errors" -ne 0 ]]; then
+    echo "Aborting — no repositories were changed." >&2
+    exit 1
+fi
+
+# Pass 2 — all clear, roll back to each recorded pre-patch SHA.
+while IFS=$'\t' read -r repo_rel pre_sha post_sha; do
+    [[ -z "$repo_rel" ]] && continue
+    repo_path="$SOURCE_ROOT_DIR/$repo_rel"
+    echo "Reverting $repo_rel to ${pre_sha:0:12}"
+    git -C "$repo_path" reset --hard "$pre_sha"
+done < "$STATE_FILE"
+
+rm -f "$STATE_FILE"
+echo "Done. $STATE_FILE removed."
