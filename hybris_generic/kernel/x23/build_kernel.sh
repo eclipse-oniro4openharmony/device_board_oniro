@@ -105,7 +105,7 @@ export PRODUCT_PATH=vendor/oniro/hybris_generic
 # ---------------------------------------------------------------------------
 # Stage the extra GPU + touch kernel modules into the vendor_boot overlay.
 #
-# These modules (Mali GPU stack, MTK coprocessors, GT9886 touch) are NOT
+# These modules (Mali GPU stack, MTK coprocessors, chipone-tddi touch) are NOT
 # in Halium's `modules.load`, so `make-bootimage.sh`'s dep-resolution
 # never copies them into vendor_boot.  We need them bundled anyway —
 # OHOS init.x23.cfg `insmod`s them from /mnt/kmodules at pre-init (the
