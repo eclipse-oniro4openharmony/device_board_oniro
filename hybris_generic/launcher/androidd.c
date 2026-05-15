@@ -415,6 +415,34 @@ static int child_main(void *arg)
               MS_NODEV | MS_NOEXEC | MS_NOSUID, NULL) < 0)
         die("mount sysfs: %s", strerror(errno));
 
+    /* selinuxfs — the LSM cmdline `lsm=selinux` (set in
+     * build_boot_img_chainload.sh) gets SELinux loaded into the kernel,
+     * but the kernel does NOT auto-mount selinuxfs.  We need it for
+     * libselinux's `selinux_status_open()` and `getcon()` to succeed
+     * inside the Halium NS — without this, `vndservicemanager` aborts
+     * with `Check failed: selinux_status_open(true) >= 0` immediately
+     * on startup, the vndbinder context manager dies, and every Halium
+     * HAL service in `class hal` (composer@2.3-service, allocator@4.0,
+     * etc.) cycles every 4–6 s as their hwbinder lookups fail.  See
+     * phase_n8_graphics_native.md §N8.9.2 for the bisection.
+     *
+     * Mount in this fresh-/sys Halium-NS view; OHOS-side selinuxfs is
+     * mounted separately by init.x23.cfg (so OHOS-side libhybris
+     * callers also see it after the libhybris namespace switches into
+     * the Halium FS view).
+     *
+     * No policy is loaded.  Without a policy, all SELinux access
+     * checks pass (kernel default), which is exactly the permissive
+     * mode behaviour we want — `androidboot.selinux=permissive`
+     * couldn't be threaded through LK's truncated cmdline anyway
+     * (only one space-free token survives the LK boot.img-cmdline
+     * insertion). */
+    if (mkdir_p(ANDROID_ROOT "/sys/fs/selinux", 0755) < 0) { }
+    if (mount("selinuxfs", ANDROID_ROOT "/sys/fs/selinux", "selinuxfs",
+              0, NULL) < 0)
+        logmsg("mount selinuxfs: %s (non-fatal — was `lsm=selinux` "
+               "passed in /proc/cmdline?)", strerror(errno));
+
     /* Bind halium_vendor_a (currently mounted at /android/vendor from
      * OHOS PoV — see chainload Stage 3b) ONTO the halium rootfs's
      * /vendor.  After pivot_root into ANDROID_ROOT (= /android/system),
