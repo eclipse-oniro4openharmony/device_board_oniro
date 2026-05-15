@@ -1,0 +1,56 @@
+# Extra GPU/touch kernel modules staged into vendor_boot by
+# device/board/oniro/hybris_generic/kernel/x23/build_kernel.sh.
+# The .ko binaries are gitignored (build artifacts); this list is the
+# tracked source of truth. See phase_n8_graphics_native.md N8.11/N8.13.
+aee_aed.ko
+clk-common.ko
+cmdq_helper_inf.ko
+device-apc-common.ko
+emi.ko
+emi-mpu.ko
+fhctl.ko
+ged.ko
+gpueb.ko
+gt9886.ko
+iommu_debug.ko
+irq-dbg.ko
+leds-mtk.ko
+mali_kbase_mt6789.ko
+mali_mgm_.ko
+mali_prot_alloc_.ko
+mcupm.ko
+mediatek-drm.ko
+mmprofile.ko
+mmqos-common.ko
+mrdump.ko
+mtk-cmdq-drv-ext.ko
+mtk_disp_notify.ko
+mtk_dramc.ko
+mtk_dynamic_loading_throttling.ko
+mtk_gpufreq_mt6789.ko
+mtk_gpufreq_wrapper.ko
+mtk_gpu_hal.ko
+mtk_gpu_qos.ko
+mtk-icc-core.ko
+mtk_low_battery_throttling.ko
+mtk-mbox.ko
+mtk_mdpm.ko
+mtk-mmdvfs-debug.ko
+mtk-mmdvfs.ko
+mtk-mml.ko
+mtk_panel_ext.ko
+mtk_pbm.ko
+mtk_qos.ko
+mtk_rpmsg_mbox.ko
+mtk_slbc.ko
+mtk-smi-dbg.ko
+mtk-smi.ko
+mtk-ssc.ko
+mtk_sync.ko
+mtk_tinysys_ipi.ko
+pmic_lbat_service.ko
+pmic_lvsys_notify.ko
+sspm_v3.ko
+system_heap.ko
+tinysys-scmi.ko
+vcp_status.ko
