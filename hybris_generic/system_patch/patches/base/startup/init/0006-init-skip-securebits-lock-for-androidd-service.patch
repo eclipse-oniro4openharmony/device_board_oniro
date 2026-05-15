@@ -1,0 +1,72 @@
+From 2a8b877dd7b2bd39596cefe9fd841ab62e748464 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 13 May 2026 20:45:17 +0000
+Subject: [PATCH 6/6] init: skip securebits lock for androidd service
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+OHOS init's KeepCapability() sets SECBIT_KEEP_CAPS_LOCKED on every
+service.  This is permanent — the linux capabilities(7) "locked"
+bits cannot be unset.  When that bit is inherited by a service that
+in turn fork+execs another init binary (e.g. Halium 12's android
+init via androidd in the hybris_generic native-boot path), that
+inner init can no longer toggle SECBIT_KEEP_CAPS for its own child
+services that declare a `capabilities` directive — kernel returns
+EPERM on PR_SET_SECUREBITS, init's pre-exec setup fails, and the
+service exits with WEXITSTATUS=6.
+
+Fix: name-check "androidd" in KeepCapability() and skip the
+PR_SET_SECUREBITS call entirely for that service.  This leaves
+androidd's securebits at 0, so when Halium init forks logd / netd /
+etc. it can set its own KEEP_CAPS|KEEP_CAPS_LOCKED dance freely.
+
+Verified on Volla X23 via a static aarch64 probe binary
+(`logd_probe.c`) that simulates Halium init's pre-exec setup:
+pre-fix PR_GET_SECUREBITS=0x20 → PR_SET_SECUREBITS(0x30) rc=-1
+post-fix PR_GET_SECUREBITS=0x0  → PR_SET_SECUREBITS(0x30) rc=0.
+
+Full root-cause writeup in
+device/board/oniro/docs/hybris_generic/native_boot_plan/phase_n4_androidd.md
+"2026-05-14 PM" section.
+
+Change-Id: I8fa0949cfdce009345c224a03c2eabe07e43dded
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/init/adapter/init_adapter.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/services/init/adapter/init_adapter.c b/services/init/adapter/init_adapter.c
+index f086b7ab..c90ad255 100644
+--- a/services/init/adapter/init_adapter.c
++++ b/services/init/adapter/init_adapter.c
+@@ -16,6 +16,7 @@
+ 
+ #include <errno.h>
+ #include <semaphore.h>
++#include <string.h>
+ #include <sys/prctl.h>
+ #include <unistd.h>
+ #if defined OHOS_LITE && !defined __LINUX__
+@@ -39,6 +40,18 @@ int KeepCapability(const Service *service)
+         return 0;
+ #else
+ #ifndef OHOS_LITE
++    /* Native-boot bring-up (hybris_generic): services that fork+exec a
++     * foreign init (Halium 12's android-style init via androidd) must
++     * leave securebits unlocked so the inner init can run its own
++     * PR_SET_KEEPCAPS / PR_SET_SECUREBITS dance for its child services
++     * (logd, netd, …).  Without this skip, SECBIT_KEEP_CAPS_LOCKED would
++     * be set on androidd, causing every Halium HAL service that has a
++     * `capabilities` directive to fail PR_SET_SECUREBITS with EPERM and
++     * exit with status 6 in init's pre-exec setup. */
++    if (service != NULL && service->name != NULL &&
++        strcmp(service->name, "androidd") == 0) {
++        return 0;
++    }
+     if (service->attribute & SERVICE_ATTR_SETUID) {
+         if (prctl(PR_SET_SECUREBITS, SECBIT_NO_SETUID_FIXUP | SECBIT_NO_SETUID_FIXUP_LOCKED)) {
+             INIT_LOGE("prctl PR_SET_SECUREBITS failed: %d", errno);
+-- 
+2.50.1
+

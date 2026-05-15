@@ -1,7 +1,7 @@
 From 5e91734c0aab1b0bbf78e3b12420977f69e0e94d Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:36:59 +0000
-Subject: [PATCH 3/5] init: propagate container shutdown/reboot to host via
+Subject: [PATCH 3/6] init: propagate container shutdown/reboot to host via
  flag file
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
