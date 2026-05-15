@@ -1,2 +1,3 @@
 *.cmd
 *.[oad]
+hybris_generic/system_patch/.patch_state
