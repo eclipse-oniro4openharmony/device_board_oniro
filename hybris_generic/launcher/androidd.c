@@ -7,8 +7,8 @@
  * Runs as an OHOS init service.  Provisions an `android-binder` device on
  * the host binderfs, clones into a child PID/mount/UTS namespace with the
  * IPC (hwbinder) and network namespaces left shared with OHOS, sets up
- * a Halium-style /dev tree, binds vendor + tmpfs /data, pivot_roots into
- * /android/system (the halium android-rootfs.img root), and `exec`s
+ * a Halium-style /dev tree, mounts a tmpfs /data, pivot_roots into
+ * /android (the halium android-rootfs.img root), and `exec`s
  * Halium 12's stage-2 init at /system/bin/init.
  *
  * The parent stays in the OHOS root namespace and runs a watchdog that
@@ -61,35 +61,29 @@
  * The Halium android-rootfs.img is shaped like a *full* Android root
  * (not just /system content): the partition's root has `/system`,
  * `/vendor`, `/init`, `/data`, etc., and `/bin -> /system/bin` as
- * absolute symlinks.  When we mount halium_system_a at
- * /android/system from OHOS init's PoV, the halium rootfs root is
- * therefore at /android/system/ (NOT /android/).  We pivot into
- * /android/system so Halium init sees its expected layout — /vendor
- * for halium_vendor_a, /system for the in-tree halium /system dir,
- * etc.
+ * absolute symlinks.  The chainload mounts halium_system_a at
+ * /android (see init-chainload.sh Stage 3b), so the halium rootfs
+ * root is /android/ and its inner Android /system content is at
+ * /android/system/.
  *
- * /android (the OHOS-visible mount-points dir) is used by OHOS-side
- * libhybris callers via env vars (HYBRIS_LD_LIBRARY_PATH=
+ * ANDROID_ROOT is that partition root.  We pivot the Halium NS into
+ * ANDROID_ROOT so Halium init finds itself at /system/bin/init
+ * post-pivot (where the inner system/ subdir becomes /system) and
+ * /vendor resolves to halium_vendor_a.  All Halium-NS mount setup
+ * (/dev, /data, ...) happens under ANDROID_ROOT pre-pivot.
+ *
+ * /android is also the OHOS-visible path: OHOS-side libhybris callers
+ * use env vars (HYBRIS_LD_LIBRARY_PATH=
  * /android/vendor/lib64:/android/system/lib64) — those keep working
  * from the OHOS namespace because the mounts remain visible there.
- * The pivot here is only for the Halium guest's view.
- */
-/* ANDROID_ROOT is the OUTER halium_system_a partition root (acct/,
- * apex/, bin/, system/, ...) — the dynamic-partition image's literal
- * top-level FHS.  We pivot the Halium NS into ANDROID_ROOT so Halium
- * init finds itself at /system/bin/init post-pivot (where the inner
- * system/ subdir becomes /system).  All Halium-NS mount setup (/dev,
- * /vendor, /data, ...) happens under ANDROID_ROOT pre-pivot.
+ * A single mount at /android serves both views; the pivot here is
+ * only for the Halium guest.
  *
- * Pre-2026-05-14 this was "/android/system" — the chainload mounted
- * halium_system_a directly there.  We now bind the inner Android
- * /system content over /android/system (so the OHOS-side libhybris
- * sees its hardcoded /android/system/lib64 etc., matching the LXC
- * build convention), and keep the outer partition root mounted at
- * /halium-system for Halium-NS pivot use.  See init-chainload.sh
- * Stage 3b for the mount layout. */
-#define ANDROID_ROOT       "/halium-system"
-#define OHOS_HALIUM_VENDOR "/android/vendor"
+ * halium_vendor_a is overmounted on the partition's own /vendor dir
+ * by the chainload, so /vendor is already in place after the pivot —
+ * androidd does no separate vendor bind.
+ */
+#define ANDROID_ROOT       "/android"
 #define BINDERFS_CONTROL   "/dev/binderfs/binder-control"
 #define ANDROID_BINDER     "/dev/binderfs/android-binder"
 #define HWBINDER           "/dev/binderfs/hwbinder"
@@ -443,16 +437,11 @@ static int child_main(void *arg)
         logmsg("mount selinuxfs: %s (non-fatal — was `lsm=selinux` "
                "passed in /proc/cmdline?)", strerror(errno));
 
-    /* Bind halium_vendor_a (currently mounted at /android/vendor from
-     * OHOS PoV — see chainload Stage 3b) ONTO the halium rootfs's
-     * /vendor.  After pivot_root into ANDROID_ROOT (= /android/system),
-     * the halium guest will see this as its /vendor — exactly what
-     * the rc files under /system/etc/init/ reference (/vendor/lib64,
-     * /vendor/bin/hw, ...). */
-    if (mount(OHOS_HALIUM_VENDOR, ANDROID_ROOT "/vendor",
-              NULL, MS_BIND | MS_REC, NULL) < 0)
-        die("bind %s -> %s/vendor: %s",
-            OHOS_HALIUM_VENDOR, ANDROID_ROOT, strerror(errno));
+    /* halium_vendor_a is already overmounted on ANDROID_ROOT/vendor by
+     * the chainload (Stage 3b) and inherited into this NS via the
+     * clone — after pivot_root into ANDROID_ROOT it becomes the
+     * guest's /vendor (what the rc files under /system/etc/init/
+     * reference: /vendor/lib64, /vendor/bin/hw, ...).  No bind here. */
 
     /* Per-NS /data for Android — fresh tmpfs.  OHOS doesn't currently
      * have a separate userdata partition mounted (fstab.x23 only mounts
@@ -507,10 +496,10 @@ static int child_main(void *arg)
     setenv("androidboot.verifiedbootstate", "orange",     1);
     setenv("androidboot.slot_suffix",       "_a",         1);
 
-    /* pivot_root into /android/system.  musl doesn't expose a wrapper;
+    /* pivot_root into /android.  musl doesn't expose a wrapper;
      * use the raw syscall.  put-old must be a subdir of the new root,
      * and must be on a writable filesystem (since the kernel creates a
-     * mount-point dentry there for the old root).  /android/system
+     * mount-point dentry there for the old root).  /android
      * itself is RO (halium_system_a ext4) so we use /data/old_root —
      * the per-NS tmpfs we just mounted at ANDROID_ROOT/data.  chdir(".")
      * before the syscall is mandatory — the kernel resolves both args
@@ -882,12 +871,12 @@ int main(int argc, char **argv)
         die("%s missing — is binderfs mounted? "
             "(check init.x23.cfg pre-init)", BINDERFS_CONTROL);
 
-    /* Halium content must be present.  Check the real Halium init at
-     * /android/system/system/bin/init (NOT /android/system/bin/init,
-     * which is a halium-internal symlink whose `/system/bin/` target
-     * resolves to OHOS's init when read from outside the chroot).
-     * Without halium, exec'ing init would just fail; failing here
-     * gives a cleaner error. */
+    /* Halium content must be present.  Probe a real binary inside the
+     * inner system/ subdir (/android/system/bin/hwservicemanager) — a
+     * regular file, not one of the halium-internal /bin -> /system/bin
+     * symlinks that would resolve to OHOS's own tree from outside the
+     * pivot.  Without halium, exec'ing init would just fail; failing
+     * here gives a cleaner error. */
     if (access(ANDROID_ROOT "/system/bin/hwservicemanager", X_OK) < 0)
         die("%s/system/bin/hwservicemanager missing — did the chainload "
             "mount halium_system_a?", ANDROID_ROOT);

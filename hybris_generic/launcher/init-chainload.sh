@@ -155,16 +155,12 @@ mount -t ext4 -o ro /dev/mapper/system_a /root || {
 # See native_boot_plan/phase_n8_graphics_native.md (Bug 8.18 port).
 # ---------------------------------------------------------------------------
 if mount -o remount,rw /root 2>/dev/null; then
-    # /android tree must exist on disk before OHOS init takes over;
-    # init.x23.cfg's `mkdir /android` runs against a RO `/` and fails
-    # silently otherwise.  /android/data is NOT created here — the
-    # androidd launcher mounts a tmpfs there inside its NS (the OHOS
-    # build has no separate userdata partition mounted, so we can't
-    # back it with a real RW dir anyway).
-    mkdir -p /root/android /root/android/system /root/android/vendor \
-             /root/halium-system /root/apex /root/storage 2>/dev/null
-    chmod 0755 /root/android /root/android/system /root/android/vendor \
-               /root/halium-system /root/apex /root/storage 2>/dev/null
+    # /android must exist on disk before OHOS init takes over — it is
+    # the mount point for halium_system_a (Stage 3b).  Its system/,
+    # vendor/, data/ etc. sub-trees come from that partition once
+    # mounted, so only the top-level dir is pre-created here.
+    mkdir -p /root/android /root/apex /root/storage 2>/dev/null
+    chmod 0755 /root/android /root/apex /root/storage 2>/dev/null
 
     # Bug 8.18 — sandbox configs ship at 0640 from upstream;
     # nwebspawn (uid 3081) needs 0644 to load them.
@@ -187,45 +183,39 @@ mount -t ext4 -o ro /dev/mapper/chip_prod_a /root/chip_prod 2>/dev/null \
     || echo "[init-chainload] mount chip_prod_a failed (non-fatal)"
 
 # ---------------------------------------------------------------------------
-# Stage 3b — mount Halium system + vendor at /root/android/{system,vendor}
-# when their partitions are present in super.  Optional: a graphics-
-# disabled native build skips the Halium blobs (utils/host/pull-halium-
-# blobs.sh not run), so build_super_img.sh leaves them out and the
-# /dev/mapper entries never appear.  Both mounts are non-fatal — OHOS
-# still boots without them, you just don't get the libhybris HAL
-# stack.  /root/android, /root/android/system, /root/android/vendor
-# were created above (Stage 3a) during the brief remount-rw window;
-# init.x23.cfg's `mkdir /android` runs against a RO / and can't make
-# them itself.
+# Stage 3b — mount Halium system + vendor when their partitions are
+# present in super.  Optional: a graphics-disabled native build skips
+# the Halium blobs (utils/host/pull-halium-blobs.sh not run), so
+# build_super_img.sh leaves them out and the /dev/mapper entries never
+# appear.  Both mounts are non-fatal — OHOS still boots without them,
+# you just don't get the libhybris HAL stack.  /root/android was
+# created above (Stage 3a) during the brief remount-rw window.
 # ---------------------------------------------------------------------------
 if [ -b /dev/mapper/halium_system_a ] && [ -b /dev/mapper/halium_vendor_a ]; then
     # halium_system_a is a dynamic-partition image with a Halium-style
-    # FHS at its root (acct/, apex/, bin/, system/, etc.).  The actual
-    # Android `/system` content (lib64/, bin/, etc.) lives in the inner
-    # system/ subdir.  Two consumers want different views of this:
+    # FHS at its root (acct/, apex/, bin/, system/, vendor/, etc.).
+    # The actual Android `/system` content (lib64/, bin/, …) lives in
+    # the inner system/ subdir.  Mounting the partition at /android
+    # satisfies both consumers from a single mount:
     #   - libhybris (in OHOS NS) hardcodes /android/system/lib64 etc.;
-    #     LXC's lxc.mount.entry /system→android/system gives it the
-    #     inner view.  Provide the same by binding the inner system/
-    #     over /android/system here.
-    #   - androidd (in its Halium NS) pivots into the *outer* root so
-    #     Halium init can find itself at /system/bin/init (the inner
-    #     system/ becomes /system after pivot).  Keep the outer root
-    #     mounted separately at /halium-system for androidd's use.
-    mount -t ext4 -o ro /dev/mapper/halium_system_a /root/halium-system 2>/dev/null \
+    #     the partition's inner system/ lands exactly at /android/system.
+    #   - androidd (in its Halium NS) pivots into /android so Halium
+    #     init finds itself at /system/bin/init (the inner system/
+    #     becomes /system after pivot).
+    mount -t ext4 -o ro /dev/mapper/halium_system_a /root/android 2>/dev/null \
         || echo "[init-chainload] mount halium_system_a failed (non-fatal)"
-    if [ -d /root/halium-system/system ]; then
-        mount --bind /root/halium-system/system /root/android/system 2>/dev/null \
-            || echo "[init-chainload] bind halium-system/system→android/system failed"
-    fi
+    # halium_vendor_a overmounts the partition's own /vendor dir, so the
+    # Halium MTK HALs are visible at /android/vendor (OHOS PoV) and at
+    # /vendor after androidd's pivot.
     mount -t ext4 -o ro /dev/mapper/halium_vendor_a /root/android/vendor 2>/dev/null \
         || echo "[init-chainload] mount halium_vendor_a failed (non-fatal)"
     # libhybris's bionic loader pulls libc.so etc. from /apex/com.android.runtime/
-    # (the Android APEX path).  Expose halium-system/system/apex at /apex so
+    # (the Android APEX path).  Expose android/system/apex at /apex so
     # those lookups resolve — without this composer_host SIGSEGVs early in its
     # first Android-namespace dlopen (libc.so not found).
-    if [ -d /root/halium-system/system/apex ]; then
-        mount --bind /root/halium-system/system/apex /root/apex 2>/dev/null \
-            || echo "[init-chainload] bind /halium-system/system/apex→/apex failed"
+    if [ -d /root/android/system/apex ]; then
+        mount --bind /root/android/system/apex /root/apex 2>/dev/null \
+            || echo "[init-chainload] bind /android/system/apex→/apex failed"
     fi
 
     # Expose the Android gralloc/EGL HAL dirs at OHOS-side /vendor/lib64/{hw,egl}.
