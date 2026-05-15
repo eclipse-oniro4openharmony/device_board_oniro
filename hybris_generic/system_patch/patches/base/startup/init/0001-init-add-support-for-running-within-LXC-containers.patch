@@ -1,7 +1,7 @@
 From 67b7a22492dbbc58cb8db1eca3ddd0305c7916ad Mon Sep 17 00:00:00 2001
 From: Francesco Pham <pham.francesco@gmail.com>
 Date: Mon, 9 Mar 2026 12:37:56 +0000
-Subject: [PATCH 1/5] init: add support for running within LXC containers
+Subject: [PATCH 1/6] init: add support for running within LXC containers
 
 - Added InContainerMode() utility to detect containerized environments via 'container' env var.
 - Modified main.c to skip SystemPrepare (first-stage init) when running in a container.

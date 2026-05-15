@@ -1,7 +1,7 @@
 From 0ba80790808dad779a26a32b94c60ed1ee5dd784 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Tue, 12 May 2026 11:09:05 +0000
-Subject: [PATCH 5/5] init: skip mksandbox under OHOS_NATIVE_BOOT=1
+Subject: [PATCH 5/6] init: skip mksandbox under OHOS_NATIVE_BOOT=1
 
 In native chainload boot mode, OHOS init runs as PID 1 chrooted into
 system_a. DoMkSandbox's unshare(CLONE_NEWNS) + chdir(rootPath) +
