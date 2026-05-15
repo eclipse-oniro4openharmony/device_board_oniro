@@ -3,10 +3,12 @@
 # Copyright (C) 2026 Oniro / Hybris Generic.
 # Licensed under the Apache License, Version 2.0 (the "License").
 #
-# Fetch + extract Halium 12 system_a and vendor_a images for Volla X23
-# (vidofnir).  Outputs are stashed under
-# device/board/oniro/hybris_generic/halium-blobs/ for the super-image
-# builder (kernel/x23/build_super_img.sh) to consume.
+# Fetch + extract Halium 12 system_a / vendor_a / boot images for Volla
+# X23 (vidofnir).  All three are stashed under
+# device/board/oniro/hybris_generic/halium-blobs/ — system_a + vendor_a
+# for the super-image builder (kernel/x23/build_super_img.sh), and the
+# pristine Halium boot.img (as halium_boot_a.img) for the chainload
+# boot.img builder (kernel/x23/build_boot_img_chainload.sh).
 #
 # One-time, host-side.  The blobs are not checked in (Volla-licensed,
 # ~1.5 GB combined) but SHA256 pins tie them to specific upstream
@@ -136,6 +138,28 @@ if [[ ! -f "$BLOBS/halium_system_a.img" ]]; then
     rm -rf "$BLOBS/system"
 fi
 
+# ===========================================================================
+# 3. halium_boot_a.img — pristine Halium boot.img
+# ===========================================================================
+# build_boot_img_chainload.sh reuses the Halium ramdisk from a pristine
+# boot.img (parse-android-dynparts, dmsetup, modprobe + a kernel-matched
+# module set).  The bootstrap zip carries boot.img as a sibling of
+# super.img, so we extract it directly.
+# ===========================================================================
+if [[ ! -f "$BLOBS/halium_boot_a.img" ]]; then
+    if [[ ! -f "$BOOTSTRAP_ZIP" ]]; then
+        echo "==> Downloading UBports bootstrap zip (~478 MB)…"
+        curl --location --fail --output "$BOOTSTRAP_ZIP.tmp" "$BOOTSTRAP_URL"
+        mv "$BOOTSTRAP_ZIP.tmp" "$BOOTSTRAP_ZIP"
+        echo "==> Verifying bootstrap zip SHA256…"
+        echo "$BOOTSTRAP_SHA256  $BOOTSTRAP_ZIP" | sha256sum -c -
+    fi
+
+    echo "==> Extracting boot.img → halium_boot_a.img…"
+    unzip -p "$BOOTSTRAP_ZIP" boot.img > "$BLOBS/halium_boot_a.img.tmp"
+    mv "$BLOBS/halium_boot_a.img.tmp" "$BLOBS/halium_boot_a.img"
+fi
+
 # ---------------------------------------------------------------------------
 # Cleanup downloads (keep them — they're large; re-fetching takes minutes).
 # Comment-out to free disk space.
@@ -144,7 +168,7 @@ fi
 
 echo
 echo "Halium blobs ready:"
-ls -lh "$BLOBS/halium_system_a.img" "$BLOBS/halium_vendor_a.img"
+ls -lh "$BLOBS/halium_system_a.img" "$BLOBS/halium_vendor_a.img" "$BLOBS/halium_boot_a.img"
 echo
 echo "Next: bash device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh"
 echo "      (will detect halium-blobs/ and bake halium_system_a + halium_vendor_a"

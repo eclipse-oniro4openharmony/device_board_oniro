@@ -9,8 +9,8 @@
 # Output:  $OHOS_ROOT/out/hybris_generic/boot-chainload.img
 #
 # Inputs:
-#   - $OHOS_ROOT/out/hybris_generic/backups/boot_a.bak — pulled from device
-#     with `adb pull /dev/disk/by-partlabel/boot_a` before reflashing.
+#   - halium-blobs/halium_boot_a.img — a pristine Halium boot.img,
+#     produced by utils/host/pull-halium-blobs.sh.
 #   - $OHOS_ROOT/device/board/oniro/hybris_generic/launcher/init-chainload.sh
 #
 # Why reuse the Halium ramdisk: it already has parse-android-dynparts,
@@ -23,7 +23,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OHOS_ROOT="$(cd "$HERE/../../../../../.." && pwd)"
 KERNEL_TREE="$OHOS_ROOT/kernel/linux/volla-vidofnir"
-LIVE_BOOT="$OHOS_ROOT/out/hybris_generic/backups/boot_a.bak"
+LIVE_BOOT="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/halium_boot_a.img"
 CHAINLOAD_INIT="${CHAINLOAD_INIT:-$OHOS_ROOT/device/board/oniro/hybris_generic/launcher/init-chainload.sh}"
 MKBOOT_DIR="$KERNEL_TREE/build-dir/downloads/android_system_tools_mkbootimg"
 MKBOOTIMG="$MKBOOT_DIR/mkbootimg.py"
@@ -39,7 +39,7 @@ OUTPUT="$OHOS_ROOT/out/hybris_generic/boot-chainload.img"
 OHOS_KERNEL_BOOT_IMG="${OHOS_KERNEL_BOOT_IMG:-$KERNEL_TREE/out/boot.img}"
 
 if [[ ! -f "$LIVE_BOOT" ]]; then
-    echo "Error: $LIVE_BOOT missing — run 'adb pull /dev/disk/by-partlabel/boot_a' first" >&2
+    echo "Error: $LIVE_BOOT missing — run utils/host/pull-halium-blobs.sh first" >&2
     exit 1
 fi
 if [[ ! -f "$CHAINLOAD_INIT" ]]; then
