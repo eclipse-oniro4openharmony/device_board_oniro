@@ -36,7 +36,7 @@ SYS_PROD_IMG="$OHOS_ROOT/out/hybris_generic/packages/phone/images/sys_prod.img"
 CHIP_PROD_IMG="$OHOS_ROOT/out/hybris_generic/packages/phone/images/chip_prod.img"
 OUTPUT="$OHOS_ROOT/out/hybris_generic/super.img"
 
-# Volla X23 super partition geometry (from x23-super.txt reference).
+# Volla X23 super partition geometry.
 SUPER_SIZE=9663676416   # 9.66 GB
 METADATA_SIZE=65536     # 64 KB
 METADATA_SLOTS=2        # A/B slots
