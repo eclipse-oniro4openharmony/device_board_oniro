@@ -1,5 +1,11 @@
 # Phase 5: Libhybris Integration & HAL Bridge
 
+> **Legacy (LXC-era) document.** Describes the original OHOS-as-LXC-container
+> path, which is **no longer maintained** — the project now boots OHOS
+> natively (no Ubuntu Touch host, no LXC). Kept as a reference for the HAL /
+> driver bring-up detail (libhybris, graphics, audio, WiFi, …) that still
+> applies under native boot. For current status start at [README.md](README.md).
+
 > **Context (pre-read before starting):**
 > - Device is Volla X23 (Halium 12 / Android 12, aarch64).
 > - Android HAL ABI version: `android.hardware.graphics.mapper@4.0` passthrough, legacy `gralloc.common.so` loadable via `hw_get_module()`.

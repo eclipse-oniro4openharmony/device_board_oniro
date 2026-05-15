@@ -1,5 +1,11 @@
 # Phase 7: Input System Integration
 
+> **Legacy (LXC-era) document.** Describes the original OHOS-as-LXC-container
+> path, which is **no longer maintained** — the project now boots OHOS
+> natively (no Ubuntu Touch host, no LXC). Kept as a reference for the HAL /
+> driver bring-up detail (libhybris, graphics, audio, WiFi, …) that still
+> applies under native boot. For current status start at [README.md](README.md).
+
 ## Status: ✅ Complete
 
 **Completed 2026-03-27.** Touch input and hardware keys working on the physical Volla X23 display. All five `/dev/input/event*` devices enumerated by `multimodalinput` via libinput; touch coordinates correctly mapped to 720×1560.

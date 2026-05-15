@@ -1,5 +1,11 @@
 # Phase 13: Audio Support
 
+> **Legacy (LXC-era) document.** Describes the original OHOS-as-LXC-container
+> path, which is **no longer maintained** — the project now boots OHOS
+> natively (no Ubuntu Touch host, no LXC). Kept as a reference for the HAL /
+> driver bring-up detail (libhybris, graphics, audio, WiFi, …) that still
+> applies under native boot. For current status start at [README.md](README.md).
+
 ## Status: ✅ Phase 13B WORKING on BOTH Volla Tablet (mimir, 2026-04-16) AND Volla X23 (2026-04-17) — OHOS speaker playback audible end-to-end
 
 **X23 fix (2026-04-17):** the tablet-only hardcoded numids in `common.h` were wrong on X23 (kernel inserts extra codec controls earlier, shifting subsequent numids by +2), and the X23 uses a completely different speaker path than the tablet. Fixed with:
@@ -493,9 +499,9 @@ hdc shell "LD_LIBRARY_PATH=/system/lib64/libhybris:/system/lib64 \
 | start script | `device/board/oniro/hybris_generic/utils/start-ohos.sh` | Add PulseAudio mask (13.2) |
 | Post-stop hook | `device/board/oniro/hybris_generic/utils/ohos-post-stop.sh` | Add PulseAudio unmask (13.2) |
 | Host PulseAudio droid module | `pulseaudio-modules-droid-30` (UT deb pkg) | The conflicting consumer of `hw_get_module("audio.primary")` |
-| Phase-10 conflict-resolution template | `phase10_wifi_support.md` section 10.1 | Same host-daemon-masking pattern |
-| Phase-11 DAC_OVERRIDE template | `phase11_power_off_and_backlight_plan.md` Fix 1 | Same cap-add-to-HDF-host pattern |
-| Phase-6 binder-collision fixes | `phase6_graphics_stack.md` 6.8.1 | Same HIDL binder risk class |
+| Phase-10 conflict-resolution template | `legacy_wifi_support.md` section 10.1 | Same host-daemon-masking pattern |
+| Phase-11 DAC_OVERRIDE template | `legacy_power_off_and_backlight.md` Fix 1 | Same cap-add-to-HDF-host pattern |
+| Phase-6 binder-collision fixes | `legacy_graphics_stack.md` 6.8.1 | Same HIDL binder risk class |
 
 ---
 

@@ -1,5 +1,11 @@
 # Phase 12: User-File Access via `sharefs` — Current Workaround & Proper Fix
 
+> **Legacy (LXC-era) document.** Describes the original OHOS-as-LXC-container
+> path, which is **no longer maintained** — the project now boots OHOS
+> natively (no Ubuntu Touch host, no LXC). Kept as a reference for the HAL /
+> driver bring-up detail (libhybris, graphics, audio, WiFi, …) that still
+> applies under native boot. For current status start at [README.md](README.md).
+
 ## Context
 
 OpenHarmony exposes `/storage/Users` (the user-visible "Internal storage" root) to sandboxed apps via two separate mounts declared in `/system/etc/sandbox/appdata-sandbox.json`:
@@ -176,6 +182,6 @@ Low priority for bring-up: the current workaround is fully functional for single
 
 ## Related
 
-- Phase 2 (`phase2_kernel_adaptation.md`) — the reference for how we port OHOS kernel drivers onto the Halium kernel.
+- Phase 2 (`legacy_kernel_adaptation.md`) — the reference for how we port OHOS kernel drivers onto the Halium kernel.
 - Phase 6.14 — `appdata-sandbox.json` deployment context (nweb sandbox config fix, same file family).
 - 12.1 shares the same underlying kernel-driver gap as the main Phase 12 work (`sharefs` there, `hmdfs` here) — both fall out of running stock OHOS storage code on Halium 5.10 without the OHOS-side kernel drivers.
