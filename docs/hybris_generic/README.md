@@ -75,15 +75,18 @@ Recently resolved — full root-cause detail in the linked phase docs:
 | N7  | [phase_n7_hdc_usb.md](phase_n7_hdc_usb.md) | ✅ **DONE.**  `cmode=3` + `developermode=true` setparam + aarch64 hdc cross-build |
 | N8  | [phase_n8_graphics_native.md](phase_n8_graphics_native.md) | ✅ **Display working (2026-05-15) — OHOS lockscreen on the physical panel.**  Five blockers cleared: SELinux (`lsm=selinux`), `/mnt`+`/storage` tmpfs, Mali GPU 21-module load, `/vendor/lib64/{hw,egl}` bind for the gralloc mapper, + earlier N8.9.1 property-store share.  ✅ Touch input working (2026-05-16) — `chipone-tddi` (ICNL9911C) SPI touch driver bundled + loaded at pre-init; § N8.13, verified on device. |
 | N9  | [phase_n9_firmware_peripherals.md](phase_n9_firmware_peripherals.md) | 🔄 Partial — WiFi/audio native; BT/sensors need androidd-resolved Android HALs |
-| N10 | [phase_n10_flash_recovery.md](phase_n10_flash_recovery.md) | ✅ `flash-native.sh` follows chainload flow (boot_a.bak → fastbootd → super → boot_a chainload) |
+| N10 | [phase_n10_flash_recovery.md](phase_n10_flash_recovery.md) | ✅ `flash-native.sh` flashes super + boot_a + vendor_boot_a in one LK-fastboot pass (no fastbootd switch) |
 | N11 | [phase_n11_chainload.md](phase_n11_chainload.md) | ✅ **DONE.**  Halium ramdisk + replaced `/init` chain-loads into OHOS init via `OHOS_NATIVE_BOOT=1 chroot` |
 
 ## Reproduction
 
 Prerequisites: OHOS source checkout, build container, Halium `boot_a.bak`
-backup stashed at `out/hybris_generic/backups/boot_a.bak` (pull via
+stashed at `out/hybris_generic/backups/boot_a.bak` (pull via
 `adb pull /dev/disk/by-partlabel/boot_a` from a live Halium device
-before the first reflash).
+before the first reflash). `boot_a.bak` is a build input for
+`build_boot_img_chainload.sh` (it supplies the Halium ramdisk) and the
+fallback for recovering the device back to Halium — it is no longer
+flashed in the normal flow.
 
 ```
 # Build
