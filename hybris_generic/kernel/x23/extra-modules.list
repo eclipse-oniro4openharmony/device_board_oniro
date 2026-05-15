@@ -3,6 +3,7 @@
 # The .ko binaries are gitignored (build artifacts); this list is the
 # tracked source of truth. See phase_n8_graphics_native.md N8.11/N8.13.
 aee_aed.ko
+chipone-tddi.ko
 clk-common.ko
 cmdq_helper_inf.ko
 device-apc-common.ko
@@ -11,7 +12,6 @@ emi-mpu.ko
 fhctl.ko
 ged.ko
 gpueb.ko
-gt9886.ko
 iommu_debug.ko
 irq-dbg.ko
 leds-mtk.ko
