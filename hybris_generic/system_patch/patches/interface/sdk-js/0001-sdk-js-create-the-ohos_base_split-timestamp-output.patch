@@ -1,0 +1,31 @@
+From 02fb9d2d3a305d66dc1cb069604a54ae85223fd1 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Sun, 17 May 2026 09:18:34 +0000
+Subject: [PATCH] sdk-js: create the ohos_base_split timestamp output
+
+ohos_base_split declared a ${target_name}.timestamp output that
+parse_interface_sdk.py never created, leaving the action perpetually
+dirty. Pass --output-timestamp so the script creates it.
+
+Change-Id: Id9fc6716c045342df8f4000ba05cbb04c7d0aefd
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index df0c82239..5fb61a023 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -58,6 +58,8 @@ action("ohos_base_split") {
+     "${sdk_build_check_level}",
+     "--sdk-api-version",
+     "${api_version}",
++    "--output-timestamp",
++    rebase_path("${target_out_dir}/${target_name}.timestamp", root_build_dir),
+   ]
+   outputs = [
+     "${interface_sdk_path}",
+-- 
+2.50.1
+
