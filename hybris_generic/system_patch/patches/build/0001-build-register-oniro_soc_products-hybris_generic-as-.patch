@@ -1,7 +1,7 @@
 From 671a18f70bfec42c1833573513fc073e41ae7f13 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:36:05 +0000
-Subject: [PATCH] build: register oniro_soc_products (hybris_generic) as a
+Subject: [PATCH 1/2] build: register oniro_soc_products (hybris_generic) as a
  build subsystem
 
 Add the oniro_soc_products subsystem entry to subsystem_config.json so

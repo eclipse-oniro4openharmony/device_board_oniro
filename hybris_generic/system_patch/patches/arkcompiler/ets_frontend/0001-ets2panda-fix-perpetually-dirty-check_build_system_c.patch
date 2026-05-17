@@ -1,0 +1,73 @@
+From e211dee2b893b7c97b534f16cd9310bc88f21de5 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Sun, 17 May 2026 09:18:27 +0000
+Subject: [PATCH] ets2panda: fix perpetually-dirty
+ check_build_system_consistency
+
+The action declared consistency_check.stamp as an output but the script
+never created it (and was never passed the path), so it ran on every
+build and forced a rebuild of ets2panda and every ArkTS .abc. Pass the
+stamp path and create it on success, and declare the CMake/GN file
+lists it compares as inputs so it re-runs only when they change.
+
+Change-Id: I889b8772218206fc22d5ca2b66d6d7f7372175d0
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ ets2panda/BUILD.gn                               | 16 ++++++++++++++--
+ .../scripts/check_build_system_consistency.py    |  6 ++++++
+ 2 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/ets2panda/BUILD.gn b/ets2panda/BUILD.gn
+index 653d400cf..16671634e 100644
+--- a/ets2panda/BUILD.gn
++++ b/ets2panda/BUILD.gn
+@@ -43,8 +43,20 @@ config("libes2panda_public_config") {
+ 
+ action("check_build_system_consistency") {
+   script = "./scripts/check_build_system_consistency.py"
+-  args = [ rebase_path(".", root_build_dir) ]
+-  outputs = [ "$target_gen_dir/consistency_check.stamp" ]
++  _stamp = "$target_gen_dir/consistency_check.stamp"
++
++  # The script reads these file lists; declare them as inputs so the check
++  # re-runs only when they change instead of being perpetually dirty.
++  inputs = [
++    "CMakeLists.txt",
++    "public/CMakeLists.txt",
++    "BUILD.gn",
++  ]
++  args = [
++    rebase_path(".", root_build_dir),
++    rebase_path(_stamp, root_build_dir),
++  ]
++  outputs = [ _stamp ]
+ }
+ 
+ libes2panda_sources = [
+diff --git a/ets2panda/scripts/check_build_system_consistency.py b/ets2panda/scripts/check_build_system_consistency.py
+index ecae9d832..83399dd21 100755
+--- a/ets2panda/scripts/check_build_system_consistency.py
++++ b/ets2panda/scripts/check_build_system_consistency.py
+@@ -160,6 +160,7 @@ def compare_file_lists(cmake_files, cmake_files_dict, gn_files, gn_files_dict, f
+ 
+ def main():
+     work_dir = sys.argv[1]
++    stamp_path = sys.argv[2]
+     cmake_src, cmake_src_dict = parse_root_cmake(os.path.join(work_dir, "CMakeLists.txt"))
+     (
+         cmake_hdr,
+@@ -189,6 +190,11 @@ def main():
+ 
+     if src_consistent and hdr_consistent and yaml_consistent:
+         print("all file types are consistent beetween CMake and GN")
++        # Create the declared output so ninja sees this action as up-to-date;
++        # without the stamp the action is perpetually dirty and forces a
++        # rebuild of ets2panda and every ArkTS .abc on every build.
++        with open(stamp_path, "w"):
++            pass
+         return 0
+     print("Warning! inconsistent file found beetween CMake and GN")
+     return 1
+-- 
+2.50.1
+
