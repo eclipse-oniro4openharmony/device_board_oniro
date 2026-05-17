@@ -1,0 +1,170 @@
+From ba7f4ee5a6e87f41c83f79a7db22efa920f2dba7 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Sun, 17 May 2026 09:18:20 +0000
+Subject: [PATCH 2/2] =?UTF-8?q?build:=20speed=20up=20dev=20builds=20?=
+ =?UTF-8?q?=E2=80=94=20disable=20ThinLTO,=20fix=20always-dirty=20actions?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Lower compiler.gni defaults to use_thin_lto=false / symbol_level=1.
+ThinLTO deferred optimization to link time, turning single .so links
+into 300-580s of codegen; a warm full rebuild drops ~40min -> ~15min.
+symbol_level=1 keeps line-numbered backtraces while shrinking .o files.
+Override with --gn-args "use_thin_lto=true symbol_level=-1" for release.
+
+Fix "phantom output" bugs where a GN action declares an output its
+script never creates, leaving the action perpetually dirty and
+cascading rebuilds every build:
+- idl_tool/idl.gni: sources_common headers declared as ii<name>.h vs
+  the generated i<name>.h (double 'i').
+- ohos/notice/collect_module_notice_file.py: skipped creating declared
+  notice outputs for modules without a license file.
+- ohos/sdk/parse_interface_sdk.py: add --output-timestamp so it can
+  create the ohos_base_split timestamp output.
+- scripts/build_js_assets.py: drop node_modules/.cache from the depfile
+  so every HAP's js_assets.zip is not perpetually stale.
+
+Change-Id: Ice248fbbf5759d9e080a780ba73e3d583833b736
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ config/compiler/compiler.gni              | 11 +++++++++--
+ config/components/idl_tool/idl.gni        | 17 ++++++++---------
+ ohos/notice/collect_module_notice_file.py |  9 +++++++++
+ ohos/sdk/parse_interface_sdk.py           | 11 +++++++++++
+ scripts/build_js_assets.py                |  5 +++++
+ 5 files changed, 42 insertions(+), 11 deletions(-)
+
+diff --git a/config/compiler/compiler.gni b/config/compiler/compiler.gni
+index 4cdc956d..09921896 100755
+--- a/config/compiler/compiler.gni
++++ b/config/compiler/compiler.gni
+@@ -28,7 +28,10 @@ declare_args() {
+   # appear when using this level.
+   #   0 means no symbols.
+   #   -1 means auto-set according to debug/release and platform.
+-  symbol_level = -1
++  # Default lowered from -1 (which auto-resolves to 2 on ohos arm64) to 1 for
++  # faster dev builds: line-numbered backtraces are kept, .o files shrink and
++  # links speed up. Override with `--gn-args symbol_level=-1` for release.
++  symbol_level = 1
+ 
+   # ohos-only: Strip the debug info of libraries within lib.unstripped to
+   # reduce size. As long as symbol_level > 0, this will still allow stacks to be
+@@ -56,7 +59,11 @@ declare_args() {
+   if (use_libfuzzer) {
+     use_thin_lto = is_cfi || (is_ohos_or_android && is_official_build)
+   } else {
+-    use_thin_lto = is_cfi || is_ohos_or_android
++    # ThinLTO defers optimization to link time; on this dev tree it turned
++    # single .so links into 300-580 s of codegen. Default off (was
++    # `is_cfi || is_ohos_or_android`). Override with `--gn-args
++    # use_thin_lto=true` for a release/perf build. CFI still forces it on.
++    use_thin_lto = is_cfi
+   }
+ 
+   # Tell VS to create a PDB that references information in .obj files rather
+diff --git a/config/components/idl_tool/idl.gni b/config/components/idl_tool/idl.gni
+index 72427f95..61c2105c 100644
+--- a/config/components/idl_tool/idl.gni
++++ b/config/components/idl_tool/idl.gni
+@@ -213,12 +213,11 @@ template("idl_gen_interface") {
+       i = i + 1
+     }
+ 
+-    # first letter 'i'
++    # first letter 'i': collapse a leading "_i_" back into "i" so `name`
++    # keeps the interface prefix exactly once.
+     name_split = []
+     name_split = string_split(name, "_i_")
+-    init_with_i = false
+     if (name_split[0] == "") {
+-      init_with_i = true
+       name = string_replace(name, "_i_", "i", 1)
+     }
+     name_split = []
+@@ -236,12 +235,12 @@ template("idl_gen_interface") {
+ 
+     out_full_name = string_replace(idl_full_name, idl_name, name)
+ 
+-    if (init_with_i) {
+-      out_full_name_i = string_replace(idl_full_name, idl_name, "i" + name)
+-      sources_all += [ "${target_gen_dir}/" + out_full_name_i + ".h" ]
+-    } else {
+-      sources_all += [ "${target_gen_dir}/" + out_full_name + ".h" ]
+-    }
++    # For sources_common, the "_i_" -> "i" replacement above already keeps the
++    # leading interface "i" in `name`, so out_full_name is the correct header
++    # stem (matching the generated .cpp). The old init_with_i branch prepended
++    # another "i", declaring a phantom "ii<name>.h" output that never matched
++    # the generated file -- leaving every common-IDL target perpetually dirty.
++    sources_all += [ "${target_gen_dir}/" + out_full_name + ".h" ]
+     sources_all += [ "${target_gen_dir}/" + out_full_name + ".cpp" ]
+     sources_proxy += [ "${target_gen_dir}/" + out_full_name + ".cpp" ]
+     sources_stub += [ "${target_gen_dir}/" + out_full_name + ".cpp" ]
+diff --git a/ohos/notice/collect_module_notice_file.py b/ohos/notice/collect_module_notice_file.py
+index af841a5f..157a3c6f 100755
+--- a/ohos/notice/collect_module_notice_file.py
++++ b/ohos/notice/collect_module_notice_file.py
+@@ -203,6 +203,15 @@ def do_collect_notice_files(options, depfiles: list):
+             notice_files = [file for file in notice_file.split(",") if file]
+ 
+             write_file_content(notice_files, options, output, notice_info_json, module_notice_info_list, depfiles)
++    elif options.output:
++        # No license/NOTICE found for this module. Still create the declared
++        # output files (empty) so ninja sees the action as up-to-date; without
++        # them the notice target is perpetually dirty and cascades a rebuild
++        # of every dependent module on every build.
++        for output in options.output:
++            os.makedirs(os.path.dirname(output), exist_ok=True)
++            build_utils.touch(output)
++            build_utils.touch('{}.json'.format(output))
+ 
+ 
+ def write_file_content(notice_files, options, output, notice_info_json, module_notice_info_list, depfiles):
+diff --git a/ohos/sdk/parse_interface_sdk.py b/ohos/sdk/parse_interface_sdk.py
+index 36785126..fb8a6cae 100755
+--- a/ohos/sdk/parse_interface_sdk.py
++++ b/ohos/sdk/parse_interface_sdk.py
+@@ -190,11 +190,22 @@ def main():
+     parser.add_argument('--build-sdk-path', required=True)
+     parser.add_argument('--sdk-check-level', required=True)
+     parser.add_argument('--sdk-api-version', required=True)
++    parser.add_argument('--output-timestamp', required=False)
+ 
+     options = parser.parse_args()
+ 
+     parse_step(options)
+ 
++    # Create the GN-declared timestamp output. Without it the ohos_base_split
++    # action is perpetually dirty and rebuilds the SDK interface (and every
++    # downstream ArkTS .abc) on every build.
++    if options.output_timestamp:
++        timestamp_dir = os.path.dirname(options.output_timestamp)
++        if timestamp_dir:
++            os.makedirs(timestamp_dir, exist_ok=True)
++        with open(options.output_timestamp, 'w'):
++            pass
++
+ 
+ if __name__ == '__main__':
+     sys.exit(main())
+diff --git a/scripts/build_js_assets.py b/scripts/build_js_assets.py
+index 075e77f9..04a337f2 100755
+--- a/scripts/build_js_assets.py
++++ b/scripts/build_js_assets.py
+@@ -253,6 +253,11 @@ def main(args):
+         else:
+             cmd.extend(['--env', 'compilerType=ark',
+                         'arkFrontendDir={}'.format(ark_es2abc_dir), 'nodeJs={}'.format(node_js)])
++        # The ace/ets loaders rewrite their node_modules/.cache directory on
++        # every run; sweeping those cache files into the depfile makes every
++        # HAP's js_assets.zip perpetually stale and forces a HAP rebuild each
++        # build. Drop cache paths -- they are build artifacts, not sources.
++        depfiles = [f for f in depfiles if "/.cache/" not in f]
+         build_utils.call_and_write_depfile_if_stale(
+             lambda: build_ace(cmd, options, js2abc, loader_home, assets_dir, assets_name),
+             options,
+-- 
+2.50.1
+
