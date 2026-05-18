@@ -1,0 +1,76 @@
+From 7223d4ad570b4bfcde60d4988fa219c122317fdf Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 18 May 2026 13:03:04 +0000
+Subject: [PATCH] hdc daemon: cap USB bulk reads to stable size for hybris
+ devices
+
+The Volla X23 native-boot (hybris) target runs the Halium Android
+vendor 5.10 kernel. Its FunctionFS gadget short-reads any bulk-OUT
+request larger than ~61KB, so hdc's 512KB "huge buffer" mode makes
+the daemon post 300KB+ reads that short-read ("Not full packet,
+wanted:300088 really:27704") and collapse the session, leaving
+`hdc file send` and `hdc install` unusable.
+
+Cap a single USB bulk read in HdcDaemonUSB::OnUSBRead at
+GetUsbffsBulkSizeStable() (61KB); large hdc packets are still
+reassembled across multiple reads. Also default the daemon-side
+HdcTransferBase to stable buffer mode so it advertises hugeBuf=0 and
+CheckFeatures negotiates the host down too -- no host-side hdc change
+is required.
+
+Change-Id: Icdf721e77d589bb37de5ad2afd4bbe68ccac8226
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ src/common/transfer.cpp   | 13 +++++++++++++
+ src/daemon/daemon_usb.cpp |  9 ++++++++-
+ 2 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/src/common/transfer.cpp b/src/common/transfer.cpp
+index bdd3e51a..7b21e397 100644
+--- a/src/common/transfer.cpp
++++ b/src/common/transfer.cpp
+@@ -36,7 +36,20 @@ HdcTransferBase::HdcTransferBase(HTaskInfo hTaskInfo)
+     ResetCtx(&ctxNow, true);
+     commandBegin = 0;
+     commandData = 0;
++#ifdef HDC_HOST
+     isStableBuf = false;
++#else
++    // Volla X23 / hybris native boot: the device runs the Halium (Android
++    // vendor) 5.10 kernel, whose FunctionFS gadget cannot satisfy a single
++    // bulk-OUT read larger than ~61KB. hdc's 512KB "huge buffer" fast mode
++    // makes the daemon post 300KB+ reads that short-read (see daemon_usb.cpp
++    // "Not full packet, wanted:300088 really:27704") and collapse the
++    // session -- this is why `hdc file send` is unusable on this device.
++    // Force the 61KB compatible "stable" mode on the daemon side: the daemon
++    // then advertises hugeBuf=0 and CheckFeatures negotiates the host down
++    // to stable mode too, so no host-side hdc change is needed.
++    isStableBuf = true;
++#endif
+ }
+ 
+ HdcTransferBase::~HdcTransferBase()
+diff --git a/src/daemon/daemon_usb.cpp b/src/daemon/daemon_usb.cpp
+index 95011be5..6c2cfe14 100644
+--- a/src/daemon/daemon_usb.cpp
++++ b/src/daemon/daemon_usb.cpp
+@@ -662,7 +662,14 @@ void HdcDaemonUSB::OnUSBRead(uv_fs_t *req)
+                 }
+             }
+         }
+-        int nextReadSize = childRet == 0 ? hUSB->wMaxPacketSizeSend : std::min(childRet, Base::GetUsbffsBulkSize());
++        // Volla X23 / hybris native boot: the Halium (Android vendor) 5.10
++        // kernel's FunctionFS gadget short-reads any bulk-OUT request larger
++        // than ~61KB, which collapses the session on `hdc file send` (see
++        // the "Not full packet" warning above). Cap a single USB read at the
++        // 61KB "stable" size so every read is satisfiable; large hdc packets
++        // are still received correctly across multiple reads.
++        int usbReadCap = Base::GetUsbffsBulkSizeStable();
++        int nextReadSize = childRet == 0 ? hUSB->wMaxPacketSizeSend : std::min(childRet, usbReadCap);
+         thisClass->saveNextReadSize = nextReadSize;
+         if (thisClass->LoopUSBRead(hUSB, nextReadSize) < 0) {
+             WRITE_LOG(LOG_FATAL, "LoopUSBRead failed");
+-- 
+2.50.1
+
