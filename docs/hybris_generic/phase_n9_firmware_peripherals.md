@@ -1,9 +1,11 @@
 # Phase N9 — Firmware, Peripherals & Connectivity
 
-**Status:** 🔄 Partial (2026-05-18).  WiFi (Phase 10) is native and inherits
-cleanly.  Audio (Phase 13B) is native too, but needed its MT6789/MT6366
-kernel modules bundled into `vendor_boot` (N9.5, 2026-05-18) — they live in
-the Android second-stage module set that native boot never loads.  Bluetooth
+**Status:** 🔄 Partial (2026-05-18).  WiFi (Phase 10) and audio (Phase 13B)
+are native, but both needed their MT6789 kernel modules bundled into
+`vendor_boot` — they live in the Android second-stage / `vendor_dlkm`
+module set that native boot never loads.  Audio: N9.5.  WiFi: N9.2 — the
+connsys (WMT) module set, plus a `wmtdetect-init` helper that runs the
+`wmt_loader` chip-detect ioctl the kernel `WMT_init()` needs.  Bluetooth
 and sensors still need their Android HALs running in `androidd`'s namespace;
 defer until N4's exec-init SEGV is resolved (see `phase_n4_androidd.md`).
 
@@ -77,15 +79,112 @@ Wait — `/vendor/firmware` is OHOS-vendor and likely already exists as a direct
 
 ---
 
-## N9.2 — WiFi ✅
+## N9.2 — WiFi ✅ (2026-05-18 — fixed + verified)
 
-Already done in Phase 10 + N3.3.
+The OHOS-side WiFi userspace from Phase 10 (HDI WPA path: `wpa_host` +
+`chip_interface_service` HDF services from `device_info.hcs`, the
+`GetChipCaps` SIGSEGV stub, the `libwifi_hal_default.z.so` install fix)
+carries over unchanged. **What did NOT carry over is the connsys kernel
+stack** — exactly the same second-stage-module problem as audio (N9.5)
+and the GPU/touch modules (N8.11/N8.13).
 
-`init.x23.cfg` pre-init calls `/system/bin/rfkill unblock all` (verified `/system/bin/rfkill` ships in OHOS rootfs).
+The MT6789 WiFi is a MediaTek **connsys** (WMT) chip. Its driver set —
+`connadp`, `connfem`, `btif_drv`, `wmt_drv`, `mddp`, `wmt_chrdev_wifi`,
+`wlan_drv_gen4m_6789` — is built `=m` and lives in the Android
+`vendor_dlkm` partition (`/vendor/lib/modules`, a symlink target native
+boot does not carry or mount). It is not in Halium's `vendor_boot`
+`modules.load`, so under native boot nothing ever loads it: no `wlan0`,
+no `phy0`, `lsmod` shows no connsys modules. In the LXC era this was
+invisible — Ubuntu Touch's Android second-stage init loaded the whole
+`vendor_dlkm` set, and OHOS (sharing the net namespace) just saw a ready
+`wlan0`.
 
-`wpa_host` and `chip_interface_service` start as HDF services from `device_info.hcs` — the existing config file at `vendor/oniro/hybris_generic/hdf_config/uhdf/` already has these entries (Phase 10). No change for native boot.
+Fix — bundle the connsys modules into `vendor_boot` and `insmod` them at
+pre-init, **plus** one extra step the audio/GPU stacks don't need:
 
-**Plan adjustment:** the original plan listed N9.2 as "still open". It's not — Phase 10 is complete and self-contained.
+1. **`kernel/x23/extra-modules.list`** — the 7 connsys modules added so
+   `build_kernel.sh` stages their `.ko` into the `vendor_boot` overlay
+   (→ `/mnt/kmodules`). `cfg80211.ko` is already in Halium's
+   `modules.load`, so it is not bundled.
+
+2. **`vendor/oniro/hybris_generic/etc/init/init.x23.cfg`** — pre-init
+   `insmod`s the modules in dependency order. All transitive deps of
+   `wmt_drv`/`mddp`/`wlan_drv` (`ccci_md_all`, `ccmni`, the GPU display
+   chain, PMIC throttling, …) are already up from the GPU + audio
+   blocks, so only the 7 connsys `.ko` are new.
+
+3. **The `wmt_loader` step.** Unlike audio/GPU, `insmod` alone is not
+   enough. `wmt_drv.ko`'s `module_init` only registers `/dev/wmtdetect`;
+   the real WMT bring-up (`WMT_init()`, which creates `/dev/stpwmt` and
+   arms the WiFi/BT function-on path) is deferred to a `/dev/wmtdetect`
+   ioctl that Android's `/vendor/bin/wmt_loader` issues from second-stage
+   init. Native boot has no second-stage init. Without it,
+   `echo 1 > /dev/wmtWifi` fails — `WMT turn on WIFI fail`, connsys
+   func-on `opId 32` completion timeout, `RST_FW_DL_FAIL`.
+
+   `wmt_loader` is a dynamically-linked Android binary (needs
+   `libcutils.so` + the Android linker namespace), so it cannot run
+   under OHOS directly. Instead we ship **`wmtdetect-init`**, a tiny
+   pure-C OHOS executable (`launcher/wmtdetect-init.c`, built by
+   `launcher/BUILD.gn`, installed to `/system/bin`) that drives the same
+   `/dev/wmtdetect` ioctl sequence wmt_loader uses for an integrated-SoC
+   connsys chip: `CONNSYS_SOC_HW_INIT` → `GET_SOC_CHIP_ID` (→ `0x6789`)
+   → `GET_ADIE_CHIP_ID` (→ `0x6631`) → `SET_CHIP_ID` →
+   `DO_MODULE_INIT` (→ kernel `WMT_init()`).
+
+   `init.x23.cfg` runs `wmtdetect-init` **between** the `wmt_drv` insmod
+   and the `wmt_chrdev_wifi`/`wlan_drv_gen4m` insmods. This ordering is
+   mandatory — loading the wlan modules *before* `WMT_init()` makes the
+   connsys WiFi firmware download fail (`RST_FW_DL_FAIL`); loading them
+   *after* it succeeds (`wmt call wlan probe ok`, `WMT turn on WIFI
+   success`).
+
+   > **The ordering MUST use the `syncexec` init command — not `exec`,
+   > and never `exec_start`.** OHOS init implements only `exec` (fork +
+   > *no wait*) and `syncexec` (fork + `waitpid`). `exec_start` is an
+   > *Android* init keyword; OHOS init does not implement it and
+   > silently drops the line. The first cut of this fix used
+   > `exec_start /system/bin/wmtdetect-init`, so `WMT_init()` never ran
+   > before the WiFi driver loaded — the connsys WiFi function-on then
+   > failed its firmware download (`RST_FW_DL_FAIL`) on essentially
+   > every boot. `syncexec` makes init block until `wmtdetect-init`
+   > exits, guaranteeing `WMT_init()` completes first. This was the
+   > single root cause of a long "WiFi flaky / WLAN Operation Error"
+   > investigation — it was never flaky hardware, just a dropped init
+   > command.
+
+4. **Function-on.** Something has to write `1` to `/dev/wmtWifi` to
+   power on the connsys WiFi function (which creates `wlan0`); the OHOS
+   WiFi framework does not do this reliably on its own. `wmtdetect-init
+   wifi-on` does it, run as the `wmtwifi-on` oneshot init service
+   (started by the `boot` job, so it never blocks pre-init). With the
+   `syncexec` ordering correct it succeeds on the first attempt; the
+   service keeps a retry loop purely as insurance against a transient
+   function-on failure.
+
+`init.x23.cfg` also `syncexec`s `/system/bin/rfkill unblock all` after
+the wlan modules (covering the freshly-created `phy0`).
+
+### Verified (2026-05-19, on device)
+
+After a clean flash, `wmtwifi-on` powers on the connsys WiFi during the
+`boot` stage; `wlan0` comes up and OHOS auto-connects to the saved WPA2
+network — `ifconfig wlan0` shows a DHCP lease and `ping 8.8.8.8` returns
+0% loss (~17 ms RTT) within ~30 s of boot, reproducibly across reboots.
+The Phase 10 HDI services (`wifi_host -i 5`, `wpa_host -i 6`) are
+unchanged.
+
+**Lessons:**
+- An MTK connsys WiFi/BT chip needs more than its modules loaded — the
+  `wmt_loader` chip-detect ioctl that fires the kernel `WMT_init()` is a
+  hard requirement, and the wlan modules must load *after* it.
+- OHOS init has **no `exec_start`** — only `exec` (async) and `syncexec`
+  (synchronous). Any init.cfg line that must complete before later lines
+  (here: `WMT_init()` before the WiFi driver insmod) must use
+  `syncexec`. An `exec_start` line is silently dropped.
+
+Any future connsys-side bring-up (Bluetooth N9.4, GPS, FM) reuses the
+same `wmt_drv` + `wmtdetect-init` foundation.
 
 ---
 
@@ -284,13 +383,21 @@ Phase 12 currently uses an LXC-time bind to substitute the missing `sharefs` ker
 2. **`start-ohos.sh` PulseAudio mask** → no-op natively; remove the dependency.
 3. **Phase 11 Fix 2** (`/ohos-host-action` flag) → delete entirely under native boot.
 4. **Phase 8.15 logind workaround** → delete entirely under native boot.
-5. **N9.2 WiFi**: Phase 10 already complete; N9.2 collapses to "verify firmware path" and "ensure rfkill unblock fires".
+5. **N9.2 WiFi**: Phase 10's OHOS userspace carries over, but the connsys
+   *kernel* stack does not — the `vendor_dlkm` connsys modules must be
+   bundled into `vendor_boot` and `insmod`'d at pre-init, and a
+   `wmtdetect-init` helper must run the `wmt_loader` chip-detect ioctl
+   (kernel `WMT_init()`) between the `wmt_drv` and `wlan_drv` insmods.
 6. **N9.10 sharefs**: ship LXC-equivalent bind; port kernel driver in Milestone 5.
 
 ## Tasks status
 
 - ✅ **N9.1** — Firmware path: `init.x23.cfg` writes `firmware_class.path=/android/vendor/firmware` at pre-init (2026-05-18) — OHOS `/vendor/firmware` doesn't exist; in-kernel `request_firmware` (AW883xx codec) needs Halium's tree
-- ✅ **N9.2** — WiFi: rfkill unblock added in N3.3; HDI WPA services unchanged from Phase 10
+- ✅ **N9.2** — WiFi: 7 connsys (WMT) kernel modules bundled into
+  vendor_boot + insmod'd at pre-init, with the `wmtdetect-init` helper
+  running the kernel `WMT_init()` ioctl between the `wmt_drv` and
+  `wlan_drv` insmods (2026-05-18); rfkill unblock from N3.3; HDI WPA
+  services unchanged from Phase 10. Scan + connect verified on device
 - ⏳ **N9.3** — Modem / RIL: deferred to Milestone 5+
 - ⏳ **N9.4** — Bluetooth: deferred to post-Milestone-3
 - ✅ **N9.5** — Audio: 23 audio-stack kernel modules bundled into vendor_boot
