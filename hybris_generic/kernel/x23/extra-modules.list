@@ -1,7 +1,8 @@
-# Extra GPU/touch kernel modules staged into vendor_boot by
+# Extra GPU/touch/audio kernel modules staged into vendor_boot by
 # device/board/oniro/hybris_generic/kernel/x23/build_kernel.sh.
 # The .ko binaries are gitignored (build artifacts); this list is the
-# tracked source of truth. See phase_n8_graphics_native.md N8.11/N8.13.
+# tracked source of truth. See phase_n8_graphics_native.md N8.11/N8.13
+# and phase_n9_firmware_peripherals.md N9.5 (audio).
 aee_aed.ko
 chipone-tddi.ko
 clk-common.ko
@@ -54,3 +55,32 @@ sspm_v3.ko
 system_heap.ko
 tinysys-scmi.ko
 vcp_status.ko
+
+# MT6789 + MT6366 + AWINIC AW883xx audio stack.  These are second-stage
+# (Android /vendor/lib/modules) modules — Halium's vendor_boot modules.load
+# doesn't carry them, so native boot never loads them and no soundcard
+# registers.  init.x23.cfg insmods them at pre-init in dependency order.
+# See phase_n9_firmware_peripherals.md N9.5.
+nvmem-mt635x-efuse.ko
+mtk-afe-external.ko
+scp.ko
+adsp.ko
+mtk-scp-audiocommon.ko
+audio_ipi.ko
+mtk-scp-audio.ko
+snd-soc-audiodsp-common.ko
+mtk-scp-ultra.ko
+snd-soc-mtk-scp-ultra.ko
+rps_perf.ko
+ccmni.ko
+ccci_util_lib.ko
+ccci_auxadc.ko
+ccci_md_all.ko
+snd-soc-mtk-common.ko
+mtk-sp-spk-amp.ko
+smartpa.ko
+mt6358-accdet.ko
+snd-soc-mt6366.ko
+snd-soc-mt6789-afe.ko
+mtk-btcvsd.ko
+mt6789-mt6366.ko
