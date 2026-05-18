@@ -84,3 +84,19 @@ snd-soc-mt6366.ko
 snd-soc-mt6789-afe.ko
 mtk-btcvsd.ko
 mt6789-mt6366.ko
+
+# MT6789 connsys (MediaTek WMT) WiFi stack.  Same second-stage-module
+# problem as the audio + GPU stacks: the connsys driver set lives in the
+# Android vendor_dlkm partition (/vendor/lib/modules), which native boot
+# does not carry or load.  init.x23.cfg insmods them at pre-init in
+# dependency order; `wmt_drv` must be followed by the wmtdetect-init
+# helper (kernel WMT_init) before the wlan modules.  cfg80211.ko is
+# already in Halium's vendor_boot modules.load, so it is not listed here.
+# See phase_n9_firmware_peripherals.md N9.2.
+connadp.ko
+connfem.ko
+btif_drv.ko
+wmt_drv.ko
+mddp.ko
+wmt_chrdev_wifi.ko
+wlan_drv_gen4m_6789.ko

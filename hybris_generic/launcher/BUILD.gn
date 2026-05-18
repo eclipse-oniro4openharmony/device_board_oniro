@@ -19,6 +19,24 @@ ohos_executable("androidd") {
   subsystem_name = "device_hybris_generic"
 }
 
+# Phase N9.2 — native-boot replacement for the Android `wmt_loader`
+# connsys chip-detect step.  Runs the /dev/wmtdetect ioctl sequence that
+# fires the kernel's WMT_init(); without it the MTK WiFi/BT function-on
+# path is dead.  Pure C, libc only.  See phase_n9_firmware_peripherals.md.
+ohos_executable("wmtdetect_init") {
+  sources = [ "wmtdetect-init.c" ]
+  output_name = "wmtdetect-init"
+  cflags = [
+    "-Wall",
+    "-Wextra",
+    "-O2",
+  ]
+  install_enable = true
+  install_images = [ "system" ]
+  part_name = "device_hybris_generic"
+  subsystem_name = "device_hybris_generic"
+}
+
 # Phase N4 — init service definition.  Started on post-fs-data so that
 # /data/android can be created before the launcher tries to bind-mount
 # it.
@@ -34,5 +52,6 @@ group("androidd_group") {
   deps = [
     ":androidd",
     ":androidd_cfg",
+    ":wmtdetect_init",
   ]
 }
