@@ -1,6 +1,11 @@
 # Phase N9 — Firmware, Peripherals & Connectivity
 
-**Status:** 🔄 Partial (2026-05-12).  WiFi (Phase 10) and audio (Phase 13B) are native and inherit cleanly — no Android HAL dependency.  Bluetooth and sensors still need their Android HALs running in `androidd`'s namespace; defer until N4's exec-init SEGV is resolved (see `phase_n4_androidd.md`).
+**Status:** 🔄 Partial (2026-05-18).  WiFi (Phase 10) is native and inherits
+cleanly.  Audio (Phase 13B) is native too, but needed its MT6789/MT6366
+kernel modules bundled into `vendor_boot` (N9.5, 2026-05-18) — they live in
+the Android second-stage module set that native boot never loads.  Bluetooth
+and sensors still need their Android HALs running in `androidd`'s namespace;
+defer until N4's exec-init SEGV is resolved (see `phase_n4_androidd.md`).
 
 The peripherals Ubuntu Touch was loading transparently come up under OHOS.
 
@@ -53,7 +58,22 @@ Wait — `/vendor/firmware` is OHOS-vendor and likely already exists as a direct
 
 (Cleaner: leave OHOS's empty `/vendor/firmware` in place; bind Halium's on top.)
 
-> **TODO:** add the firmware bind to `init.x23.cfg` after first-boot ueventd validation confirms the kernel does try `/vendor/firmware` and fails to find WiFi firmware there. Don't add speculatively — Phase 10's WiFi working today via LXC paths suggests the kernel may already accept `/android/vendor/firmware` via the libhybris linker remap path. Confirm on first boot.
+> **RESOLVED (2026-05-18, via N9.5 audio bring-up).** Confirmed on the
+> device: OHOS `/vendor/firmware` does *not* even exist, so any
+> in-kernel `request_firmware()` lands at `-ENOENT`. The AW883xx
+> speaker codec's `request_firmware("aw883xx_acf.bin")` was the first
+> consumer to actually exercise this path — without the firmware the
+> amp never initialises (silent speaker). Fix shipped: `init.x23.cfg`
+> pre-init does
+> `write /sys/module/firmware_class/parameters/path /android/vendor/firmware`
+> before the audio `insmod`s. `firmware_class.path` is a writable
+> module param; the `write` retargets *all* in-kernel firmware lookups
+> at Halium's firmware tree (loop-mounted at `/android/vendor` in N8.1)
+> — cleaner than a bind, and it needs no `/vendor/firmware` dir to
+> exist. (Pitfall: do **not** set it with `echo` from a shell — the
+> trailing newline becomes part of the path and every lookup fails
+> `…/firmware\n/<name>` → ENOENT. OHOS init's `write` command writes
+> the value with no newline, so the `init.x23.cfg` line is correct.)
 
 ---
 
@@ -98,11 +118,110 @@ Estimated 2–3 days similar to WiFi but smaller surface.
 
 ---
 
-## N9.5 — Audio ✅
+## N9.5 — Audio ✅ (2026-05-18 — fixed + flashed)
 
-Already done in Phase 13B (native ALSA). No new work.
+The Phase 13B userspace (native ALSA via `audio_host` + libasound,
+`audio_alsa/vendor_render.c`) carries over unchanged. **Two separate
+things did NOT carry over** — both fixed 2026-05-18, rebuilt and
+flashed:
 
-`audio_host` cfg from `vendor/oniro/hybris_generic/hdf_config/uhdf/device_info.hcs` carries over unchanged. `/dev/snd/*` perms set by N2.6 ueventd. `mt6789-mt6366` codec firmware in-kernel.
+1. **The MT6789/MT6366 audio kernel drivers never loaded** →
+   `/proc/asound/cards` showed *no soundcards*, `/dev/snd` held only
+   `timer`, `audio_host` had no `primary` adapter.
+2. **The AW883xx speaker amp's config firmware was unreachable** → even
+   once the card was up, the speaker stayed silent (see "AW883xx
+   firmware" below).
+
+Root cause — same class as the Mali GPU (N8.11) and touch (N8.13)
+modules: the MTK audio stack is built `=m` and lives in the Android
+**second-stage** module set (`/vendor/lib/modules`). It is *not* in
+Halium's `vendor_boot` `modules.load`, so under native boot — where OHOS
+init replaces Android second-stage init — nothing ever loads it. In the
+LXC era this was invisible: OHOS ran inside Ubuntu Touch, whose Android
+init loaded the full `/vendor/lib/modules` set before the container
+started.
+
+Fix — bundle the audio modules into `vendor_boot` and `insmod` them at
+pre-init, exactly like the GPU/touch stacks:
+
+- **`kernel/x23/extra-modules.list`** — 23 audio modules added so
+  `build_kernel.sh` stages their `.ko` into the `vendor_boot` overlay
+  (→ `/mnt/kmodules`).
+- **`vendor/oniro/hybris_generic/etc/init/init.x23.cfg`** — 23 `insmod`
+  lines in the pre-init job, in dependency order, plus a
+  `write /sys/module/firmware_class/parameters/path /android/vendor/firmware`
+  line before them (see "AW883xx firmware" below).
+
+Module set + load order (dep-resolved from `modules.dep` / each module's
+`depends` field; all other transitive deps — `clk-common`, `emi*`,
+`mtk-mbox`, `aee_aed`, … — are already up via the chainload
+`modules.load` + the GPU `insmod` block):
+
+```
+nvmem-mt635x-efuse   PMIC efuse nvmem provider; mt6366 codec + mt635x-auxadc
+                     defer (-517 "Get efuse failed") without it
+mtk-afe-external     SCP/AFE leaf, no deps
+scp adsp             SCP + audio-DSP coprocessors
+mtk-scp-audiocommon audio_ipi mtk-scp-audio snd-soc-audiodsp-common
+mtk-scp-ultra snd-soc-mtk-scp-ultra        ultrasound (proximity) path
+rps_perf ccmni ccci_util_lib ccci_auxadc ccci_md_all
+                     modem (eccci) — hard symbol deps of snd-soc-mtk-common
+snd-soc-mtk-common   MTK ASoC common
+mtk-sp-spk-amp smartpa             speaker-amp common + AWINIC AW883xx codec
+mt6358-accdet snd-soc-mt6366       PMIC codec (mt6366 = mt6358 family)
+snd-soc-mt6789-afe                 MT6789 AFE platform
+mtk-btcvsd                         BT-CVSD — registers platform component
+                     `18050000.mtk-btcvsd-snd`; the card's btcvsd dai_link
+                     references it by name, so the card -517-defers without it
+mt6789-mt6366                      machine driver — registers card 0
+```
+
+Two non-obvious blockers found while bringing the card up live:
+
+1. **`nvmem-mt635x-efuse`** is a separate `=m` nvmem provider. Without
+   it the `mt6358-sound` codec probe and `mt635x-auxadc` both stick at
+   `-EPROBE_DEFER` ("Get efuse failed (-517)") — the codec reads PMIC
+   trim data from this efuse.
+2. **`mtk-btcvsd`** is not a symbol dependency of any audio module, so
+   it isn't pulled in by `modules.dep`. But the `mt6789-mt6366` card has
+   a `btcvsd` dai_link whose platform component (`18050000.mtk-btcvsd-snd`)
+   is registered by `mtk-btcvsd`. `snd_soc_register_card` returns
+   `-517` until that component exists. `CONFIG_SND_SOC_MTK_BTCVSD=m` ⇒
+   the dai_link is compiled in ⇒ the module is mandatory for the card.
+
+### AW883xx firmware (the "card up but silent" half)
+
+With the card registered, the music app played but the speaker was
+silent. The X23 speaker is an AWINIC AW883xx smart amp; its codec
+driver (`smartpa.ko`) loads a DSP config blob `aw883xx_acf.bin` via
+`request_firmware()` — and **only after that load succeeds does it
+create the `aw_dev_0_prof` / `aw_dev_0_switch` kcontrols** that Phase
+13B's `vendor_render.c` toggles to power the amp. The kernel searched
+`firmware_class.path=/vendor/firmware`, which on OHOS doesn't even
+exist; the firmware actually ships at `/android/vendor/firmware/aw883xx_acf.bin`
+(Halium's tree, loop-mounted in N8.1). So `request_firmware` hit
+`-ENOENT`, the amp was never initialised, and the `aw_dev_0_*` controls
+were absent.
+
+Fix: the `init.x23.cfg` `write` line above retargets `firmware_class.path`
+at `/android/vendor/firmware`. `aw883xx_load_fw` is async and runs from
+the *ASoC codec probe* (when the card binds the codec), so the path is
+set well before the lookup. With it, `aw883xx_acf.bin` loads,
+`aw_dev_0_*` appear, and `aw883xx_start_pa` succeeds. See N9.1 for the
+`firmware_class.path` mechanism + the trailing-newline pitfall.
+
+### Verified
+
+On a clean boot after flashing `super` + `boot_a` + `vendor_boot_a`
+(no hand-patching): `firmware_class.path` = `/android/vendor/firmware`,
+card 0 `mt6789mt6366` registers with all 45 PCM nodes, the `aw_dev_0_*`
+controls exist, `audio_host` loads the `primary` adapter, and
+`aw883xx_start_pa: start success` — audible on the X23 speaker
+(confirmed by the user playing the music-app demo).
+
+`/dev/snd/*` perms set by N2.6 ueventd. `audio_host` cfg from
+`vendor/oniro/hybris_generic/hdf_config/uhdf/device_info.hcs` carries
+over unchanged.
 
 **One adjustment** from `start-ohos.sh` that needs to migrate to native init: the `start-ohos.sh` script masked PulseAudio (`systemctl mask pulseaudio`) before container start. Native boot has no PulseAudio (no Ubuntu Touch host). The mask becomes a no-op; remove the dependency from any native init script.
 
@@ -170,11 +289,14 @@ Phase 12 currently uses an LXC-time bind to substitute the missing `sharefs` ker
 
 ## Tasks status
 
-- ✅ **N9.1** — Firmware path: cmdline already correct; vendor bind deferred to first-boot verification
+- ✅ **N9.1** — Firmware path: `init.x23.cfg` writes `firmware_class.path=/android/vendor/firmware` at pre-init (2026-05-18) — OHOS `/vendor/firmware` doesn't exist; in-kernel `request_firmware` (AW883xx codec) needs Halium's tree
 - ✅ **N9.2** — WiFi: rfkill unblock added in N3.3; HDI WPA services unchanged from Phase 10
 - ⏳ **N9.3** — Modem / RIL: deferred to Milestone 5+
 - ⏳ **N9.4** — Bluetooth: deferred to post-Milestone-3
-- ✅ **N9.5** — Audio: Phase 13B unchanged; PulseAudio mask becomes no-op
+- ✅ **N9.5** — Audio: 23 audio-stack kernel modules bundled into vendor_boot
+  + insmod'd at pre-init, + `firmware_class.path` retargeted for the AW883xx
+  codec firmware (2026-05-18); rebuilt + flashed; speaker audible on clean
+  boot. Phase 13B userspace unchanged
 - ⏳ **N9.6** — Sensors: deferred
 - ✅ **N9.7** — Power: native reboot path works without /ohos-host-action; logind workaround disappears
 - ⏳ **N9.8** — Camera: deferred (multi-week project)
