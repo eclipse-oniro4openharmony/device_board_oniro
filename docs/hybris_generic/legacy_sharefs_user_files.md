@@ -1,10 +1,85 @@
-# Phase 12: User-File Access via `sharefs` — Current Workaround & Proper Fix
+# Phase 12: User-File Access via `sharefs`
 
-> **Legacy (LXC-era) document.** Describes the original OHOS-as-LXC-container
-> path, which is **no longer maintained** — the project now boots OHOS
-> natively (no Ubuntu Touch host, no LXC). Kept as a reference for the HAL /
-> driver bring-up detail (libhybris, graphics, audio, WiFi, …) that still
-> applies under native boot. For current status start at [README.md](README.md).
+> **Legacy (LXC-era) document.** The sections below the "Native-boot
+> resolution" describe the original OHOS-as-LXC-container path and its
+> bind-mount workaround, which is **no longer used**. For current status
+> start at [README.md](README.md).
+
+## Native-boot resolution (2026-05-18) — the proper fix, DONE
+
+The `sharefs` kernel driver is now **ported and built into the Volla X23
+kernel**, so `storage_daemon`'s stock JSON-driven mount flow gives normal
+apps a working `/storage/Users` view. No bind-mount workaround, no
+userspace patches to the mount logic.
+
+Four changes — all reproducible from a clean checkout:
+
+1. **`sharefs` kernel driver.** The OHOS `kernel/linux/linux-5.10`
+   reference tree already ships a 5.10-native `sharefs` (the X23 kernel
+   is also 5.10, so **no VFS-API port was needed** — all 8 source files
+   compiled unmodified). The 5.10 `sharefs` has **no `access_token_id`
+   dependency** — just standard VFS + `configfs`. It ships as
+   `kernel/x23/patches/kernel-source/sharefs.patch` (adds `fs/sharefs/` +
+   wires `fs/Kconfig`/`fs/Makefile`), applied by `build_kernel.sh`;
+   `kernel/x23/config/openharmony.config` sets `CONFIG_SHARE_FS=y`
+   (built-in, so it is registered before `storage_daemon` mounts).
+
+1b. **`CONFIG_SHAREFS_SUPPORT_OVERRIDE=y`** (also in `openharmony.config`).
+   Without it, `sharefs_permission()` (`fs/sharefs/inode.c`) enforces
+   sharefs's per-app isolation model: every level-1 dir under the mount
+   (`Download`, `Documents`, `Desktop`, …) is presented as mode `0550`
+   owned by uid `<userId>*200000`. A normal app such as VLC (no
+   `FILE_ACCESS_COMMON_DIR`, uid `<userId>*200000+appId`) is therefore
+   "other" and **cannot even traverse into a picked file's directory**.
+   `file_api`'s `OpenByFileDataUri` (`open.cpp`) then sees
+   `access(realPath)!=0` for the `file://docs/...` URI and misroutes the
+   open to the MediaLibrary DataShare (`datashare:///media`), which
+   rejects a non-media URI (`-13`) — the app reports "No such file or
+   directory". With `SUPPORT_OVERRIDE`, `sharefs_permission()` returns 0
+   and access defers to the lower ext4 perms (`0771` dirs, `0644` files —
+   both world-traversable/readable). This is the OHOS-intended setting
+   for device types without per-app file isolation and matches this
+   build's single-user dev posture. Symptom this fixed: file picker shows
+   the file and returns its URI fine, but the picked video/file won't
+   open/play.
+
+2. **`const.distributed_file_property.enabled=false`** in
+   `foundation/filemanagement/dfs_service/services/distributed_file.para`.
+   This was the non-obvious blocker. `storage_daemon::MountHmdfs()`
+   (`mount_manager.cpp:556`) checks `SupportHmdfs()`, which reads that
+   `const.` param. While it was `true`, `MountHmdfs()` attempted the real
+   `-t hmdfs` mount, which fails `ENODEV` (no hmdfs driver) and **aborts
+   the entire per-user mount sequence** at `MountFileSystem():548` — so
+   `MountSharefs()` and `MountAppdata()` (which produce the docs `sharefs`
+   mounts) never ran. With `false`, `MountHmdfs()` takes the
+   `LocalMount()` path: plain bind mounts only (no hmdfs driver needed),
+   feeding `/storage/media/<id>/local` from `/data/service/el2/<id>/hmdfs/
+   account`, after which `MountSharefs` + `MountAppdata` run normally.
+   The param had to change in `distributed_file.para` itself — it is a
+   `const.` param and the param service (`CheckParamValue`,
+   `param_manager.c:617`) rejects re-setting a `const.` once loaded, so a
+   later `/sys_prod` vendor `.para` cannot override the `/system` one.
+
+3. **Picker fix re-gated.** The 12.1 MediaLibrary `CheckUnlockScene`
+   bypass in `os_account_interface.cpp::SendToStorageAccountStart` was
+   gated on `getenv("container")` — an LXC-era env var absent under
+   native boot. Re-gated on `getenv("OHOS_NATIVE_BOOT")` (set by the
+   chainload). Without it the OS account stays `Verified:false` and
+   MediaLibrary self-kills, breaking the file picker before it even
+   appears.
+
+Resulting on-device mount chain (verified):
+`/data/service/el2/100/hmdfs/account/files/Docs` (real ext4) → bind →
+`/storage/media/100/local/files/Docs` → `-t sharefs` →
+`/mnt/user/100/currentUser/other` → bind →
+`/mnt/user/100/sharefs/docs/currentUser` (the view normal apps get at
+`/storage/Users/currentUser`). `/proc/filesystems` lists `sharefs`;
+`/config/sharefs/<bundle>` is populated. **End-to-end verified**: VLC
+(`org.oniroproject.vlc`) picks a file from `/storage/Users` and plays it.
+
+Everything below is the retired LXC-era workaround, kept for history.
+
+---
 
 ## Context
 
