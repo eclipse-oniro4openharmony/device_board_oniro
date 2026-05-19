@@ -1,7 +1,7 @@
-From 0ba80790808dad779a26a32b94c60ed1ee5dd784 Mon Sep 17 00:00:00 2001
+From 5a06f567a18bb13e7f5dbcb0d0a3b36f6e7d0fce Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
-Date: Tue, 12 May 2026 11:09:05 +0000
-Subject: [PATCH 5/6] init: skip mksandbox under OHOS_NATIVE_BOOT=1
+Date: Tue, 19 May 2026 16:36:07 +0000
+Subject: [PATCH 2/3] init: skip mksandbox under OHOS_NATIVE_BOOT=1
 
 In native chainload boot mode, OHOS init runs as PID 1 chrooted into
 system_a. DoMkSandbox's unshare(CLONE_NEWNS) + chdir(rootPath) +
@@ -16,20 +16,21 @@ detect chrooted bring-up here and skip the sandbox dance. Sandboxing
 is a service-isolation feature, not required for the chainload
 bring-up path.
 
+Change-Id: I08ffee5d8a974a53980c40766b933c0f72a30d1e
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
-Change-Id: If89d2a0adb522c4d513ac0ac9293da533702c105
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ---
  services/init/standard/init_cmds.c | 12 ++++++++++++
  1 file changed, 12 insertions(+)
 
 diff --git a/services/init/standard/init_cmds.c b/services/init/standard/init_cmds.c
-index abc28fb5..6fb7b842 100755
+index 08da2516..1633681d 100755
 --- a/services/init/standard/init_cmds.c
 +++ b/services/init/standard/init_cmds.c
-@@ -989,6 +989,18 @@ static void DoMkSandbox(const struct CmdArgs *ctx)
-     if (InContainerMode() != 0) {
-         return;
-     }
+@@ -963,6 +963,18 @@ static void DoSwapon(const struct CmdArgs *ctx)
+ 
+ static void DoMkSandbox(const struct CmdArgs *ctx)
+ {
 +    /* Native chainload boot (init runs chrooted into system_a): the
 +     * unshare+chdir+pivot_root+umount2+setns sequence below leaves init's
 +     * fs_struct->{root,pwd} pointing into a detached mount tree.  Every
