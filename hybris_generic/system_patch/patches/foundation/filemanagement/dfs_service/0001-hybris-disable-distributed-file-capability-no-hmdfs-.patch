@@ -1,0 +1,45 @@
+From 3548c9cf11a12f6b5ed8ebadb7259bac04a8d95f Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 19 May 2026 11:17:41 +0000
+Subject: [PATCH] hybris: disable distributed-file capability (no hmdfs driver)
+
+The Halium/MTK 5.10 kernel has no hmdfs filesystem driver. With
+const.distributed_file_property.enabled=true, storage_daemon's MountHmdfs()
+attempts the real `-t hmdfs` mount, which fails ENODEV and aborts the
+entire per-user mount sequence -- MountSharefs() and MountAppdata() never
+run, so normal apps see an empty /storage/Users.
+
+Setting it false routes MountHmdfs() through LocalMount() (plain bind
+mounts only, no hmdfs driver needed) so the rest of the chain runs.
+
+See legacy_sharefs_user_files.md.
+
+Change-Id: I7101cbbc7e2f2a0e3639a9943bab1a709ba38bda
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ services/distributed_file.para | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/services/distributed_file.para b/services/distributed_file.para
+index 901aa74cd..c5665d87f 100644
+--- a/services/distributed_file.para
++++ b/services/distributed_file.para
+@@ -12,6 +12,13 @@
+ # limitations under the License.
+ 
+ 
+-const.distributed_file_property.enabled=true
++# hybris_generic: the Halium/MTK 5.10 kernel has no hmdfs filesystem driver,
++# so the distributed-file capability is unavailable on this build.  Leaving
++# this `true` makes storage_daemon's MountHmdfs() attempt the real `-t hmdfs`
++# mount, which fails with ENODEV and aborts the entire per-user mount
++# sequence (MountSharefs + MountAppdata never run -> /storage/Users empty for
++# normal apps).  `false` routes MountHmdfs() through LocalMount() (plain bind
++# mounts only, no hmdfs driver needed) so the rest of the chain runs.
++const.distributed_file_property.enabled=false
+ const.distributed_file_only_for_same_account_test=true
+ 
+-- 
+2.50.1
+
