@@ -91,6 +91,6 @@ index 8a06d0f84..5e3382ccd 100644
 +
 +ccflags-y += $(HDF_OSAL_INC) $(HDF_FRAMEWORK_INC)
 +endif
- 
  hid-y			:= hid-core.o hid-input.o hid-quirks.o
  hid-$(CONFIG_DEBUG_FS)		+= hid-debug.o
+ 

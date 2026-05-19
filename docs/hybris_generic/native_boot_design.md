@@ -43,7 +43,7 @@ A surprising amount of the heavy lifting is already done for `hybris_generic`. B
 | OHOS ramdisk builds | `out/hybris_generic/packages/phone/images/ramdisk.img` (~2.8 MB gzip cpio with `init`→`bin/init_early`, full toybox, `unshare`/`nsenter`/`pivot_root`/`switch_root`) | Phase N1 only needs to repack into Halium `boot.img`, not author a new ramdisk. |
 | `enable_ramdisk: true` | `vendor/oniro/hybris_generic/config.json:10` | Already on; no product config flip needed. |
 | OHOS `system.img` (2 GB ext4) + `vendor.img` (256 MB ext4) + `userdata.img` (1.4 GB) | Same dir, every full build | Can flash directly; only the partition mapping is open. |
-| Kernel cmdline already carries `hardware=x23`, `ohos.boot.sn=...` | `device/board/oniro/hybris_generic/kernel/x23/patch/linux-5.10/volla-vidofnir.patch:12` | OHOS init second-stage already finds `/vendor/etc/fstab.x23` via `${ohos.boot.hardware}`. |
+| Kernel cmdline already carries `hardware=x23`, `ohos.boot.sn=...` | `device/board/oniro/hybris_generic/kernel/x23/patches/port-repo/deviceinfo.patch` | OHOS init second-stage already finds `/vendor/etc/fstab.x23` via `${ohos.boot.hardware}`. |
 | `selinux=false`, `seccomp=false` | `vendor/oniro/hybris_generic/config.json:12-13` | Native boot inherits this; no further action. |
 | 29 `InContainerMode()` guards in init | `base/startup/init/` (count from `grep -rn`, not 27 as old plan claimed) | All 29 default-take the *native* path when the `container=` env is unset; inverting the boot mode auto-runs them. |
 | Phase 10 WiFi via HDI WPA + `chip_interface_service` | `legacy_wifi_support.md` | N9.2 collapses to "load wlan/bt firmware + start `wpa_host` + `chip_interface_service`"; no new Android WiFi HAL needed. |
@@ -797,7 +797,7 @@ adb shell "echo 1234 | sudo -S dd if=/tmp/system.img of=/dev/block/by-name/syste
 
 **N10.5 — pstore / ramoops.**
 - Add to kernel cfg (Phase 2 build): `CONFIG_PSTORE=y`, `CONFIG_PSTORE_RAM=y`, `CONFIG_PSTORE_CONSOLE=y`, `CONFIG_PSTORE_PMSG=y`.
-- Reserve a ramoops region via DT overlay (`device/board/oniro/hybris_generic/kernel/x23/patch/linux-5.10/ramoops.patch`):
+- Reserve a ramoops region via DT overlay (`device/board/oniro/hybris_generic/kernel/x23/patches/kernel-source/ramoops.patch`):
 ```
 ramoops {
     compatible = "ramoops";
@@ -879,7 +879,7 @@ WiFi (Phase 10), audio (Phase 13B), input (Phase 7), backlight + power (Phases 8
 
 | Item | X23 (`vidofnir`, MT6789) | Tablet (`mimir`, MT8781) |
 |---|---|---|
-| Kernel patches | `kernel/x23/patch/` | `kernel/mimir/patch/` |
+| Kernel patches | `kernel/x23/patches/` | `kernel/mimir/patch/` |
 | `hardware=` | `x23` | `mimir` |
 | Android base | 12 (Halium) | 13 (with Phase 9 libhybris hooks) |
 | Speaker path (Phase 13B) | DL1 → I2S3 → AW883xx | Ext_Speaker_Amp |
