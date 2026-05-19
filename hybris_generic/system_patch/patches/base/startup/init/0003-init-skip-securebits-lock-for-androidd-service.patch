@@ -1,7 +1,7 @@
-From 2a8b877dd7b2bd39596cefe9fd841ab62e748464 Mon Sep 17 00:00:00 2001
+From e11276ea6f467cc64ea0b8bf75f062378b3be7ff Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
-Date: Wed, 13 May 2026 20:45:17 +0000
-Subject: [PATCH 6/6] init: skip securebits lock for androidd service
+Date: Tue, 19 May 2026 16:37:12 +0000
+Subject: [PATCH 3/3] init: skip securebits lock for androidd service
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -21,17 +21,12 @@ PR_SET_SECUREBITS call entirely for that service.  This leaves
 androidd's securebits at 0, so when Halium init forks logd / netd /
 etc. it can set its own KEEP_CAPS|KEEP_CAPS_LOCKED dance freely.
 
-Verified on Volla X23 via a static aarch64 probe binary
-(`logd_probe.c`) that simulates Halium init's pre-exec setup:
-pre-fix PR_GET_SECUREBITS=0x20 → PR_SET_SECUREBITS(0x30) rc=-1
-post-fix PR_GET_SECUREBITS=0x0  → PR_SET_SECUREBITS(0x30) rc=0.
-
 Full root-cause writeup in
-device/board/oniro/docs/hybris_generic/native_boot_plan/phase_n4_androidd.md
-"2026-05-14 PM" section.
+device/board/oniro/docs/hybris_generic/phase_n4_androidd.md.
 
-Change-Id: I8fa0949cfdce009345c224a03c2eabe07e43dded
+Change-Id: Id5a2b41a412987dd194dab5975db12dbb1198380
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ---
  services/init/adapter/init_adapter.c | 13 +++++++++++++
  1 file changed, 13 insertions(+)
