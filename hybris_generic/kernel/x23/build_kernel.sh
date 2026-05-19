@@ -52,38 +52,53 @@ else
     cp -arf "$KERNEL_SRC"/* "$KERNEL_SRC_TMP_PATH/"
 fi
 
-# 3. Patching
-cd "$KERNEL_SRC_TMP_PATH"
-PATCH_PATH="$HERE/patch/linux-5.10"
+# 3. Patch the kernel-port repo and the kernel source.
+#
+# All kernel modifications live under kernel/x23/ — this script is their
+# single owner (system_patch/ deliberately does not touch the kernel; the
+# kernel-port repo and the MT6789 source are not OHOS-checkout repos).
+# There are two distinct target trees, hence two patch sets — see
+# patches/README.md:
+#   patches/port-repo/     -> the volla-vidofnir clone ($KERNEL_TREE)
+#   patches/kernel-source/ -> the downloaded MT6789 source (temp copy)
+#   config/                -> kernel defconfig fragment
+PATCHES="$HERE/patches"
+CONFIG_DIR="$HERE/config"
 
-# Apply volla-vidofnir, halium-build-tools, and libufdt patches ONLY once to the source tree if needed
-# Note: volla-vidofnir and halium-build-tools are NOT in KERNEL_SRC, they are in KERNEL_TREE.
-echo "Applying Volla and Halium build tools patches..."
-pushd "$KERNEL_TREE"
-patch -N -p1 < "$PATCH_PATH/volla-vidofnir.patch" || echo "Volla patch already applied or failed"
-pushd build
-patch -N -p1 < "$PATCH_PATH/halium-generic-adaptation-build-tools.patch" || echo "Halium build tools patch already applied or failed"
-popd
-pushd build-dir/downloads/libufdt
-patch -N -p1 < "$PATCH_PATH/libufdt.patch" || echo "libufdt patch already applied or failed"
-popd
-popd
+# 3a. Port-repo patches — deviceinfo, Halium build tools, libufdt.  These
+# live in $KERNEL_TREE (which persists between builds), so `patch -N`
+# no-ops cleanly when they are already applied.
+echo "Applying port-repo patches..."
+patch -N -p1 -d "$KERNEL_TREE" \
+      < "$PATCHES/port-repo/deviceinfo.patch"  || echo "  deviceinfo: already applied"
+patch -N -p1 -d "$KERNEL_TREE/build" \
+      < "$PATCHES/port-repo/build-tools.patch" || echo "  build-tools: already applied"
+patch -N -p1 -d "$KERNEL_TREE/build-dir/downloads/libufdt" \
+      < "$PATCHES/port-repo/libufdt.patch"     || echo "  libufdt: already applied"
 
-# HDF patch using hdf_patch.sh (it also applies hdf.patch which might fail if we already did sed, but it's fine)
+# 3b. Kernel-source patches — applied to the fresh temp copy, which is
+# recreated every build, so a clean `patch -p1` always applies (a failure
+# is a real error and aborts via `set -e`).
+#
+# HDF is helper-script driven (the script does symlink/copy fixups beyond
+# the plain patch); the rest are plain patches applied in glob order.
+# sharefs.patch adds fs/sharefs/ and wires it into fs/Kconfig + fs/Makefile.
 echo "Applying HDF patch..."
-HDF_PATCH="$PATCH_PATH/common_patch/hdf.patch"
-bash "$PATCH_PATH/common_patch/hdf_patch.sh" "$ROOT_DIR" "$KERNEL_SRC_TMP_PATH" "$HDF_PATCH"
+bash "$PATCHES/kernel-source/hdf_patch.sh" \
+     "$ROOT_DIR" "$KERNEL_SRC_TMP_PATH" "$PATCHES/kernel-source/hdf.patch"
 
-# Apply OpenHarmony adaptation patch
-echo "Applying OpenHarmony adaptation patch..."
-patch -N -p1 < "$PATCH_PATH/kernel_patch/ohos_adaptation.patch" || echo "OHOS adaptation patch already applied or failed"
+for p in "$PATCHES"/kernel-source/*.patch; do
+    [ "$(basename "$p")" = "hdf.patch" ] && continue   # applied via hdf_patch.sh above
+    echo "Applying $(basename "$p")..."
+    patch -p1 -d "$KERNEL_SRC_TMP_PATH" < "$p"
+done
 
-# Apply QoS Auth
+# QoS Auth (helper-script driven, like HDF).
 echo "Applying QoS Auth..."
 bash "$ROOT_DIR/kernel/linux/common_modules/qos_auth/apply_qos_auth.sh" "$ROOT_DIR" "$KERNEL_SRC_TMP_PATH"
 
-# Copy OpenHarmony config
-cp "$PATCH_PATH/kernel_patch/openharmony.config" "$KERNEL_SRC_TMP_PATH/arch/arm64/configs/openharmony.config"
+# Kernel defconfig fragment.
+cp "$CONFIG_DIR/openharmony.config" "$KERNEL_SRC_TMP_PATH/arch/arm64/configs/openharmony.config"
 
 # Build hc-gen
 echo "Building hc-gen..."
