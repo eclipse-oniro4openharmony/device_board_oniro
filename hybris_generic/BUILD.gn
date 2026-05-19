@@ -6,7 +6,7 @@ group("hybris_generic_group") {
     "cfg:hybris_graphic_env_group",
     "cfg:hybris_input_caps_group",
     "cfg:hybris_hdcd_autostart_group",
-    "cfg:hybris_container_fixes_group",
+    "cfg:hybris_device_node_perms_group",
     "cfg:hybris_hdf_env_group",
     "cfg:hybris_composer_gate_group",
     "audio_alsa/test_audio:test_audio_group",
