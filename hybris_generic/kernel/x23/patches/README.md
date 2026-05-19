@@ -43,22 +43,28 @@ clean tree — a failure is a real error (the build aborts).
 | Patch | Patches | Why |
 |---|---|---|
 | `ohos-adaptation.patch` | `drivers/`, `include/`, `kernel/fork.c`, … | OHOS kernel drivers: hilog, accesstokenid, blackbox, hievent, binder token-id, … |
+| `hmdfs.patch` | `fs/hmdfs/` (new), `fs/Kconfig`, `fs/Makefile` | ports the OHOS `hmdfs` distributed filesystem (storage_daemon `-t hmdfs` + os_account account mount) |
 | `sharefs.patch` | `fs/sharefs/` (new), `fs/Kconfig`, `fs/Makefile` | ports the OHOS `sharefs` filesystem (gives normal apps `/storage/Users`) |
 | `hdf.patch` (+ `hdf_patch.sh`) | HDF driver framework | applied via the helper script — it also symlinks/copies the in-tree HDF repos |
+
+> `hmdfs.patch` and `sharefs.patch` both edit `fs/Kconfig` + `fs/Makefile`.
+> They do not conflict: `hmdfs.patch` anchors its two-line wiring at the
+> `fuse` entries, far from `sharefs.patch`'s `ext4`/`zonefs` anchors.
 
 To add a kernel-source patch, drop a `*.patch` here — `build_kernel.sh`
 globs the directory (skipping `hdf.patch`, which the helper script owns).
 Patches apply in glob (alphabetical) order; prefix with `NN-` if a
 specific order is required.
 
-## Regenerating sharefs.patch
+## Regenerating sharefs.patch / hmdfs.patch
 
-`sharefs.patch` carries the whole `fs/sharefs/` driver as new files plus
-the two-line `fs/Kconfig` / `fs/Makefile` wiring. To regenerate it after
-editing the driver, diff a pristine kernel `fs/` against a modified one:
+Each carries a whole filesystem driver (`fs/sharefs/` or `fs/hmdfs/`) as
+new files plus the two-line `fs/Kconfig` / `fs/Makefile` wiring. To
+regenerate one after editing the driver, diff a pristine kernel `fs/`
+against a modified one:
 
-    diff -ruN a/fs b/fs > sharefs.patch
+    diff -ruN a/fs b/fs > <name>.patch
 
 where `a/` holds the pristine `fs/{Kconfig,Makefile}` and `b/` holds the
-modified `fs/{Kconfig,Makefile}` + the `fs/sharefs/` source. The driver
-source is the OHOS `kernel/linux/linux-5.10/fs/sharefs/` reference tree.
+modified `fs/{Kconfig,Makefile}` + the new `fs/<name>/` source. The driver
+source is the OHOS `kernel/linux/linux-5.10/fs/<name>/` reference tree.

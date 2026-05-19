@@ -82,7 +82,8 @@ patch -N -p1 -d "$KERNEL_TREE/build-dir/downloads/libufdt" \
 #
 # HDF is helper-script driven (the script does symlink/copy fixups beyond
 # the plain patch); the rest are plain patches applied in glob order.
-# sharefs.patch adds fs/sharefs/ and wires it into fs/Kconfig + fs/Makefile.
+# hmdfs.patch / sharefs.patch each add a filesystem driver (fs/hmdfs/,
+# fs/sharefs/) and wire it into fs/Kconfig + fs/Makefile.
 echo "Applying HDF patch..."
 bash "$PATCHES/kernel-source/hdf_patch.sh" \
      "$ROOT_DIR" "$KERNEL_SRC_TMP_PATH" "$PATCHES/kernel-source/hdf.patch"
