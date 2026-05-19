@@ -121,13 +121,17 @@ export PATCHES_DIR
 
 # Find all git repositories in ROOT_DIR.
 # Exclude the .repo directory and the oniro device/board/soc/vendor trees
-# (those are our own repos, not upstream repos being patched).
+# (those are our own repos, not upstream repos being patched), and the
+# kernel/linux/volla-* port repos — those are transient build clones owned
+# by device/board/oniro/hybris_generic/kernel/*/build_kernel.sh, not
+# OHOS-checkout repos that system_patch should manage.
 if [[ "$MODE" == "list-dirty" ]]; then
     find "$ROOT_DIR" -name ".git" \( -type d -o -type l \) \
         ! -path "$ROOT_DIR/.repo/*" \
         ! -path "$ROOT_DIR/device/board/oniro/*" \
         ! -path "$ROOT_DIR/device/soc/oniro/*" \
         ! -path "$ROOT_DIR/vendor/oniro/*" \
+        ! -path "$ROOT_DIR/kernel/linux/volla-*" \
         -exec bash -c 'list_dirty "$(dirname "{}")" "$ROOT_DIR"' \;
 else
     find "$ROOT_DIR" -name ".git" \( -type d -o -type l \) \
@@ -135,6 +139,7 @@ else
         ! -path "$ROOT_DIR/device/board/oniro/*" \
         ! -path "$ROOT_DIR/device/soc/oniro/*" \
         ! -path "$ROOT_DIR/vendor/oniro/*" \
+        ! -path "$ROOT_DIR/kernel/linux/volla-*" \
         -exec bash -c 'generate_patch "$(dirname "{}")" "$ROOT_DIR" "$PATCHES_DIR"' \;
 
     echo ""
