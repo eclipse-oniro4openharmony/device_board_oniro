@@ -43,6 +43,55 @@ Four changes — all reproducible from a clean checkout:
    the file and returns its URI fine, but the picked video/file won't
    open/play.
 
+Items 2–3 below were the original interim workarounds for the **missing
+`hmdfs` driver**. Both — plus the two `storage_service` picker patches
+from § 12.1 — are now **removed**: `hmdfs` was ported on 2026-05-19, so
+stock OHOS storage code runs unmodified. See the next section.
+
+## hmdfs native-boot resolution (2026-05-19) — the proper fix, DONE
+
+The `hmdfs` kernel driver is now **ported and built into the X23 kernel**,
+the same way `sharefs` was. With the driver present, `storage_daemon`'s
+real `-t hmdfs` mount path and `os_account`'s per-user `StartUser` both
+succeed, so the four no-hmdfs interim workarounds were dropped:
+
+- **`hmdfs` driver** — `kernel/x23/patches/kernel-source/hmdfs.patch`
+  adds `fs/hmdfs/` from the OHOS `linux-5.10` reference tree and wires
+  `fs/Kconfig`/`fs/Makefile`; `openharmony.config` sets `CONFIG_HMDFS_FS=y`
+  + `CONFIG_HMDFS_FS_PERMISSION=y` (`ENCRYPTION` off — TLS-only, used by
+  the cross-device transport, not the local account mount). Unlike
+  `sharefs`, hmdfs needed ~10 small edits for MTK-5.10 VFS-API gaps
+  (`xattr_handler::get` / `__vfs_getxattr` `flags` arg, the 5-arg
+  `file_open_root` form, an `access_ok` cast) — documented in the patch
+  header.
+- **Removed:** the `const.distributed_file_property.enabled=false`
+  override in `dfs_service/distributed_file.para` — back to upstream
+  `true`. `MountHmdfs()` now takes the real `-t hmdfs` path, which
+  succeeds, and the full per-user chain (hmdfs → sharefs → appdata) runs.
+- **Removed:** the `os_account_interface.cpp` `OHOS_NATIVE_BOOT`
+  "mark user verified" bypass (was § 12.1 fix 1) — `StartUser`'s
+  `/mnt/hmdfs/<id>/account` mount now succeeds, so `isVerified` is set
+  through the real path (`acm dump` → account 100 `Verified: true`).
+- **Removed:** the two `storage_service` `storage_user_path.json` patches
+  — the docs-dir `0711`→`0755` perm relax (§ 12.1 area) and the
+  `/storage/cloud/<id>/files` dir entry (§ 12.1 fix 2). With `hmdfs`
+  enabled the mount chain provides `/storage/cloud/<id>/files` (a
+  `cloud_merge_view` bind) and the docs views for real, so both obsolete.
+
+Resulting on-device mount chain (verified 2026-05-19): the per-user
+sequence mounts `-t hmdfs` at `/mnt/hmdfs/100/{account,non_account,cloud}`
+and binds the hmdfs `device_view` / `cloud_merge_view` onto
+`/storage/media/100`, `/storage/cloud/100`,
+`/mnt/user/100/…/distributedfiles`, `/mnt/user/100/currentUser/filemgr`,
+etc.; `MountSharefs` then runs and the picker `sharefs` views mount on
+top. `/proc/filesystems` lists both `hmdfs` and `sharefs`.
+**End-to-end verified**: VLC (`org.oniroproject.vlc`) picks a file from
+`/storage/Users` and plays it.
+
+----
+
+### Original interim workarounds (2026-05-18, now removed — kept for history)
+
 2. **`const.distributed_file_property.enabled=false`** in
    `foundation/filemanagement/dfs_service/services/distributed_file.para`.
    This was the non-obvious blocker. `storage_daemon::MountHmdfs()`
@@ -67,15 +116,6 @@ Four changes — all reproducible from a clean checkout:
    chainload). Without it the OS account stays `Verified:false` and
    MediaLibrary self-kills, breaking the file picker before it even
    appears.
-
-Resulting on-device mount chain (verified):
-`/data/service/el2/100/hmdfs/account/files/Docs` (real ext4) → bind →
-`/storage/media/100/local/files/Docs` → `-t sharefs` →
-`/mnt/user/100/currentUser/other` → bind →
-`/mnt/user/100/sharefs/docs/currentUser` (the view normal apps get at
-`/storage/Users/currentUser`). `/proc/filesystems` lists `sharefs`;
-`/config/sharefs/<bundle>` is populated. **End-to-end verified**: VLC
-(`org.oniroproject.vlc`) picks a file from `/storage/Users` and plays it.
 
 Everything below is the retired LXC-era workaround, kept for history.
 
@@ -218,6 +258,12 @@ Low priority for bring-up: the current workaround is fully functional for single
 | `device/board/oniro/hybris_generic/utils/start-ohos.sh` | (Previously added chmod loop — removed after JSON patch replaced the need) |
 
 ## 12.1 Normal-app file picker (VLC "Open File") — downstream of the same hmdfs gap
+
+> **Superseded (2026-05-19).** Both fixes below (the `os_account`
+> `isVerified` bypass and the `/storage/cloud/<id>/files` dir entry) are
+> **removed** — the `hmdfs` driver is now ported (see "hmdfs native-boot
+> resolution" near the top), so `StartUser` succeeds and MediaLibrary's
+> `ROOT_MEDIA_DIR` exists for real. Kept for history.
 
 **Symptom (2026-04-16):** In a normal app that calls `picker.DocumentViewPicker().select(...)` (e.g. VLC's `OPEN_FILE_SERVICE` flow), tapping "Open File" does nothing. The picker never appears; `com.ohos.filepicker` spawns, reaches `FilePickerUIExtAbility.onSessionCreate`, then hangs and is killed by AMS with `LIFECYCLE_TIMEOUT`.
 
