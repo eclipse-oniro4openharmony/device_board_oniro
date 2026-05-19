@@ -62,16 +62,16 @@ group("hybris_hdcd_autostart_group") {
   deps = [ ":hybris_hdcd_autostart" ]
 }
 
-ohos_prebuilt_etc("hybris_container_fixes") {
-  source = "z_container_fixes.cfg"
+ohos_prebuilt_etc("hybris_device_node_perms") {
+  source = "z_device_node_perms.cfg"
   relative_install_dir = "init"
   install_images = [ "system" ]
   part_name = "device_hybris_generic"
   subsystem_name = "device_hybris_generic"
 }
 
-group("hybris_container_fixes_group") {
-  deps = [ ":hybris_container_fixes" ]
+group("hybris_device_node_perms_group") {
+  deps = [ ":hybris_device_node_perms" ]
 }
 
 ohos_prebuilt_etc("hybris_hdf_env") {
