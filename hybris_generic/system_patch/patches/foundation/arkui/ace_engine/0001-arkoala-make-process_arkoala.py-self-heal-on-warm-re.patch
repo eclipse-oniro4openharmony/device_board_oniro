@@ -1,0 +1,81 @@
+From 8d2c99ca37eca0e19ad3e5adfcd1b039ad5aa230 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 19 May 2026 13:51:37 +0000
+Subject: [PATCH] arkoala: make process_arkoala.py self-heal on warm rebuilds
+
+The arkoala annotate->process pipeline is non-idempotent.
+arkoala_process (process_arkoala.py) consumes arkui-preprocessed/
+{generated,src} destructively -- it merges generated/ into src/,
+rmtree's generated/, and renames src/ to arkui/, leaving only arkui/.
+
+arkoala_annotate, which regenerates generated/+src/ via annotate.py,
+declares no inputs/deps, so once its declared output exists ninja
+treats it as up-to-date and skips it on every warm rebuild. But
+arkoala_process's declared output is never created, so that action is
+perpetually dirty and re-runs every build -- against an already-
+consumed tree, failing in merge_generated_files with "Generated
+directory does not exist". A cold build hid this because wiping out/
+removes arkoala_annotate's output stamp, forcing it to re-run.
+
+Make process_arkoala.py self-healing: before processing, if
+arkui-preprocessed/generated is missing, re-run annotate.py (which
+wipes and fully regenerates arkui-preprocessed/ from arkui-ohos/).
+The build is now idempotent under both warm and cold builds.
+
+Change-Id: I7edb9f089efb903fa8d9e30f36da86f8d634ea52
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ .../arkts_frontend/arkoala/process_arkoala.py | 29 +++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/frameworks/bridge/arkts_frontend/arkoala/process_arkoala.py b/frameworks/bridge/arkts_frontend/arkoala/process_arkoala.py
+index 5085e04249c..db6797537a9 100755
+--- a/frameworks/bridge/arkts_frontend/arkoala/process_arkoala.py
++++ b/frameworks/bridge/arkts_frontend/arkoala/process_arkoala.py
+@@ -50,6 +50,34 @@ def parse_argv(argv) -> Paths:
+ 
+     return path
+ 
++def ensure_preprocessed(path: Paths):
++    """
++    The arkoala build pipeline is non-idempotent: this script consumes
++    arkui-preprocessed/{generated,src} destructively (merge -> rmtree
++    generated -> rename src to arkui), leaving only arkui/. arkoala_process
++    re-runs on every build, but arkoala_annotate -- which regenerates
++    generated/+src/ via annotate.py -- is skipped by ninja on a warm
++    rebuild because its output stamp still exists. The result is this
++    script running against an already-consumed tree, failing in
++    merge_generated_files with "Generated directory does not exist".
++
++    Detect that state (generated/ missing) and re-run annotate.py first,
++    which wipes and fully regenerates arkui-preprocessed/ from arkui-ohos/.
++    """
++    generated_path = os.path.join(
++        path.project_path, "arkui-preprocessed", "generated")
++    if os.path.exists(generated_path):
++        return
++
++    annotate_script = os.path.normpath(
++        os.path.join(path.project_path, os.pardir, "tools", "annotate.py"))
++    annotate_config = os.path.join(path.project_path, "annotate-config.json")
++    print("Arkoala: arkui-preprocessed already consumed, re-running annotate.py")
++    subprocess.run(
++        [sys.executable, annotate_script, path.project_path, annotate_config],
++        check=True)
++
++
+ def pre_processing(path: Paths):
+     start_time = time.time()
+     target_path = os.path.join(
+@@ -89,6 +117,7 @@ def pre_processing(path: Paths):
+ def main(argv):
+     path = parse_argv(argv)
+     os.chdir(path.project_path)
++    ensure_preprocessed(path)
+     pre_processing(path)
+ 
+ 
+-- 
+2.50.1
+
