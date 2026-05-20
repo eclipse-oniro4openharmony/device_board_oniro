@@ -748,9 +748,12 @@ transport path.
 | **N12.5.3a** | `IServiceManager::get(fqName, instance)` handle resolution + `BC_ACQUIRE`-before-`BC_FREE_BUFFER`.  Wire-format gotcha cluster discovered (see below) | ✅ DONE (2026-05-21) |
 | **N12.5.3b** | `HwCameraProvider::GetCameraIdList`: 3 cameras enumerated end-to-end (S5KGM1ST/OV16A1Q/GC08A3WIDE) | ✅ DONE (2026-05-21) |
 | **N12.5.3c** | Wire `HwCameraProvider` into `HybrisCameraHostVdiImpl::Init` → real `cameraIds_` from HAL ("0","1","2" → "lcam001/002/003" in camera_service) | ✅ DONE (2026-05-21) |
-| N12.5.4 | `GetCameraAbility` returns real metadata (either HCS-style ability loading mirroring `vdi_base/v4l2/.../CameraHostConfig`, or Halium `camera_metadata_t` → OHOS `CameraMetadata` translation).  Today camera_service announces 3 IDs via `OnCameraStatus` but only `lcam001` has dump-visible metadata. | ⏳ |
-| N12.5.5 | `OpenCamera` proxy through `ICameraProvider::getCameraDeviceInterface_V3_x` → `ICameraDevice` handle → wrapped as `ICameraDeviceVdi` | ⏳ |
-| N12.5.6 | `SetTorchMode` proxy through `ICameraProvider::setTorchMode` | ⏳ |
+| **N12.5.4** | `GetCameraAbility` returns real metadata.  Hand-rolled per-camera `CameraMetadata` blobs (lcam001 rear primary / lcam002 front / lcam003 rear wide) under `src/camera_host/hybris_camera_ability.cpp`.  Long-term HIDL `getCameraCharacteristics` translation is deferred — hand-rolling unblocks N12.5.5+.  `hidumper -s 3008` reports full per-camera characteristics.  | ✅ DONE (2026-05-21) |
+| **N12.5.5** | `OpenCamera` proxy through `ICameraProvider::getCameraDeviceInterface_V3_x` (V2.4 transaction code 6) → `ICameraDevice` handle → wrapped as `HybrisCameraDeviceVdiImpl`.  `HwCameraDevice::GetCameraCharacteristics` (V3.2 transaction 2, `hidl_vec<uint8_t>` reader) called as liveness check — Halium returns 21400 bytes of `camera_metadata_t`.  Required a HwBinderClient `Transact` pump loop (AOSP `IPCThreadState::waitForResponse` analogue) — `getCameraDeviceInterface_V3_x` instantiates a new `BnHwCameraDevice` on the far side so the BR_REPLY can arrive in a follow-up BWR ioctl rather than the initial transact one. | ✅ DONE (2026-05-21) |
+| **N12.6.0** | `IStreamOperatorVdi` logging-only stub under `src/camera_device/hybris_stream_operator_vdi_impl.cpp`.  Accepts CreateStreams + CommitStreams + AttachBufferQueue + Capture, fires `OnCaptureStarted` so the framework believes streaming has begun. | ✅ DONE (2026-05-21) — OHOS Camera HAP launches with full UI; preview area is black (frames don't flow yet). |
+| N12.5.6 | `SetTorchMode` proxy through `ICameraProvider::setTorchMode` (V2.4 transaction code, separate from per-device setTorchMode in V3.2 ICameraDevice) | ⏳ |
+| N12.6.1 | Bridge `CommitStreams` to Halium via `ICameraDevice::open` (V3.2 transaction 4) → `ICameraDeviceSession` HIDL handle → `configureStreams_3_4` (V3.4 ICameraDeviceSession transaction).  This is **substantial**: requires a *server-side* `BnHwCameraDeviceCallback` implementation in our process (since `open()` takes a callback sp<>), plus the BC_REGISTER_LOOPER / BC_ENTER_LOOPER / BR_TRANSACTION dispatch loop. | ⏳ |
+| N12.7 | `processCaptureRequest` + `processCaptureResult` round-trip via FMQ (Fast Message Queue).  Buffer interop: Android `native_handle_t` ↔ OHOS `BufferHandle` (round-trip via `allocator_host`'s libhybris-bridged Halium gralloc — same path display already uses). | ⏳ |
 
 The N12.5.0–N12.5.3 subgoal is now achieved: **`GetCameraIds`
 returns real HAL output, end-to-end**.  `camera_service` enumerates
@@ -798,6 +801,54 @@ Plus an X23-specific:
 - **MediaTek camera provider instance is `internal/0`, not
   `legacy/0`.**  Confirmed by
   `/android/vendor/etc/vintf/manifest/manifest_cameraprovider.xml`.
+
+### N12.5.5 / N12.6 — additional wire-format / framework gotchas (2026-05-21)
+
+Three more lessons from getting the OHOS Camera HAP to launch:
+
+6. **`Transact` must pump the read side until BR_REPLY arrives.**
+   The first `BINDER_WRITE_READ` ioctl may return only `BR_NOOP +
+   BR_TRANSACTION_COMPLETE` when the remote takes time to produce
+   its reply (e.g. `getCameraDeviceInterface_V3_x` instantiates a
+   new `BnHwCameraDevice` on the HAL side).  Without a follow-up
+   read loop in `HwBinderClient::Transact`, anything that bounces
+   through `dlopen` on the far side comes back as
+   `Result::Truncated`.  Mirror AOSP
+   `IPCThreadState::waitForResponse`: keep issuing read-only BWR
+   ioctls until `ParseReplies` returns a terminal (Ok / FailedReply
+   / DeadReply) result.
+
+7. **`OHOS_CAMERA_FORMAT_YCBCR_420_888` (=2) is NOT in
+   `metaToFwCameraFormat_`** (`camera_manager.cpp:83`).  Advertising
+   it in `OHOS_ABILITY_STREAM_AVAILABLE_BASIC_CONFIGURATIONS` /
+   `_EXTEND_CONFIGURATIONS` silently maps to `CAMERA_FORMAT_INVALID`
+   in the framework, and `createPreviewOutput` then fails with
+   `7400101` INVALID_ARGUMENT in the HAP (no log on the VDI side —
+   `CreateStreams` is never called).  Use
+   `OHOS_CAMERA_FORMAT_YCRCB_420_SP` (NV21, =3) for preview / video
+   — translates to `CAMERA_FORMAT_YUV_420_SP` (=1003), which is
+   what the standard Camera HAP requests.
+
+8. **`OHOS_ABILITY_STREAM_AVAILABLE_EXTEND_CONFIGURATIONS` wire
+   format** (parsed by `CameraStreamInfoParse` in
+   `camera_stream_info_parse.h`):
+   ```
+   [ modeName,
+       streamType,
+           format, w, h, fixedFps, minFps, maxFps,
+               [abilityIds...], ABILITY_FINISH (-1),
+           ... more (format, w, h, ...) details, each followed by ABILITY_FINISH,
+       STREAM_FINISH (-1),
+       ... more streamType + details + STREAM_FINISH,
+     MODE_FINISH (-1)
+   ]
+   ```
+   The parser uses the triplet `[…, ABILITY_FINISH, STREAM_FINISH,
+   MODE_FINISH]` as the mode boundary.  Getting the structure wrong
+   silently produces zero profiles (`Set full preview profiles for
+   mode: 0, profile size: 0` in framework logs) and the same 7400101
+   downstream failure as #7.  Stream types are `OutputCapStreamType`
+   (camera_manager.h): 0 PREVIEW, 1 VIDEO_STREAM, 2 STILL_CAPTURE.
 
 ### N12.5.3c result — end-to-end on device
 
