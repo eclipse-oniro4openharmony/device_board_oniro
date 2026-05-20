@@ -744,13 +744,78 @@ transport path.
 | **N12.5.0** | Smoke: libhybris dlopen of Halium HIDL libs from OHOS-side musl | ✅ DONE (2026-05-21) |
 | **N12.5.1** | Smoke: raw binder IOCTLs on `/dev/{,hw,vnd}binder` from OHOS-side musl | ✅ DONE (2026-05-21) — Option ζ confirmed viable |
 | **N12.5.2** | Spike `tools/hidl_ping.cpp`: BC_TRANSACTION → hwservicemanager → `EX_NONE`.  Three wire-format corrections discovered | ✅ DONE (2026-05-21) |
-| N12.5.2b | Refactor inline spike into `src/hidl/{hw_parcel,hw_binder_client,hw_service_manager,hw_camera_provider}.{h,cpp}` | ⏳ next |
-| N12.5.3 | `CameraProviderClient` on top of the refactored transport: `getCameraIdList`, `setTorchMode`, `getCameraDeviceInterface_V3_x`.  Wire into `HybrisCameraHostVdiImpl::Init` ⇒ real `cameraIds_` from HAL | ⏳ |
+| **N12.5.2b** | Refactor inline spike into `src/hidl/{hw_parcel,hw_binder_client,hw_service_manager}.{h,cpp}` reusable modules | ✅ DONE (2026-05-21) |
+| **N12.5.3a** | `IServiceManager::get(fqName, instance)` handle resolution + `BC_ACQUIRE`-before-`BC_FREE_BUFFER`.  Wire-format gotcha cluster discovered (see below) | ✅ DONE (2026-05-21) |
+| **N12.5.3b** | `HwCameraProvider::GetCameraIdList`: 3 cameras enumerated end-to-end (S5KGM1ST/OV16A1Q/GC08A3WIDE) | ✅ DONE (2026-05-21) |
+| **N12.5.3c** | Wire `HwCameraProvider` into `HybrisCameraHostVdiImpl::Init` → real `cameraIds_` from HAL ("0","1","2" → "lcam001/002/003" in camera_service) | ✅ DONE (2026-05-21) |
+| N12.5.4 | `GetCameraAbility` returns real metadata (either HCS-style ability loading mirroring `vdi_base/v4l2/.../CameraHostConfig`, or Halium `camera_metadata_t` → OHOS `CameraMetadata` translation).  Today camera_service announces 3 IDs via `OnCameraStatus` but only `lcam001` has dump-visible metadata. | ⏳ |
+| N12.5.5 | `OpenCamera` proxy through `ICameraProvider::getCameraDeviceInterface_V3_x` → `ICameraDevice` handle → wrapped as `ICameraDeviceVdi` | ⏳ |
+| N12.5.6 | `SetTorchMode` proxy through `ICameraProvider::setTorchMode` | ⏳ |
 
-The narrower subgoal of N12.5.0–N12.5.3 is just **`GetCameraIds`
-returns real HAL output, end-to-end** — no metadata, no streams, no
-callbacks yet.  Callbacks + streams + buffers move into N12.6 / N12.7
-and reuse the `libhybris_hidl` machinery N12.5.2 establishes.
+The N12.5.0–N12.5.3 subgoal is now achieved: **`GetCameraIds`
+returns real HAL output, end-to-end**.  `camera_service` enumerates
+`lcam001`/`lcam002`/`lcam003`.  Metadata + streams + buffers move into
+N12.5.4 / N12.5.5 / N12.6 and reuse the transport modules N12.5.2b
+established.
+
+### N12.5.3 — wire-format gotchas (hard-won)
+
+Five non-obvious wire details discovered while bringing
+`IServiceManager::get` and `ICameraProvider::getCameraIdList` up.  All
+five are codified in source comments under
+`device/soc/oniro/hybris_generic/hardware/camera/src/hidl/`:
+
+1. **`binder_buffer_object` is NOT 8-aligned in main data.**  AOSP
+   `Parcel::writeBuffer` appends 40 bytes at the current `mDataPos`
+   with no realignment.  Inserting an 8-byte align gap puts the object
+   4 bytes past where the receiver's `readBuffer` looks (which reads
+   sequentially from `mDataPos+0`, advancing by 40), so its zero-padding
+   gets interpreted as `hdr.type` and fails the `BINDER_TYPE_PTR`
+   check → `BAD_VALUE` (-22).  IBase descriptors happen to be
+   8-aligned post-pad, which is why N12.5.2's ping worked despite this.
+2. **`flat_binder_object` is 4-aligned after primitives**, not 8.
+   Same root cause: libhwbinder primitives are 4-aligned; `writeObject`
+   appends 24 bytes at `mDataPos` with no realignment.
+3. **Null strong binder is `BINDER_TYPE_BINDER` with handle=0**, not
+   `type=0`.  The kernel doesn't rewrite null binders to
+   `BINDER_TYPE_HANDLE`; they pass through as-is.
+4. **BC_ACQUIRE every reply handle BEFORE BC_FREE_BUFFER.**  The
+   kernel `binder_transaction_buffer_release` decrements refs on each
+   `BINDER_TYPE_HANDLE` in the offsets during free — without a prior
+   acquire the handle goes ref=0 and the next BC_TRANSACTION returns
+   `BR_FAILED_REPLY` ("to 0:0 ret 29201/-22" in
+   `/sys/kernel/debug/binder/failed_transaction_log`).
+5. **enforceInterface uses the *defining* class's descriptor**, not
+   the most-derived.  V2.4-defined methods like `getCameraIdList`
+   enforce `android.hardware.camera.provider@2.4::ICameraProvider`
+   even when the registered service is V2.6.  Verified by
+   disassembly: `_hidl_getCameraIdList` in
+   `android.hardware.camera.provider@2.4.so` loads the V2.4
+   descriptor string from its own GOT.
+
+Plus an X23-specific:
+
+- **MediaTek camera provider instance is `internal/0`, not
+  `legacy/0`.**  Confirmed by
+  `/android/vendor/etc/vintf/manifest/manifest_cameraprovider.xml`.
+
+### N12.5.3c result — end-to-end on device
+
+```
+CAMERA_VDI: HybrisCameraHostVdiImpl ctor
+CAMERA_VDI: LoadCameraIdsFromHalium: 3 cameras:
+            device@3.6/internal/0→0,
+            device@3.6/internal/1→1,
+            device@3.6/internal/2→2
+CAMERA_VDI: VDI registered, 3 Halium cameras
+CAMERA:     OnCameraStatus cameraId = lcam001, status = 2
+CAMERA:     OnCameraStatus cameraId = lcam002, status = 2
+CAMERA:     OnCameraStatus cameraId = lcam003, status = 2
+```
+
+Tools added under `tools/`:
+`hidl_get_smoke` (IServiceManager::get smoke),
+`hidl_camera_smoke` (ICameraProvider::getCameraIdList smoke).
 
 ### N12.5.0 result (smoke test)
 
