@@ -711,82 +711,195 @@ hdc shell hilog | grep CAMERA_VDI
 
 ---
 
-## N12.5 — HIDL client bridging (the load-bearing step)
+## N12.5 — HIDL client bridging (the load-bearing step) — IN PROGRESS
 
-**Goal.** From inside the OHOS-side VDI (`composer_host`-sibling
-process, uid `camera_host`), call
-`android::hardware::camera::provider::V2_x::ICameraProvider::getService`
-over the shared `/dev/hwbinder` and successfully invoke
-`getCameraIdList`.
+### Architecture decision (2026-05-21) — pure-musl, no bionic shim
 
-### Approach
+The original plan assumed a bionic-compiled sidecar shim was unavoidable
+because cross-libc C++ vtables don't fly (bionic vs musl name-mangling,
+TLS, libcxx ABI variants).  Two smoke tests on the running X23 disprove
+the premise that bionic involvement is required at all:
 
-Same pattern N8 already uses for `IComposer`:
+| Step | What we proved |
+|---|---|
+| **N12.5.0** ✅ | libhybris's bionic linker can `dlopen` Halium's HIDL libs (`libhidlbase`, `libhwbinder`, `libutils`, `android.hardware.camera.provider@2.6.so`) from an OHOS-side musl process.  Means **if** we ever need to load HIDL libs in-process, it works. |
+| **N12.5.1** ✅ | `/dev/hwbinder` (510,2), `/dev/binder` (510,1), `/dev/vndbinder` (510,3) all open R/W from a plain OHOS-side musl process.  `BINDER_VERSION` ⇒ protocol 8, `mmap(4 KB)` ⇒ ok, `BINDER_SET_MAX_THREADS` ⇒ ok.  **The kernel binder driver is libc-agnostic** — same IOCTLs whether bionic or musl makes them. |
 
-1. `dlopen` the libhybris linker namespace.  It loads bionic
-   `libc.so` + Halium's `libhidlbase.so`,
-   `libhidltransport.so`, `libcamera_metadata.so`, and the
-   per-version generated stub
-   `android.hardware.camera.provider@2.5.so`.
-2. From the OHOS process, call into those libs through libhybris's
-   symbol forwarding.  Libhybris already remaps `/vendor` →
-   `/android/vendor` and `/system/lib64` → `/android/system/lib64`
-   (verified by N8.1), so the linker finds everything.
-3. The HIDL stub talks over hwbinder which both namespaces share —
-   the Halium HAL's binder objects are visible OHOS-side identically.
+Since the binder kernel ABI is just `ioctl(fd, BINDER_WRITE_READ, ...)`,
+we don't need libhwbinder at all.  HIDL is a *wire format* layered on
+top of plain binder transactions.  Implementing the wire format
+(`HwParcel`, interface tokens, `hidl_string`, `hidl_vec<T>`) in pure
+musl is ~800–1500 lines of code — a one-time cost that scales to every
+HIDL method we'll need across N12.6–N12.12.
 
-The composer / allocator path already proves the bionic-libc-loaded-in-a-musl-process
-pattern works without crashing.  Camera reuses it.
+**Decision:** drop the bionic shim plan.  Build a pure-musl HIDL
+transport library `libhybris_hidl` under `device/soc/oniro/hybris_generic/hardware/camera/src/hidl/`,
+used by the camera VDI directly with no libhybris involvement on the
+transport path.
 
-### Concrete: `camera_provider_client.cpp` skeleton
+### N12.5 substep layout (revised)
 
-```cpp
-// Pseudocode — illustrates the bridge shape.
-//
-// libhybris exposes hybris_dlopen()/hybris_dlsym() which use the
-// bionic linker for /android/system/lib64 paths.  Anything we
-// dlsym out of an Android .so is a bionic-compiled symbol — call it
-// through wrappers that match Android's calling convention.
+| Step | What | Status |
+|---|---|---|
+| **N12.5.0** | Smoke: libhybris dlopen of Halium HIDL libs from OHOS-side musl | ✅ DONE (2026-05-21) |
+| **N12.5.1** | Smoke: raw binder IOCTLs on `/dev/{,hw,vnd}binder` from OHOS-side musl | ✅ DONE (2026-05-21) — Option ζ confirmed viable |
+| **N12.5.2** | Spike `tools/hidl_ping.cpp`: BC_TRANSACTION → hwservicemanager → `EX_NONE`.  Three wire-format corrections discovered | ✅ DONE (2026-05-21) |
+| N12.5.2b | Refactor inline spike into `src/hidl/{hw_parcel,hw_binder_client,hw_service_manager,hw_camera_provider}.{h,cpp}` | ⏳ next |
+| N12.5.3 | `CameraProviderClient` on top of the refactored transport: `getCameraIdList`, `setTorchMode`, `getCameraDeviceInterface_V3_x`.  Wire into `HybrisCameraHostVdiImpl::Init` ⇒ real `cameraIds_` from HAL | ⏳ |
 
-#include <hybris/common/binding.h>
-#include <hybris/common/binding_helpers.h>
+The narrower subgoal of N12.5.0–N12.5.3 is just **`GetCameraIds`
+returns real HAL output, end-to-end** — no metadata, no streams, no
+callbacks yet.  Callbacks + streams + buffers move into N12.6 / N12.7
+and reuse the `libhybris_hidl` machinery N12.5.2 establishes.
 
-namespace OHOS::Camera::Hybris {
+### N12.5.0 result (smoke test)
 
-using getService_t = sp<IBinder>(*)(const char *, const char *);
+`device/soc/oniro/hybris_generic/hardware/camera/tools/camera_hidl_smoke.cpp` —
+standalone OHOS-side executable that `hybris_dlopen`s the HIDL toolchain
+from `/android/system/lib64/`.  Live output:
 
-struct CameraProviderClient {
-    void* hidlbase   = nullptr;
-    void* providerSo = nullptr;
-    sp<ICameraProvider> provider;
-
-    bool Connect() {
-        hidlbase = hybris_dlopen("/android/system/lib64/libhidlbase.so",  RTLD_NOW);
-        if (!hidlbase) return false;
-
-        providerSo = hybris_dlopen(
-            "/android/system/lib64/android.hardware.camera.provider@2.5.so", RTLD_NOW);
-        if (!providerSo) return false;
-
-        // getService is the C++-generated convenience; through hybris
-        // it's HIDL's C-ABI BpHwCameraProvider::tryGetService.
-        provider = ICameraProvider::tryGetService("internal/0");
-        return provider != nullptr;
-    }
-
-    Status GetCameraIdList(std::vector<std::string>& out) {
-        auto rc = provider->getCameraIdList([&](auto status, auto& ids) {
-            for (auto& id : ids) out.push_back(id);
-        });
-        return rc.isOk() ? Status::OK : Status::TRANSPORT_FAILED;
-    }
-    // … getVendorTags, setCallback, getCameraDeviceInterface_V3_x, setFlashlight
-};
-
-} // namespace
+```
+camera_hidl_smoke — N12.5.0
+OK   hybris_dlopen(/android/system/lib64/libutils.so) = 0x6058c667
+OK   hybris_dlopen(/android/system/lib64/libhwbinder.so) = 0x662cc6c9
+OK   hybris_dlopen(/android/system/lib64/libhidlbase.so) = 0x33894313
+OK   hybris_dlopen(/android/system/lib64/android.hardware.camera.provider@2.6.so) = 0x76da82ad
+WARN hybris_dlsym(android.hardware.camera.provider@2.6.so, HIDL_FETCH_ICameraProvider): (null)
+smoke: 0 / 4 probes failed
 ```
 
-### Pitfalls — anticipate
+All four libs load.  The `HIDL_FETCH_*` miss is expected — that symbol
+is exported only by passthrough HAL implementations; the stub library
+exposes only mangled C++ entry points (`_ZN7android8hardware6camera...`
+shape).  N12.5.0 established that **if** in-process bionic loading is
+needed, libhybris's linker can do it under the chainload root.  In
+the end the decision below makes this path unnecessary.
+
+### N12.5.1 result (raw binder smoke)
+
+`device/soc/oniro/hybris_generic/hardware/camera/tools/binder_smoke.cpp` —
+standalone OHOS-side executable that opens each binder node with
+no libhybris involvement.  Live output:
+
+```
+binder_smoke — N12.5.1
+probe /dev/hwbinder ...
+  BINDER_VERSION: protocol=8
+  mmap(4 KB) = 0x7f806ce000
+  BINDER_SET_MAX_THREADS: ok
+  OK
+probe /dev/binder ...   (same)   OK
+probe /dev/vndbinder ...  (same) OK
+binder_smoke: 0/3 probes failed
+```
+
+The kernel binder driver doesn't care that we're musl-linked.  The
+HIDL wire format (interface tokens, `hidl_string`, `hidl_vec<T>`,
+fence-fd fixups) is a layer of bytes we'll serialize ourselves — no
+HIDL runtime, no libhwbinder, no bionic-compiled anything.
+
+### N12.5.2 — transport PROVEN (2026-05-21): ping → EX_NONE
+
+`tools/hidl_ping.cpp` issues a `BC_TRANSACTION` for `IBase::ping()` to
+hwservicemanager (handle 0 on `/dev/hwbinder`) and gets a clean reply:
+
+```
+sending ping → handle=0, code=0x0f504e47, data=32, sg=0
+BWR done: write_consumed=76, read_consumed=76
+  cmd 0x0000720c BR_NOOP
+  cmd 0x00007206 BR_TRANSACTION_COMPLETE
+  cmd 0x80407203 BR_REPLY data_size=4 offsets_size=0 flags=0x0
+    parcel.int32[0] = 0  (EX_NONE — success!)
+hidl_ping: SUCCESS
+```
+
+End-to-end pure-musl HIDL transport works.  Getting here required
+three corrections to my mental model of the wire format, each
+discovered by disassembling `libhidlbase.so` (via `aarch64-linux-gnu-objdump`)
+after `hdc file recv` of the on-device binary:
+
+1. **IBase transaction codes** are NOT `0xff000000 + N`.  The libhidlbase
+   ABI dispatches `IBase` methods by codes of the form
+   `(0x0F << 24) | (c0 << 16) | (c1 << 8) | c2` where `c0c1c2` is a
+   3-letter ASCII mnemonic of the method.  The full set was extracted
+   by reading `BnHwBase::onTransact`'s comparison constants:
+   ```
+   0x0F43484E  CHN  interfaceChain
+   0x0F444247  DBG  debug
+   0x0F445343  DSC  interfaceDescriptor
+   0x0F485348  HSH  getHashChain
+   0x0F494E54  INT  setHALInstrumentation  ('instrument')
+   0x0F4C5444  LTD  linkToDeath
+   0x0F504E47  PNG  ping            ← what we needed
+   0x0F524546  REF  getDebugInfo    ('reflect'?)
+   0x0F535953  SYS  notifySyspropsChanged
+   0x0F555444  UTD  unlinkToDeath
+   ```
+   Recorded in `src/hidl/hw_binder_abi.h` under `namespace HidlBase`.
+
+2. **The interface token is a raw C string**, not a `hidl_string` struct.
+   `Parcel::writeInterfaceToken(char const*)` writes the descriptor
+   bytes including the NUL, then pads `mDataPos` to a 4-byte boundary.
+   The receiver's `Parcel::enforceInterface(char const*)` reads it
+   back via `memchr` for the NUL plus `strcmp`.  There is NO
+   `binder_buffer_object` and NO scatter-gather for the token — those
+   are only used for `hidl_string` *method arguments* (e.g.
+   `IServiceManager::get(fqName, name)`).  Earlier `BR_FAILED_REPLY`
+   and `-2147483647` (`= BAD_TYPE` return from `_hidl_ping`) errors
+   were caused by serializing the token as a 2-buffer SG `hidl_string`,
+   then sending the wrong descriptor string inside it.
+
+3. **The kernel `binder_validate_fixup` quirk** observed earlier is
+   real — `if (!last_obj_offset) return false` rejects any HAS_PARENT
+   PTR fixup that walks back to a parent at data-buffer offset 0 —
+   but it only matters once we add `hidl_string` *method arguments*
+   in N12.6+ (the interface token doesn't trigger it).  When that
+   time comes, the workaround is the 16-byte leading pad we proved
+   works in this spike.
+
+The right descriptor for ping is **`android.hidl.base@1.0::IBase`**
+(not the derived interface's descriptor) because `_hidl_ping`'s
+generated body unconditionally calls
+`data.enforceInterface(IBase::descriptor)` regardless of which
+service the BnHwBase happens to sit underneath.
+
+### N12.5.2 — `libhybris_hidl` transport library (continuation)
+
+Plan for the new transport library, all musl-side:
+
+```
+device/soc/oniro/hybris_generic/hardware/camera/src/hidl/
+├── hw_parcel.{h,cpp}        # write/read int32, int64, fd, hidl_string, hidl_vec<T>,
+│                            #   interface_token; offset table for buffer fixups
+├── hw_binder_client.{h,cpp} # open /dev/hwbinder, mmap, do_transact() drives
+│                            #   BC_TRANSACTION/BR_REPLY via BINDER_WRITE_READ
+├── hw_service_manager.{h,cpp}  # resolves "android.hardware.foo@x.y::IFoo/instance"
+│                            #   to a binder handle via hwservicemanager (handle 0)
+└── hw_camera_provider.{h,cpp}  # thin proxy for the @2.6 ICameraProvider methods
+                              #   we need: getCameraIdList, setTorchMode,
+                              #   getCameraDeviceInterface_V3_6, setCallback
+```
+
+Sizing: ~1200 lines across the four modules.  HIDL `Parcel` format
+(see `system/libhwbinder/Parcel.cpp` + generated stubs for reference)
+is small but fiddly — 8-byte alignment, two-level buffer-offset
+encoding for nested vectors of strings.
+
+### N12.5.3 — wire transport into VDI
+
+```cpp
+// hybris_camera_host_vdi_impl.cpp — Init() becomes:
+auto provider = HwCameraProvider::Connect("internal/0");
+if (provider && provider->GetCameraIdList(cameraIds_) == 0) {
+    CAMERA_VDI_LOGI("VDI registered, %{public}zu cameras from HAL",
+                    cameraIds_.size());
+} else {
+    cameraIds_ = { "lcam001" };  // safe fallback if HAL not ready yet
+    CAMERA_VDI_LOGW("VDI registered, falling back to stub cameraIds");
+}
+```
+
+### Pitfalls — apply to all substeps
 
 - **HIDL version mismatch.**  Halium 12 ships `@2.5` (or `@2.4`/`@2.6`
   depending on patch level).  Our header pin must match — using `@2.4`
