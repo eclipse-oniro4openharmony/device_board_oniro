@@ -1,0 +1,504 @@
+# Phase N12.2 — Camera Kernel Module Map (X23, MT6789, ISP6s)
+
+Companion to [phase_n12_camera.md](phase_n12_camera.md) §N12.2 and
+[phase_n12_camera_x23_inventory.md](phase_n12_camera_x23_inventory.md).
+
+Defines the dependency-resolved load order for the MTK camera/ISP/sensor
+kernel stack under native boot.  Derived from
+`kernel/linux/volla-vidofnir/build-dir/tmp/system/lib/modules/5.10.209/modules.dep`
+on a freshly-built kernel (2026-05-20), filtered through `modinfo` so
+the listed deps are the *direct* link-time dependencies that the
+in-kernel module loader resolves at `insmod` time.
+
+## Pre-condition: modules already loaded by other blocks
+
+These are already `insmod`'d by the pre-init lines from N8.11 (GPU),
+N9.5 (audio), N9.2 (WiFi/connsys), or are kernel built-ins.  Camera
+load must come *after* these blocks, but adds no new `insmod` lines
+for them.
+
+```
+aee_aed             mrdump                emi             emi-mpu
+mtk-smi             mtk-smi-dbg           mtk-icc-core    iommu_debug
+iommu_secure        mtk_iommu             mtk-cmdq-drv-ext cmdq_helper_inf
+vcp_status          mmprofile             irq-dbg         device-apc-common
+system_heap         clk-common            clk-mt6789-cam
+videodev (builtin)  v4l2-mem2mem (builtin) videobuf2-v4l2 (builtin)
+```
+
+## Empirical load behaviour (2026-05-20)
+
+Tested by manually `hdc file send`ing each `.ko` to `/data/local/tmp/`
+and `insmod`ing one-at-a-time on a running native-boot device.  Result:
+
+- **Safe (loads cleanly):** TEE chain (`gz_trusty_mod`, `gz_ipc_mod`,
+  `mcDrvModule` already present from `rpmb_mtk`, `gz_tz_system`,
+  `iommu_gz`, `trusted_mem`, `mtk_sec_heap`); ISP core +
+  imgsensor framework (`archcounter_timesync`, `v4l2-fwnode`,
+  `imgsensor-glue`, `mtk_ccu`, `imgsensor`, `imgsensor_isp6s`,
+  `cam_qos`, `camera_isp`, `camera_mem`); helpers (`camera_eeprom`,
+  `camera_af_media`, `mtk_jpeg`).  → 18 modules.  After loading:
+  - `/dev/video0` appears (`mtk-jpeg-enc`)
+  - `/dev/camera_eeprom{0,1,2}` from `camera_eeprom.ko` (the 3
+    eeprom i2c devices DO bind to the eeprom driver)
+  - `/dev/camera-isp`, `/dev/camera-mem` from `camera_isp.ko` /
+    `camera_mem.ko`
+  - 3 new platform drivers register: `image_sensor`, `seninf`,
+    `seninf_n3d` (from `imgsensor_isp6s.ko`); `seninf` + `seninf_n3d`
+    bind to `1a004000.seninf_top` / `1a004000.seninf_n3d_top`
+  - **But no `/dev/kd_camera_hw`, no `/dev/v4l-subdev*`, no
+    `/dev/media*`** — the camera-sensor i2c devices
+    (`mediatek,camera_main` @ 8-001a, `mediatek,camera_main_two`
+    @ 4-0010, `mediatek,camera_sub` @ 4-001a) DO NOT bind to
+    `imgsensor.ko` (which only matches `mediatek,imgsensor`).
+    `image_sensor` platform driver also doesn't auto-bind to
+    `soc:kd_camera_hw1@1a004000` even though that node has
+    `mediatek,imgsensor` compatible and `waiting_for_supplier=0`.
+    Manual `echo soc:... > /sys/bus/platform/drivers/image_sensor/bind`
+    is accepted but produces no probe activity (no dmesg, no
+    `/dev/kd_camera_hw`).  See "Sensor binding blocker" below.
+- **Triggers kernel watchdog reboot (~30 s after insmod):**
+  `camera_dip_isp6s.ko`.  insmod returns "rc=0" but the calling
+  shell + hdcd die a few seconds later; pstore ramoops is empty
+  (no panic — the watchdog rebooted while CPUs were spinning).
+  Almost certainly the DIP block's `probe()` touches a register
+  while the camera power-domain is OFF, locking the SoC.  On a stock
+  Halium boot, modprobe loads it later — *after* `cameraserver` /
+  the HAL has issued a `pm_runtime_get` on the camera platform
+  device that turns the domain on.  Native boot has no equivalent
+  to wake the domain before probe.
+- **Not yet tested (suspected same class as DIP):**
+  `camera_dpe_isp60`, `camera_mfb_isp6s`, `camera_rsc_isp60`,
+  `camera_wpe_isp6s`, `camera_pda`.  All follow the same
+  pattern as DIP (hardware sub-block ISP6s probe).
+
+### Sensor binding blocker — RESOLVED 2026-05-20
+
+After all 18 safe modules are loaded, `dumpsys media.camera` (Android
+side) initially reports `Camera Provider HAL internal/0-X (v2.6, remote)
+static info: 0 devices`.  **Root cause + fix in two lines:**
+
+> The MTK camera HAL needs `/mnt/vendor/nvcfg` (GPT partition `nvcfg`,
+> `/dev/block/by-name/nvcfg`) mounted to find its 3A / sensor
+> calibration NV files.  Under native boot, Halium's first-stage init
+> never runs the fstab mount.  `androidd`'s parent watchdog now mounts
+> it from outside the Halium NS — `dumpsys media.camera` reports
+> 3 devices (S5KGM1ST rear, OV16A1Q front, GC08A3WIDE rear-wide).
+
+The fix: see `mount_vendor_nv()` in
+`device/board/oniro/hybris_generic/launcher/androidd.c`.  It runs
+before the existing composer-ready watchdog poll, retries the
+mount up to 16 × 500 ms while Halium init is mounting its tmpfs on
+`/mnt`, and exits silently if the partition isn't present.
+
+Detailed investigation history kept below for future reference.
+
+#### Updated findings — full investigation history (2026-05-20)
+
+#### Updated findings (2026-05-20)
+
+The i2c sensor devices **do** bind — but to the legacy MTK chardev
+shim, not to the v4l2 framework:
+
+| i2c device | DT node | Driver bound to it |
+|---|---|---|
+| `i2c-4/4-0010` | `camera_main_two` | `kd_camera_hw_bus3` |
+| `i2c-4/4-001a` | `camera_sub` | `kd_camera_hw_bus2` |
+| `i2c-8/8-001a` | `camera_main` | `kd_camera_hw` |
+| `soc:kd_camera_hw1@1a004000` (platform) | `mediatek,imgsensor` | `image_sensor` |
+
+So the kernel side of sensor bind is fine.  The chardev nodes appear
+as expected: `/dev/kd_camera_hw`, `/dev/seninf`, `/dev/seninf_n3d`,
+`/dev/camera-isp`, `/dev/camera-mem`, `/dev/camera_eeprom{0,1,2}`,
+`/dev/video0` (mtk-jpeg-enc).
+
+`imgsensor.ko` (the new v4l2 framework) — separately — is dormant.
+No i2c device has compatible `mediatek,imgsensor`, so the v4l2 driver
+binds nothing.  This is the by-design path on Halium 12 + MT6789:
+the legacy `imgsensor_isp6s.ko` + `kd_camera_hw*` shim is the
+canonical sensor path on this SoC.  The v4l2 driver is harmless
+overhead — leave it loaded; revisit if a future cleanup removes it.
+
+#### Probe-time printks — informational, not root cause
+
+Kernel printks captured at module-load time (via `logcat -d` inside
+the Halium namespace, immediately after `insmod imgsensor_isp6s.ko`):
+
+```
+image_sensor soc:kd_camera_hw1@1a004000: there is not valid maps for state default
+probe of soc:kd_camera_hw1@1a004000 returned 1 after 3811 usecs
+SeninfN3D[n3d_clk_init] cannot get 0 clock, skip
+SeninfN3D[n3d_clk_init] cannot get 1 clock, skip
+probe of 1a004000.seninf_top returned 1 after 742 usecs
+probe of 1a004000.seninf_n3d_top returned 1 after 511 usecs
+```
+
+These look alarming but are **informational**, not errors:
+
+- "*there is not valid maps for state default*" — `dev_info` from
+  `drivers/pinctrl/devicetree.c:174`, fires for any node with no
+  `pinctrl-0`/`pinctrl-names`.  Most MTK SoC nodes (including this
+  one upstream) don't declare pinctrl; the pin muxing is handled
+  by board-level overlays.
+- "*cannot get N clock, skip*" — `LOG_PR_ERR` (but the function
+  returns 0 — it just prints).  Indexes 0 (SCP_SYS_MDP) and 1
+  (SCP_SYS_CAM) are not declared in MT6789's DT (the driver is
+  generic and supports SoCs that have them).  The 4 clocks MT6789
+  *does* declare (`CAMSYS_SENINF_CGPDN`, `CAMSYS_CAM_CGPDN`,
+  `CAMSYS_CAMTG_CGPDN`, `CAMSYS_CAMTM_SEL`) all bind cleanly.
+- "*probe returned 1*" — MTK driver convention for "attached but
+  some optional sub-resource missing"; the driver continues.
+
+The seninf, seninf_n3d, and image_sensor drivers all successfully
+bind and create their chardev nodes — confirmed by the post-boot
+state of `/sys/bus/{i2c,platform}/devices/`.
+
+#### Strace of camerahalserver — what enumeration actually does
+
+`strace -y -f -e trace=openat,ioctl,read,write,close` against a
+manually-respawned camerahalserver (inside the Halium NS) caught
+the full enumeration sequence on a fresh boot.  Highlights:
+
+```
+openat("/dev/seninf",                 O_RDWR) = 8
+openat("/dev/kd_camera_hw",           O_RDWR) = 9
+openat("/dev/camera_eeprom0",         O_RDWR) = 8
+openat("/dev/camera_eeprom1",         O_RDWR) = 8
+openat("/dev/camera_eeprom2",         O_RDWR) = 8
+ioctl(9</dev/kd_camera_hw>, _IOC(WR, 0x69, 0xf,  0x18), …) = 0   x 438
+ioctl(9</dev/kd_camera_hw>, _IOC(WR, 0x69, 0x41, 0x18), …) = 0   x   3
+ioctl(8</dev/seninf>,       _IOC(WR, 0x73, 0x28, 0x18), …) = 0   x   8
+ioctl(8</dev/seninf>,       _IOC(WR, 0x73, 0x3c, 0xc),  …) = 0   x  12
+openat("mnt/vendor/nvcfg/cctNvramFile/nv_version_main",    -1 ENOENT
+openat("mnt/vendor/nvcfg/cctNvramFile/nv_version_Back1",   -1 ENOENT
+openat("/dev/ion",                                          -1 ENOENT
+```
+
+IOCTL `0x69`/15 = `KDIMGSENSORIOC_X_FEATURECONCTROL` (yes spelled
+that way in `inc/kd_imgsensor.h:44`); `0x69`/0x41 = `_X_GETINFO2`.
+The HAL hammers FEATURECONCTROL across slots querying sensor
+identity, AE/AF/AWB ability, etc.  Every call returns 0 — no
+failing ioctls.
+
+Logcat shows the actual sensor IDs the kernel reads back over i2c:
+
+```
+CAM_CUS_MSDK [compareSensorIdAndModuleId] SID F8D1   is found  (S5KGM1ST 12 MP)
+CAM_CUS_MSDK [compareSensorIdAndModuleId] SID 561642 is found  (OV16A1Q  16 MP)
+CAM_CUS_MSDK [compareSensorIdAndModuleId] SID 8A5    is found  (GC08A3W   8 MP)
+```
+
+So the kernel side enumerates correctly.  But the HAL still ends
+with `dumpsys media.camera → 0 devices`, because immediately before
+the sensor-ID compares, it tries to load the NV calibration:
+
+```
+nvbuf_util_dep: readVerNvramNoLock:228  Try to read nv_version_front1 but not exist
+MtkCam/HalSensor: get_boot_mode fail to open: /sys/class/BOOT/BOOT/boot/boot_mode
+```
+
+The NV-calibration miss is fatal for enumeration even though the
+sensor i2c probe succeeded.  The HAL refuses to expose sensors it
+can't tune.  (`/sys/class/BOOT/BOOT/boot/boot_mode` miss is
+harmless — printed multiple times throughout, never blocks anything.)
+
+#### Why the NV path is missing
+
+Halium's `fstab.mt6789` declares five NV-related partitions:
+
+| Block dev (X23 mapping)  | Mountpoint               | Used by             |
+|--------------------------|--------------------------|---------------------|
+| sdc6 → `by-name/nvcfg`   | `/mnt/vendor/nvcfg`      | **Camera HAL (3A)** |
+| sdc7 → `by-name/nvdata`  | `/mnt/vendor/nvdata`     | (auto-mounted)      |
+| sdc16 → `by-name/protect1` | `/mnt/vendor/protect_f`| keymaster           |
+| sdc17 → `by-name/protect2` | `/mnt/vendor/protect_s`| keymaster           |
+| sdc34 → `by-name/nvram`    | `/nvram` (raw)         | radio / RIL         |
+
+Under native boot, only `nvdata` ends up mounted (legacy by some
+init shortcut); the rest don't.  Camera enumeration depends on
+`nvcfg`.
+
+#### Fix
+
+Added `mount_vendor_nv()` in `androidd.c` (commit 2026-05-20).  It
+runs from the parent watchdog post-clone-of-the-child, uses a
+`PARTNAME=`-lookup helper (`find_partition_by_label()`) to resolve
+the GPT label `nvcfg` to a raw block device, `setns()`es into the
+child's mount NS, and mounts `/dev/block/by-name/nvcfg` (with raw
+`/dev/block/sd…` fallback in case Halium ueventd hasn't populated
+`by-name` yet) at `/root/mnt/vendor/nvcfg` (Halium's post-pivot
+view).  Retries up to 16 × 500 ms because Halium's `mount tmpfs
+/mnt` runs early but not instantly.
+
+Verified live: with the fix in place, `dumpsys media.camera`
+reports `Number of camera devices: 3` and `lshal debug
+android.hardware.camera.provider@2.6::ICameraProvider/internal/0`
+lists all three sensors (rear S5KGM1ST + front OV16A1Q + rear-wide
+GC08A3WIDE) with correct facing/orientation + flash unit on
+cam 0.
+
+#### Not yet mounted: protect_f/_s
+
+`protect1`/`protect2` are also declared in fstab but currently fail
+to mount with `EBUSY` — block devices are held open by something
+else (probably an OHOS service that grabbed them at boot).  Not a
+blocker for camera enumeration (they're for keymaster); revisit if
+keymaster-dependent features regress.
+
+#### camerahalserver — startup behaviour
+
+After kernel modules are up + sensors bound, Halium's
+`camerahalserver` (PID 254 in Halium namespace, uid `cameraserver`)
+runs once at init then sits in `binder_wait_for_work` indefinitely.
+Its open file descriptors are *only* `/dev/hwbinder`,
+`/dev/vndbinder`, `/dev/pmsg0`, `/sys/kernel/tracing/trace_marker`,
+and a couple of sockets — **no camera devices**.  So it probed at
+boot, found nothing, and gave up.
+
+This is consistent with the "probe returned 1 / partial init"
+hypothesis: the kernel module is loaded and bound, the chardev
+exists, but issuing an IOCTL against it returns no sensors detected
+(because the MCLK pinctrl is wrong, the sensor doesn't ACK on i2c).
+
+A restart of `camerahalserver` after the DT is fixed would be the
+verification: `setprop ctl.restart camerahalserver` inside the
+Halium NS, then `dumpsys media.camera`.
+
+#### Next debug steps
+
+1. **Capture stock Halium boot DT.**  Boot the X23 into stock
+   Halium (recovery has the original boot/vendor_boot images), then
+   `cat /proc/device-tree/soc/kd_camera_hw1@1a004000/...` recursively
+   to see the pinctrl + clock properties.  Diff against the same
+   path on native boot.  This identifies exactly which DT props are
+   missing.
+2. **DTB diff.**  `dtc -I dtb -O dts` on the two boot images'
+   embedded DTBs (Halium's `vendor_boot.img` vs ours).  Show every
+   property added/removed by our build pipeline.
+3. **`strace` camerahalserver restart.**  Captures the IOCTL
+   sequence + any `read()` returns so we see exactly what the HAL
+   thinks the sensor identity is (vs the expected GC8054/etc.).
+   Try via `strace -ttt -y -f /vendor/bin/hw/camerahalserver` from
+   inside the Halium NS after stopping the service via setprop —
+   the daemon respawn doesn't get strace-attached automatically.
+4. **Try setprop `vendor.camera.disable.driver = 0`** or similar
+   imgsensor-debug knobs.  MTK ships a number of camera-debug
+   property gates; some unlock verbose imgsensor logs at next boot.
+
+This blocker does **not** prevent the rest of N12 from proceeding:
+the HIDL ICameraProvider is alive, OHOS-side VDI scaffolding (N12.4)
+is in place, and the HIDL bridge (N12.5) can connect — the provider
+will just return an empty `getCameraIdList()` until the DT gap is
+fixed.  N12.2.5 can be debugged in parallel with VDI work.
+
+### Decision (Milestone 1)
+
+Initial cfg ships **only the 17 safe modules** at pre-init.  The
+ISP sub-blocks (DIP/DPE/MFB/RSC/WPE/PDA) are *staged into
+`vendor_boot` overlay by the build* (kept in `extra-modules.list`)
+but **not insmod'd at pre-init**.  We retain them on the device
+filesystem at `/mnt/kmodules/` so that:
+
+1. The HAL or a future `androidd`-side helper can `insmod` them
+   on demand once the camera power-domain is up.
+2. We can A/B test whether basic enumeration / preview works
+   without them.
+
+If the HIDL provider can `getCameraIdList()` against only the
+17-module set, post-Milestone-1 work picks up the deferred load
+via a dedicated runtime-PM-aware service (probably a small
+`camera-modload-init` helper modelled on `wmtdetect-init` for
+WiFi, but gated on the power-domain being on).
+
+## New modules to add — dependency-resolved load order
+
+22 modules, broken into three sub-blocks.  See "Empirical load
+behaviour" above for which subset of these get insmod'd at pre-init
+vs deferred.
+
+### Sub-block A — TEE (GenieZone + Trustonic MobiCore) + secure heap
+
+Required transitively by `camera_mem.ko` (and `camera_fdvt_isp51.ko`,
+if we choose to load FD HW).  Order is critical: gz_trusty before
+gz_ipc; mcDrvModule + gz_ipc + gz_trusty before gz_tz_system; etc.
+
+| # | Module | Why |
+|---|---|---|
+| 1 | `gz_trusty_mod.ko`     | GenieZone trusty base; root of the chain |
+| 2 | `gz_ipc_mod.ko`        | IPC channel; deps: gz_trusty_mod |
+| 3 | `mcDrvModule.ko`       | Trustonic MobiCore driver — no deps (independent of gz_) |
+| 4 | `gz_tz_system.ko`      | TZ system; deps: MobiCoreDriver + gz_ipc + gz_trusty |
+| 5 | `iommu_gz.ko`          | GenieZone IOMMU bridge; deps: gz_tz_system + chain |
+| 6 | `trusted_mem.ko`       | Trusted memory subsystem; deps: iommu_gz + chain |
+| 7 | `mtk_sec_heap.ko`      | Secure DMA-BUF heap; deps: trusted_mem + chain + mtk_iommu |
+
+### Sub-block B — Camera ISP6s + image-sensor framework
+
+Loaded after sub-block A; deps within block resolved by ordering.
+
+| # | Module | Direct deps |
+|---|---|---|
+|  8 | `archcounter_timesync.ko` | (none) |
+|  9 | `v4l2-fwnode.ko`         | (none) |
+| 10 | `imgsensor-glue.ko`      | (none) |
+| 11 | `mtk_ccu.ko`             | aee_aed, mtk-icc-core, mrdump, mtk-smi, mtk-smi-dbg (block already loaded) |
+| 12 | `imgsensor.ko`           | imgsensor-glue, mtk_ccu, v4l2-fwnode (v4l2 framework; only matches `mediatek,imgsensor` DT compatible — see Sensor binding blocker) |
+| 12b | `imgsensor_isp6s.ko`    | hardware_info (already loaded), clk-common — legacy MTK ISP6s sensor framework; registers `image_sensor`, `seninf`, `seninf_n3d` platform drivers |
+| 13 | `cam_qos.ko`             | mtk-icc-core |
+| 14 | `camera_isp.ko`          | archcounter_timesync, mtk-smi-dbg, cam_qos |
+| 15 | `camera_mem.ko`          | mtk-smi, mtk_sec_heap |
+| 16 | `camera_dip_isp6s.ko`    | cmdq_helper_inf, mtk-smi, mtk-cmdq-drv-ext — **deferred (probe hangs SoC)** |
+| 17 | `camera_dpe_isp60.ko`    | mtk-cmdq-drv-ext, mtk-smi — **deferred (suspect same)** |
+| 18 | `camera_mfb_isp6s.ko`    | mtk-smi, mtk-cmdq-drv-ext, mtk-icc-core — **deferred (suspect same)** |
+| 19 | `camera_rsc_isp60.ko`    | mtk-cmdq-drv-ext, mtk-smi, irq-dbg — **deferred (suspect same)** |
+| 20 | `camera_wpe_isp6s.ko`    | cmdq_helper_inf, mtk-cmdq-drv-ext, mtk-smi — **deferred (suspect same)** |
+| 21 | `camera_pda.ko`          | mtk-icc-core, iommu_debug — **deferred (suspect same)** |
+| 22 | `camera_eeprom.ko`       | (none) — calibration data parser, binds to i2c-4/4-0051, 4/4-0052, 8/8-0050 |
+| 23 | `camera_af_media.ko`     | (none) — autofocus media controller |
+
+### Sub-block C — JPEG encoder (used by HAL BLOB stream for still capture)
+
+| # | Module | Direct deps |
+|---|---|---|
+| 24 | `mtk_jpeg.ko`            | mtk-smi, mtk-icc-core |
+
+### Optional / deferred (Milestone 2+)
+
+| Module | Why deferred |
+|---|---|
+| `camera_fdvt_isp51.ko` | HW face-detection accelerator; not required for preview/still/torch (CONTROL_FACE_DETECT_MODE can stay OFF in Milestone 1).  Drag-in of the cmdq-sec-drv + trusted-memory chain we already loaded for `camera_mem`. |
+| `imgsensor_isp6s.ko`   | Legacy (non-v4l2) imgsensor adaptation.  The src-v4l2 `imgsensor.ko` is canonical for Halium 12; loading both would compete for /dev/kd_camera_hw.  Skip. |
+| `mtk-cam-isp.ko` + `mtk-cam-plat-util.ko` | These are ISP7 (mt6879/mt6895/mt6983 SoC family).  MT6789 uses ISP6s.  Skip. |
+| `camera_dpe_isp70.ko`  | ISP7 depth processing engine.  MT6789 uses dpe_isp60. |
+| `camera_eeprom_isp4.ko`| ISP4 (older SoC family) EEPROM fallback.  `camera_eeprom.ko` covers the generic path. |
+
+## Build-system integration
+
+### `kernel/x23/extra-modules.list` append
+
+```
+# MT6789 ISP6s camera + image-sensor stack.  Native boot doesn't run
+# Halium's second-stage init, so the modules MTK ships in vendor_dlkm
+# never load.  Bundle them into vendor_boot via build_kernel.sh + insmod
+# at OHOS pre-init.  See phase_n12_camera.md § N12.2.
+
+# TEE chain (transitive dep of camera_mem.ko for secure DMA-BUF heap).
+gz_trusty_mod.ko
+gz_ipc_mod.ko
+mcDrvModule.ko
+gz_tz_system.ko
+iommu_gz.ko
+trusted_mem.ko
+mtk_sec_heap.ko
+
+# Camera ISP6s core + image-sensor framework + JPEG.
+archcounter_timesync.ko
+v4l2-fwnode.ko
+imgsensor-glue.ko
+mtk_ccu.ko
+imgsensor.ko
+cam_qos.ko
+camera_isp.ko
+camera_mem.ko
+camera_dip_isp6s.ko
+camera_dpe_isp60.ko
+camera_mfb_isp6s.ko
+camera_rsc_isp60.ko
+camera_wpe_isp6s.ko
+camera_pda.ko
+camera_eeprom.ko
+camera_af_media.ko
+mtk_jpeg.ko
+```
+
+### `vendor/oniro/hybris_generic/etc/init/init.x23.cfg` insmod block
+
+Append **after** the existing audio, connsys, and touch blocks; the
+deps above are guaranteed loaded by then.  Block ships only the
+17 safe modules (see Empirical load behaviour above).  ISP
+sub-blocks (DIP/DPE/MFB/RSC/WPE/PDA) are intentionally omitted —
+they trigger a kernel watchdog reboot when their probe runs against
+an OFF camera power-domain.
+
+```jsonc
+"insmod /mnt/kmodules/gz_trusty_mod.ko",
+"insmod /mnt/kmodules/gz_ipc_mod.ko",
+"insmod /mnt/kmodules/mcDrvModule.ko",   // no-op if rpmb_mtk already pulled it in
+"insmod /mnt/kmodules/gz_tz_system.ko",
+"insmod /mnt/kmodules/iommu_gz.ko",
+"insmod /mnt/kmodules/trusted_mem.ko",
+"insmod /mnt/kmodules/mtk_sec_heap.ko",
+
+"insmod /mnt/kmodules/archcounter_timesync.ko",
+"insmod /mnt/kmodules/v4l2-fwnode.ko",
+"insmod /mnt/kmodules/imgsensor-glue.ko",
+"insmod /mnt/kmodules/mtk_ccu.ko",
+"insmod /mnt/kmodules/imgsensor.ko",
+"insmod /mnt/kmodules/imgsensor_isp6s.ko",  // legacy MTK ISP6s sensor framework
+"insmod /mnt/kmodules/cam_qos.ko",
+"insmod /mnt/kmodules/camera_isp.ko",
+"insmod /mnt/kmodules/camera_mem.ko",
+"insmod /mnt/kmodules/camera_eeprom.ko",
+"insmod /mnt/kmodules/camera_af_media.ko",
+"insmod /mnt/kmodules/mtk_jpeg.ko",
+```
+
+Modules deliberately **not** insmod'd at pre-init (deferred — see above):
+
+```jsonc
+// "insmod /mnt/kmodules/camera_dip_isp6s.ko",   // probe hangs SoC
+// "insmod /mnt/kmodules/camera_dpe_isp60.ko",   // (suspected same)
+// "insmod /mnt/kmodules/camera_mfb_isp6s.ko",   // (suspected same)
+// "insmod /mnt/kmodules/camera_rsc_isp60.ko",   // (suspected same)
+// "insmod /mnt/kmodules/camera_wpe_isp6s.ko",   // (suspected same)
+// "insmod /mnt/kmodules/camera_pda.ko",         // (suspected same)
+```
+
+## Verification gate
+
+After `pre-init` runs:
+
+```sh
+hdc shell "lsmod | grep -E 'camera_|imgsensor|mtk_ccu|mtk_sec_heap|trusted_mem|gz_|mcDrv|mtk_jpeg|archcounter'"
+# expect: 22 lines (1 per added module)
+
+hdc shell "ls /dev | grep -iE 'video|v4l|kd_camera|camera-'"
+# expect: video0..videoN, v4l/v4l-subdev0..N, kd_camera_hw, /dev/camera-* nodes
+
+hdc shell "dmesg | grep -iE 'imgsensor|camera_isp|mtk_ccu' | tail -30"
+# expect: sensor probes succeed, ISP firmware load OK, no -EPROBE_DEFER loops
+
+hdc shell "nsenter --mount=/proc/\$(pgrep -f 'init second_stage' | head -1)/ns/mnt \
+            --pid=/proc/\$(pgrep -f 'init second_stage' | head -1)/ns/pid \
+            -- chroot /root /system/bin/dumpsys media.camera 2>&1 | head -50"
+# expect: "Number of camera devices: 2" (rear + front), per-camera id blocks
+```
+
+Failures to diagnose next:
+
+- `insmod` fails on `gz_trusty_mod.ko` with `ENOENT` → re-check
+  `extra-modules.list` exact filename; build_kernel.sh logs a
+  `WARNING: extra module ... not found in build output` if the
+  module name is mistyped.
+- `insmod` fails on `imgsensor.ko` with `Unknown symbol mtk_ccu_*` →
+  `mtk_ccu.ko` not yet loaded; ordering bug.  Re-check insmod order.
+- `dumpsys` still shows 0 devices → either sensor probe failed
+  (check `dmesg`) or `cameraprovider@2.6` cache is stale; one-shot
+  `setprop ctl.restart vendor.camera-provider-2-6` from inside the
+  Halium namespace to restart the HAL with the fresh `/dev` tree.
+- ISP firmware (`lib3a.ccu`) load failure → confirm
+  `firmware_class.path = /android/vendor/firmware` is still in effect
+  (cat `/sys/module/firmware_class/parameters/path`).  If empty,
+  N9.1's audio-firmware retarget regressed.
+
+## Module-list growth budget
+
+Pre-N12: ~57 modules `insmod`'d at pre-init (GPU+audio+wifi+touch).
+Post-N12.2: ~79.  Plan budget was 70 before adding a `class=core`
+service split (N12.2 pitfall in [phase_n12_camera.md](phase_n12_camera.md)).
+We're over budget by ~9 modules.  Expected boot impact:
+~5 s extra black screen at boot.
+
+**Decision:** accept for Milestone 1; revisit splitting kernel-module
+load to a class=core service if user-perceptible black-screen extends
+past 15 s, or if Milestone 2 (camera + sensors + BT) crosses ~100.

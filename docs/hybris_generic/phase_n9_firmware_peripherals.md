@@ -342,9 +342,13 @@ The Phase 8.15 systemd-logind workaround (`HandlePowerKey=ignore` drop-in) **dis
 
 ---
 
-## N9.8 — Camera ✅ (deferred)
+## N9.8 — Camera 🔄 (moved to phase N12)
 
-Out of scope for Milestone 4+. Camera HAL bridge is a multi-week project of its own.
+Camera HAL bridge is a multi-week project; tracked as its own phase
+rather than crammed into N9.  See
+[phase_n12_camera.md](phase_n12_camera.md) — Camera3 HIDL via
+`androidd`, with the same `vendor_dlkm`-modules-into-`vendor_boot`
+pattern N9 already uses for audio (N9.5) and WiFi (N9.2).
 
 ---
 
@@ -406,7 +410,7 @@ Phase 12 currently uses an LXC-time bind to substitute the missing `sharefs` ker
   boot. Phase 13B userspace unchanged
 - ⏳ **N9.6** — Sensors: deferred
 - ✅ **N9.7** — Power: native reboot path works without /ohos-host-action; logind workaround disappears
-- ⏳ **N9.8** — Camera: deferred (multi-week project)
+- 🔄 **N9.8** — Camera: tracked in [phase_n12_camera.md](phase_n12_camera.md) (Camera3 HIDL via androidd)
 - ⏳ **N9.10** — sharefs: short-term bind workaround documented; kernel port deferred to M5
 
 ## Next phase entry condition

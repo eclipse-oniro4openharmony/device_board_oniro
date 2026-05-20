@@ -35,6 +35,7 @@
 #endif
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -161,6 +162,48 @@ static int mknod_min(const char *path, mode_t mode, dev_t dev)
 {
     if (mknod(path, mode, dev) == 0) return 0;
     return errno == EEXIST ? 0 : -1;
+}
+
+/* Find a GPT partition by name.  Halium's `/dev/block/by-name/<label>`
+ * symlinks aren't available OHOS-side (they're created post-pivot by
+ * Halium's ueventd).  Walk /sys/class/block/ instead — the kernel
+ * exposes `PARTNAME=<label>` in each partition's uevent file.
+ *
+ * Returns 0 on hit and writes "/dev/block/<sdXX>" into `out`; -1 on
+ * miss or any I/O error. */
+static int find_partition_by_label(const char *label, char *out, size_t out_sz)
+{
+    DIR *d = opendir("/sys/class/block");
+    if (!d) return -1;
+
+    int found = -1;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        char path[PATH_MAX];
+        snprintf(path, sizeof path, "/sys/class/block/%s/uevent", de->d_name);
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        char line[256];
+        int hit = 0;
+        while (fgets(line, sizeof line, f)) {
+            char *nl = strchr(line, '\n');
+            if (nl) *nl = '\0';
+            if (strncmp(line, "PARTNAME=", 9) == 0 &&
+                strcmp(line + 9, label) == 0) {
+                hit = 1;
+                break;
+            }
+        }
+        fclose(f);
+        if (hit) {
+            snprintf(out, out_sz, "/dev/block/%s", de->d_name);
+            found = 0;
+            break;
+        }
+    }
+    closedir(d);
+    return found;
 }
 
 /* Track which apex modules we successfully bound, so apex_info_list_write()
@@ -455,6 +498,14 @@ static int child_main(void *arg)
     if (mount("tmpfs", ANDROID_ROOT "/data", "tmpfs", 0,
               "size=64M,mode=771,uid=0,gid=0") < 0)
         die("mount tmpfs on %s/data: %s", ANDROID_ROOT, strerror(errno));
+
+    /* Vendor NV-calibration mount happens later, from the parent watchdog
+     * (see mount_vendor_nv()).  Can't be done here: ANDROID_ROOT is the
+     * RO halium_system_a image with /mnt empty (no /mnt/vendor mount
+     * points baked in), and Halium init mounts a fresh tmpfs over /mnt
+     * after it starts, hiding anything we might layer here.  The parent
+     * setns()es into the post-pivot child NS, waits for Halium's tmpfs
+     * /mnt, then mkdir + mounts the calibration partitions in place. */
 
     /* Debug overlay: if the OHOS-side directory /module_update/halium-debug/
      * exists, bind it into the Halium NS at /data/halium-debug/ so we can
@@ -813,8 +864,116 @@ static int probe_composer(pid_t child_pid)
     return rc;
 }
 
+/* Mount vendor NV-calibration partition (nvcfg) inside the child's mount
+ * namespace.  Halium init's first stage normally walks fstab.mt6789 and
+ * mounts /dev/block/by-name/nvcfg at /mnt/vendor/nvcfg before second
+ * stage starts; native boot skips first stage so the mount never
+ * happens, and any MTK HAL that wants sensor / 3A calibration falls
+ * back to "no calibration data found" and refuses to enumerate.
+ *
+ * Concrete blocker: on the X23, camerahalserver successfully probes
+ * the rear/front sensors via /dev/kd_camera_hw IOCTLs (sensor IDs
+ * F8D1 / 561642 / 8A5 → S5KGM1ST + OV16A1Q + GC08A3WIDE), but then
+ * logs `nvbuf_util_dep: Try to read nv_version_front1 but not exist`
+ * and `dumpsys media.camera` reports "0 devices".  Mounting nvcfg
+ * unblocks all three cameras (verified live).  See
+ * phase_n12_camera_modulemap.md § Sensor binding blocker.
+ *
+ * Must run AFTER Halium init has mounted its tmpfs on /mnt — until
+ * then /mnt is the RO halium_system_a's empty /mnt directory and we
+ * can't mkdir /mnt/vendor.  Poll with timeout.  Mount RO; flags
+ * mirror Halium's fstab.mt6789. */
+static int mount_vendor_nv_once(pid_t child_pid)
+{
+    char nvcfg_blkdev[64];
+    if (find_partition_by_label("nvcfg", nvcfg_blkdev, sizeof nvcfg_blkdev) < 0) {
+        logmsg("mount_vendor_nv: no GPT partition labelled `nvcfg`; "
+               "skipping (camera HAL will see 0 devices)");
+        return -1;
+    }
+
+    char ns_mnt[64];
+    snprintf(ns_mnt, sizeof ns_mnt, "/proc/%d/ns/mnt", child_pid);
+
+    int fd_mnt = open(ns_mnt, O_RDONLY | O_CLOEXEC);
+    if (fd_mnt < 0) {
+        logmsg("mount_vendor_nv: open %s: %s", ns_mnt, strerror(errno));
+        return -1;
+    }
+
+    pid_t worker = fork();
+    if (worker < 0) { close(fd_mnt); return -1; }
+
+    if (worker == 0) {
+        if (unshare(CLONE_FS) < 0)
+            logmsg("mount_vendor_nv: unshare(CLONE_FS): %s", strerror(errno));
+        if (setns(fd_mnt, CLONE_NEWNS) < 0) {
+            logmsg("mount_vendor_nv: setns mnt: %s", strerror(errno));
+            _exit(2);
+        }
+        close(fd_mnt);
+
+        /* The child has chroot'd to /root post-pivot, but our setns()
+         * doesn't change fs_struct.root or cwd.  Halium-NS paths are
+         * relative to its `/`; from outside, the post-pivot tree is
+         * still at /root.  Mount target reflects that. */
+        if (mkdir_p("/root/mnt/vendor/nvcfg", 0771) < 0 && errno != EEXIST) {
+            logmsg("mount_vendor_nv: mkdir /root/mnt/vendor/nvcfg: %s "
+                   "(Halium /mnt tmpfs not ready yet)", strerror(errno));
+            _exit(3);
+        }
+        if (mount("/dev/block/by-name/nvcfg", "/root/mnt/vendor/nvcfg",
+                  "ext4", MS_RDONLY | MS_NODEV | MS_NOSUID | MS_NOATIME,
+                  NULL) < 0) {
+            /* Halium ueventd may not have populated by-name yet; fall
+             * back to the raw block device we resolved from sysfs. */
+            char buf[128];
+            snprintf(buf, sizeof buf, "/root%s", nvcfg_blkdev);
+            (void)buf;
+            if (mount(nvcfg_blkdev, "/root/mnt/vendor/nvcfg", "ext4",
+                      MS_RDONLY | MS_NODEV | MS_NOSUID | MS_NOATIME,
+                      NULL) < 0) {
+                logmsg("mount_vendor_nv: mount %s → /root/mnt/vendor/"
+                       "nvcfg: %s", nvcfg_blkdev, strerror(errno));
+                _exit(4);
+            }
+        }
+        _exit(0);
+    }
+
+    close(fd_mnt);
+    int s;
+    if (waitpid(worker, &s, 0) < 0) return -1;
+    return WIFEXITED(s) && WEXITSTATUS(s) == 0 ? 0 : -1;
+}
+
+static void mount_vendor_nv(pid_t child_pid)
+{
+    /* Retry: Halium init's `mount tmpfs /mnt` runs early but not
+     * immediately on the second-stage exec, so we may race it.  Cap
+     * at 16 attempts × 500ms = 8 s; longer than that and Halium
+     * is wedged anyway. */
+    for (int i = 0; i < 16; ++i) {
+        if (mount_vendor_nv_once(child_pid) == 0) {
+            logmsg("mount_vendor_nv: nvcfg mounted (attempt %d) — camera "
+                   "HAL will see real cameras", i + 1);
+            return;
+        }
+        usleep(500 * 1000);
+    }
+    logmsg("mount_vendor_nv: gave up after 8s — camera HAL will see "
+           "0 devices");
+}
+
 static void watchdog(pid_t child_pid)
 {
+    /* Mount Halium's vendor NV calibration partitions before the
+     * composer-ready wait.  Camera HAL is `class main` and starts
+     * during Halium's `on boot`, which is also when IComposer
+     * registers — racing the composer probe is fine, but we want the
+     * mount in place before camerahalserver does its sensor probe. */
+    mount_vendor_nv(child_pid);
+
     logmsg("watchdog: sleeping %ds for Halium init",
            WATCHDOG_INITIAL_DELAY_SEC);
     sleep(WATCHDOG_INITIAL_DELAY_SEC);
