@@ -429,6 +429,68 @@ possible paths forward:
    plus manual ISP staging.  Substantially more work; loses
    3A/tuning/HDR.
 
+### Update 2026-05-21 (part 3) — 4 of 6 deferred modules DO load
+
+Empirical retest of the deferred 6 modules **individually** on a
+warm boot shows the watchdog blocker is narrower than the original
+"all six reboot" finding suggested:
+
+| Module               | result                | chardev created           |
+|----------------------|-----------------------|---------------------------|
+| `camera_pda.ko`      | ✅ loads, rc=0        | (no /dev/camera-pda)      |
+| `camera_dpe_isp60.ko`| ✅ loads, rc=0        | (no /dev/camera-dpe)      |
+| `camera_rsc_isp60.ko`| ✅ loads, rc=0        | `/dev/camera-rsc` ✓       |
+| `camera_mfb_isp6s.ko`| ✅ loads, rc=0        | (no /dev/camera-mfb)      |
+| `camera_wpe_isp6s.ko`| ❌ insmod hangs → WDT | —                          |
+| `camera_dip_isp6s.ko`| ❌ insmod hangs → WDT | —                          |
+
+The DT view bears this out: the safe modules each match exactly
+**1 DT node** (e.g. `1b003000.rsc → mediatek,rsc`), while the
+crashers match either:
+- `wpe_a@15011000` + `wpe_b@15811000` (2 nodes, both bare —
+  `compatible`/`reg`/`interrupts` only, no `mediatek,larb` /
+  `power-domains` properties), or
+- `dip_a0@15021000` only — the other 23 dip_a*/dip_b* DT nodes
+  have unique compatible strings (`dip_a1`..`dip_a11`,
+  `dip_b0`..`dip_b11`) that `dip_of_ids` does NOT match.
+
+So WPE/DIP each really probe 1 device — but those DT nodes are
+**bare** (no `mediatek,larb` / `power-domains` properties).  The
+`{wpe,dip}_probe` paths call `pm_runtime_enable(dev)` before the
+early-return on `!node_larb9 || !node_larb11`.  Hypothesis:
+genpd attach from `pm_runtime_enable` (or the iommu attach
+inside `dma_set_mask_and_coherent`) is touching an unpowered IMG
+SoC region and faulting, which deadlocks the calling task — the
+hardware watchdog then reboots after the timeout because the
+kernel stopped petting it.  This is consistent with the
+"insmod doesn't return; ~30 s later WDT reboot" symptom and the
+fact that pstore console-ramoops loses the trailing seconds
+before the reboot.
+
+**Practical outcome:** the 4 safe deferreds (PDA + DPE + RSC +
+MFB) have been added to `init.x23.cfg`'s pre-init `insmod`
+chain.  `/dev/camera-rsc` is now present and the MTK HAL gets
+past the original `no rsc device` block.
+
+**New (smaller) gating issue:** the HAL next opens `/dev/camera-dip`
+(via `libmtkcam_dip_isp6s.so`) and that fails with `errno=2 (ENOENT)`:
+
+```
+E IspDrvDipPhy: ERROR: DIP kernel 1st open fail, errno(2):No such file or directory.
+E IspDrvDipPhy: ERROR: DIP kernel 2nd open fail, errno(2):No such file or directory.
+```
+
+So unblocking preview now requires only `camera_dip_isp6s.ko`
+(and likely `camera_wpe_isp6s.ko`).  The kernel-debug scope
+narrows from "all six deferred modules" to "fix the genpd /
+iommu attach bug in the WPE + DIP probes".  Next steps for
+debug (since pstore loses the pre-WDT seconds): boot with
+`pstore.backend=ramoops` + a real serial console (or
+`earlycon`); add a manual `pr_emerg("step N")` print before
+each phase of DIP_probe and DIP_Init; or write a tiny pre-load
+shim that NULL-checks `mediatek,larb` and returns -ENODEV
+before `pm_runtime_enable` runs.
+
 ## New modules to add — dependency-resolved load order
 
 22 modules, broken into three sub-blocks.  See "Empirical load
