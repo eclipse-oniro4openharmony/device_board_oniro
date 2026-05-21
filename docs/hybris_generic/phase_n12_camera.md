@@ -1,10 +1,22 @@
 # Phase N12 — Camera (Camera3 HIDL via androidd)
 
-**Status (2026-05-20):** N12.1 discovery ✅, N12.2 module staging ✅,
+> **⚠️ Architecture pivot 2026-05-21:** the pure-musl HIDL transport
+> work in N12.5.x / N12.6 is **superseded for camera streaming** by
+> [phase_n12_camera_droidmedia.md](phase_n12_camera_droidmedia.md) —
+> we're switching to `libdroidmedia.so` (the same battle-tested
+> Camera1-over-libhybris path Droidian, SailfishOS, postmarketOS, and
+> Manjaro Phosh all use on Halium devices) instead of hand-rolling
+> the V3.4 `configureStreams` + FMQ + `native_handle_t` marshalling
+> on top of `/dev/hwbinder`.  N12.5.0–N12.6.0 (enumeration, OpenCamera,
+> Camera HAP launching) **stays**; N12.6.1c / N12.7 in this doc are
+> retired.
+
+**Status (2026-05-21):** N12.1 discovery ✅, N12.2 module staging ✅,
 N12.2.5 NV-calibration mount ✅ (3 cameras enumerated, full Camera3
-characteristics returned by HIDL provider), N12.4 VDI scaffolding ✅.
-See subphase index below for live status of each step; this header
-summarises only.
+characteristics returned by HIDL provider), N12.4 VDI scaffolding ✅,
+N12.5.0–N12.6.1b ✅ (Camera HAP launches with full UI on the X23),
+N12.D pivot to droidmedia ⏳ planned.  See subphase index below for
+live status of each step; this header summarises only.
 
 > Original status, kept for reference of what was unknown at plan time:
 > ⏳ Planned (2026-05-20).  No source written yet.  This doc is a

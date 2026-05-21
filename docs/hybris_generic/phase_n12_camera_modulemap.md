@@ -310,6 +310,125 @@ via a dedicated runtime-PM-aware service (probably a small
 `camera-modload-init` helper modelled on `wmtdetect-init` for
 WiFi, but gated on the power-domain being on).
 
+### Update 2026-05-21 — Deferred modules are required, not optional
+
+End-to-end test through the N12.D droidmedia pivot
+([phase_n12_camera_droidmedia.md](phase_n12_camera_droidmedia.md))
+revealed that **the MTK HAL cannot process capture requests
+without the deferred ISP sub-block modules**.  With only the 17
+safe modules loaded:
+
+- Enumeration works (`dumpsys media.camera → 3 devices`).
+- `ICameraDevice::open` works.
+- `configureStreams_3_4` succeeds.
+- `processCaptureRequest` is accepted; P1Node starts; sensor is
+  configured (e.g. S5KGM1ST → 2000x1500 BAYER10) and powered.
+- But on the first frame's downstream processing, the MTK kernel
+  drivers log `RscDrv ENQUE_REQ fail (-1)`, `no rsc device`,
+  followed by `CamsvStatisticPipe: deque DumpSenDebug fail` and
+  `PDOBufMgr: dequeueHwBuf fail`.  9 inflight frames stay
+  unfulfilled (`metadata arrived: false` in flushInflightRequests).
+- cameraserver times out (`Camera2Client::waitUntilCurrentRequest
+  IdLocked: Camera 0: Timed out waiting for current request id to
+  return in results!`), the HAL transitions to ERROR_DEVICE, gets
+  killed, and respawns.
+
+Hands-on attempts to load the deferred modules at runtime, in
+order of escalating effort:
+
+1. **Plain `insmod` while power-domain is off**: triggers SoC
+   watchdog reboot ~30 s later (matches the original finding in
+   the table above).
+2. **Plain `insmod` while camera HAP is open (HAL has called
+   `pm_runtime_get`, `dumpsys` shows the camera as CONNECTED)**:
+   reboots within ~10 s.  We have a few hundred milliseconds
+   between camera-HAP launch and HAL request-time, but a
+   poll-and-insmod loop doesn't reliably win the race.
+3. **Force `power/control=on` on `/sys/devices/platform/1a000000.
+   camisp_legacy` (driver runtime-PM knob — `pm_genpd_summary`
+   confirms `cam on-0` after the write), then insmod**: returns
+   rc=0 silently, then the SoC reboots ~5–10 s later anyway.  The
+   power-domain being on isn't sufficient; something else in the
+   probe path is the actual trigger.
+
+This is now the gating issue for camera preview.  Next-step
+investigation:
+
+- **DT diff vs stock Halium**: capture
+  `/proc/device-tree/soc/{kd_camera_hw1@1a004000, *cam_isp*,
+  *seninf*}/` recursively on a stock-Halium boot vs ours.  Identify
+  pinctrl / clock / mtk-cmdq-sec / SMI properties that differ.
+- **Halium first-stage init module load**: pull
+  `vendor_boot/ramdisk/lib/modules/` + `modules.load` (if present)
+  from Halium's `vendor_boot.img` to see whether stock Halium
+  loads these via Linux module-init or via modprobe at later
+  init.rc stages.  If the latter, identify which init.rc trigger
+  fires first (e.g. on property `vold.decrypt=trigger_default_encryption`).
+- **Pre-load `cmdq_helper_inf` / `mtk-cmdq-sec-drv`**: these are
+  cmdq-secure helpers used by the deferred modules.  cmdq_helper_inf
+  is already loaded but the secure (`mtk-cmdq-sec-drv`) variant
+  might not be — and the deferred modules may need both.  Inspect
+  the registered platform devices before+after their insmod to
+  see what the probe touches.
+- **Hold a userspace fd to `/dev/camera-isp` then insmod**: opening
+  the chardev triggers `pm_runtime_get` inside the existing
+  camera_isp.ko driver, which should fan out to the SMI / cmdq
+  larbs the deferred modules need at probe time.
+
+### Update 2026-05-21 (part 2) — Stock Halium 12 ships NONE of these
+
+Investigation of the Halium blobs in
+`device/board/oniro/hybris_generic/halium-blobs/` (`bootstrap.zip`
++ `device.tar.xz` + `halium_vendor_a.img` + `halium_system_a.img`)
+shows:
+
+- `vendor_boot.img` ramdisk `lib/modules/modules.load` lists **161
+  modules**, *none* of which are `camera_*` or `imgsensor*`.
+- `vendor_boot.img` ramdisk `lib/modules/` directory holds **181
+  `.ko` files**; the diff against `modules.load` is unrelated to
+  camera (zram, mtk-mbox, etc.).
+- The vendor partition has `/vendor/lib/modules` as a **broken
+  symlink** to `/vendor_dlkm/lib/modules` — and `super.img` has
+  no `vendor_dlkm` partition (only `system_a` + `vendor_a`).  No
+  `.ko` files are shipped via the system_a image (the LXC-host
+  Android rootfs) either.
+- The Halium kernel `Image` is not built with these drivers `=y`
+  either: `strings vmlinux | grep -E 'rsc.*isp|dip.*isp|...'`
+  returns nothing.
+- The port-repo source (`kernel/linux/volla-vidofnir/
+  vendor-ramdisk-overlay/lib/modules/modules.load`) matches the
+  built ramdisk — confirming `modules.load` is the upstream
+  source-of-truth, not a build-time stripping artefact.
+
+**Implication:** stock Halium 12 for Volla X23 **never loaded
+these modules at all** under Ubuntu Touch / Halium.  Cameras under
+upstream Halium-12 + UBports never reached a working state on
+this device either; this is not a regression caused by native
+boot.  There is no "stock loading sequence" to copy.
+
+The deferred-modules-cause-watchdog-reboot blocker is therefore a
+**new feature** the OHOS native-boot port has to solve, with no
+upstream-port reference to crib from.  The investigation has to
+work from kernel-side first principles (DT inspection, probe
+tracing) rather than reverse-engineering a known-good loader.
+
+Practical implication for the camera HAP preview goal: stock
+Halium 12 droidmedia paths assume `/dev/camera-rsc` exists; on a
+fresh boot with only the 17 safe modules loaded, the device does
+not exist; the MTK HAL fails with `no rsc device`.  Three
+possible paths forward:
+
+1. **Solve the watchdog reboot** for the deferred 6 modules
+   (kernel debugging — DT, probe sequencing, register
+   dependencies).
+2. **Fall back to a different camera HAL revision** that doesn't
+   require the RSC sub-block (e.g. an older MTK HAL on a
+   different vendor.img base).
+3. **Implement frame delivery in droidmedia without going through
+   the MTK HAL** — direct V4L2 against `/dev/video*` + `imgsensor`,
+   plus manual ISP staging.  Substantially more work; loses
+   3A/tuning/HDR.
+
 ## New modules to add — dependency-resolved load order
 
 22 modules, broken into three sub-blocks.  See "Empirical load
