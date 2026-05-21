@@ -571,25 +571,39 @@ configuration.  Sensor frames are captured (P1Node logs `Sensor
 - WPE + DIP are deliberately NOT auto-loaded at boot.  See
   "Remaining blocker" below.
 
-**Remaining blocker — kernel oops when Camera HAP opens
-/dev/camera-dip**: loading WPE + DIP modules at boot then
-launching the OHOS Camera HAP triggers a kernel reboot.
-Userspace `IspDrv_B::setLCE_D1` SIGSEGVs at `0x5a14` (NULL +
-offset) immediately after the kernel's `set tpipe mem info`
-ioctl reports `cmd:0x1 memSizeDiff:0x10000` — the kernel
-ioctl returns failure, userspace doesn't check, and falls into
-a NULL deref.  The full kernel-side path through that ioctl
-hasn't been traced yet; the working hypothesis is that one of
-the DIP ioctls dereferences `dip_devs->larb11` unconditionally
-(despite our NULL-safe fix in the larb-clamp path), maybe via
-`mtk_smi_larb_get(NULL)` from a different code path.  Next
-debug: trace
-`mtkcam_drv/src/isp/dip/6s/6s/drv/isp_drv_dip_phy.cpp`'s
-`setMemInfo` ioctl chain into the kernel.
+**Remaining blocker — Camera HAP preview frames don't flow**:
+loading all 6 deferred modules at boot is **stable**; the
+device stays up; the OHOS Camera HAP launches and renders
+its UI.  Halium-side, `camerahalserver` connects, opens the
+camera, configures streams, P1Node starts capture, and sensor
+TG timestamps come back non-zero (the sensor IS producing
+frames).  But the P2/DIP processing chain that turns those
+sensor frames into Camera3 metadata never completes:
+`IspDrvDipPhy::setMemInfo` reports `set tpipe mem info fail
+cmd:0x1 memSizeDiff:0x10000`, then `IspDrv_B::setLCE_D1`
+SIGSEGVs at `0x5a14` (NULL + offset).  cameraserver times
+out at ~5 s on "9 inflight frames, metadata arrived: false";
+Camera3 enters ERROR_DEVICE, `camerahalserver` is killed +
+respawned; the cycle repeats.  Net effect: HAP preview area
+stays black.
 
-To keep the device usable while that's worked, `init.x23.cfg`
-auto-loads only the 4 safe deferreds; WPE + DIP can be
-`insmod`'d manually for camera-debug sessions.
+The device-tree mt6789.dts has no `reserved-memory` region
+for the DIP `tpipe` (the `memPa:0xfc000000` the userspace
+HAL hands the kernel doesn't correspond to anything in
+`/proc/iomem`), and `imgsys_config@15020000` carries only
+`<&smi_larb9>` where the driver wants two larbs — so the
+HAL is reaching into hardware state our DT doesn't describe.
+
+Earlier note (now corrected): I initially read the post-HAP
+hdc disconnect as a kernel reboot.  It isn't — `uptime`
+through the same sequence shows the device stays up the
+whole time.  The disconnect was hdcd hiccupping while
+camerahalserver respawned; the kernel is fine.
+
+Next debug: ftrace + pr_emerg the DIP ioctl handlers that
+the userspace `setMemInfo` + `setLCE_D1` path opens, and
+audit `dip_devs->larb11` derefs for any outside the
+clock-gated `mtk_smi_larb_{get,put}` paths.
 
 ## New modules to add — dependency-resolved load order
 
