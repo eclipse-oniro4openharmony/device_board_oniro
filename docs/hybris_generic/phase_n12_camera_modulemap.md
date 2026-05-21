@@ -491,6 +491,106 @@ each phase of DIP_probe and DIP_Init; or write a tiny pre-load
 shim that NULL-checks `mediatek,larb` and returns -ENODEV
 before `pm_runtime_enable` runs.
 
+### Update 2026-05-22 — Kernel patch lands; WPE+DIP now loadable
+
+The probe / init investigation bottomed out via a `dmesg -w` HDC
+stream + a 1-line marker (`echo === BEGIN_X === > /dev/kmsg`)
+that survives just long enough for the kernel-side `pr_emerg()`
+prints to flush before the HW watchdog fires.  Final picture:
+
+1. **WPE_probe / DIP_probe — bare DT nodes**.  `wpe_a@15011000`,
+   `wpe_b@15811000`, and `dip_a0@15021000` are declared with
+   only `compatible` / `reg` / `interrupts`.  The driver's
+   `of_parse_phandle("mediatek,larb", 0)` returns NULL, but
+   `of_find_device_by_node(NULL)` walks the platform bus and
+   matches *any* device with `of_node == NULL` (many non-DT
+   platform devices fit), returning a NON-NULL garbage pointer.
+   The driver's `WARN_ON(!pdev_larb)` check is bypassed.
+   `pm_runtime_enable(dev)` is called *before* the would-be
+   bail-out, leaking an enable-count too.
+
+2. **DIP_probe — imgsys_config has 1 larb, driver wants 2**.
+   `imgsys_config@15020000` (compatible `"mediatek,imgsys"`)
+   carries `mediatek,larb = <&smi_larb9>;`.  Only 1 entry.
+   The driver reads index 0 (good — resolves to smi_larb9)
+   AND index 1 (returns NULL).  Original code LOG_INFs but
+   keeps going; `of_find_device_by_node(NULL)` then returns
+   garbage as in #1 → driver stores a non-NULL but invalid
+   pointer in `dip_devs->larb11`.
+
+3. **WPE_Init / DIP_Init — cmdqCoreRegisterCB or
+   register_pm_notifier deadlocks**.  Even with both probes
+   bailing cleanly at the top, `WPE_Init` calls
+   `cmdqCoreRegisterCB(mdp_get_group_wpe(), …)` then
+   `register_pm_notifier(…)`.  On this kernel one of those
+   never returns — `insmod` hangs, hardware watchdog fires
+   ~30 s later.  Root cause inside cmdq/pm not yet known.
+
+**Kernel patch** —
+`device/board/oniro/hybris_generic/kernel/x23/patches/kernel-source/
+camera-isp-bare-dt.patch`:
+- WPE_probe + DIP_probe: top-of-function bail
+  (`return -ENODEV;`) when `of_property_read_bool(np,
+  "mediatek,larb")` is false.  Prevents the
+  pm_runtime_enable + garbage-pdev_larb on the bare nodes.
+- DIP_probe: NULL-check the phandle before
+  `of_find_device_by_node`.  Leave `dip_devs->larb11 = NULL`
+  if its phandle is missing — its only consumer is conditional
+  on `DIP_IMG_MFB_DIP` / `DIP_IMG_DIP2` clocks being non-NULL,
+  which they aren't on this device's DT.
+- WPE_Init + DIP_Init: `#if 0` (under
+  `VOLLAX23_BISECT`) the `cmdqCoreRegisterCB` +
+  `register_pm_notifier` calls — defers the camera HAL
+  integration with GCE / system PM until that hang is rooted.
+  Reasonably-safe defer: those callbacks fire during
+  GCE-batch capture and during system suspend, neither of
+  which is the immediate-preview path.
+- pr_emerg bisection markers retained for the next debug
+  pass.
+
+**Empirical result after the patch + the user-space wiring
+(below)**: WPE + DIP modules `insmod` cleanly.
+`/dev/camera-{isp,mem,rsc,dip}` all exist.  The Halium MTK HAL
+gets past every earlier failure (`no rsc device`, `DIP open
+fail errno=2`, `DIP open fail errno=13`) and into P1Node + P2Node
+configuration.  Sensor frames are captured (P1Node logs `Sensor
+2000x1500` with non-zero TG timestamps).
+
+**Userspace wiring needed alongside the patch** (in
+`vendor/oniro/hybris_generic`):
+- `etc/init/init.x23.cfg` pre-init insmods the 4 safe
+  deferred modules + `chmod 666` on `/dev/camera-{isp,mem,
+  rsc,dip,kd_camera_hw,seninf}`.  The chmod is required
+  because Halium-side `camerahalserver` runs as Halium
+  `cameraserver` (uid 1047) in its own user namespace which
+  doesn't overlap with any OHOS-named group — chowning to
+  `camera_host:camera_host` wouldn't grant Halium access.
+- `etc/ueventd/ueventd.config` carries matching `0666 root
+  root` rules for chardevs created by post-boot module
+  reloads.
+- WPE + DIP are deliberately NOT auto-loaded at boot.  See
+  "Remaining blocker" below.
+
+**Remaining blocker — kernel oops when Camera HAP opens
+/dev/camera-dip**: loading WPE + DIP modules at boot then
+launching the OHOS Camera HAP triggers a kernel reboot.
+Userspace `IspDrv_B::setLCE_D1` SIGSEGVs at `0x5a14` (NULL +
+offset) immediately after the kernel's `set tpipe mem info`
+ioctl reports `cmd:0x1 memSizeDiff:0x10000` — the kernel
+ioctl returns failure, userspace doesn't check, and falls into
+a NULL deref.  The full kernel-side path through that ioctl
+hasn't been traced yet; the working hypothesis is that one of
+the DIP ioctls dereferences `dip_devs->larb11` unconditionally
+(despite our NULL-safe fix in the larb-clamp path), maybe via
+`mtk_smi_larb_get(NULL)` from a different code path.  Next
+debug: trace
+`mtkcam_drv/src/isp/dip/6s/6s/drv/isp_drv_dip_phy.cpp`'s
+`setMemInfo` ioctl chain into the kernel.
+
+To keep the device usable while that's worked, `init.x23.cfg`
+auto-loads only the 4 safe deferreds; WPE + DIP can be
+`insmod`'d manually for camera-debug sessions.
+
 ## New modules to add — dependency-resolved load order
 
 22 modules, broken into three sub-blocks.  See "Empirical load
