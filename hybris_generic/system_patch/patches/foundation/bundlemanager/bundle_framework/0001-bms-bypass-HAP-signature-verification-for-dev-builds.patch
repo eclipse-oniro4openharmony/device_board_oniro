@@ -1,0 +1,172 @@
+From 78cbe1e1f914498aa3c63fe6c61f5d592b5338e0 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 22 May 2026 19:28:34 +0000
+Subject: [PATCH] bms: bypass HAP signature verification for dev builds
+
+Force X86_EMULATOR_MODE on for libbms + bundle_parser so the existing
+emulator-mode bypasses (no-fail in CheckMultipleHapsSignInfo, appId clear
+on bad provision info, ACL_IGNORE_CHECK for unsigned HAPs in
+bundle_permission_mgr.cpp) take effect regardless of the platform.
+
+The mode flag alone isn't enough: VerifyCodeSignature{,ForHap} call
+into installd's EnforceCodeSignForApp, which is not gated by
+X86_EMULATOR_MODE and still rejects unsigned HAPs with
+ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FAILED (8519738). Swallow that
+failure in BaseBundleInstaller and return ERR_OK so installs proceed.
+
+Also: short-circuit FindSignatureFileDir / CheckSignatureFileDir and
+enable BundleVerifyMgr::EnableDebug() at BMS init.
+
+Verified by installing an unsigned HAP via 'hdc install' on the X23
+native-boot image.
+
+Change-Id: I18324fd7e398ba8764b69f6a3e3c43a007226506
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/bundlemgr/BUILD.gn                   |  8 ++-----
+ .../bundlemgr/src/base_bundle_installer.cpp   | 18 ++++++++++++----
+ .../bundlemgr/src/bundle_install_checker.cpp  | 21 ++++---------------
+ services/bundlemgr/src/bundle_mgr_service.cpp |  3 +++
+ 4 files changed, 23 insertions(+), 27 deletions(-)
+
+diff --git a/services/bundlemgr/BUILD.gn b/services/bundlemgr/BUILD.gn
+index 9d1a49ed0..23f66a500 100644
+--- a/services/bundlemgr/BUILD.gn
++++ b/services/bundlemgr/BUILD.gn
+@@ -217,9 +217,7 @@ ohos_source_set("bundle_parser") {
+     defines += [ "BUNDLE_FRAMEWORK_OVERLAY_INSTALLATION" ]
+   }
+ 
+-  if (is_emulator) {
+-    defines += [ "X86_EMULATOR_MODE" ]
+-  }
++  defines += [ "X86_EMULATOR_MODE" ]
+   part_name = "bundle_framework"
+   subsystem_name = "bundlemanager"
+ }
+@@ -311,9 +309,7 @@ ohos_shared_library("libbms") {
+     "LOG_DOMAIN = 0xD001120",
+   ]
+ 
+-  if (is_emulator) {
+-    defines += [ "X86_EMULATOR_MODE" ]
+-  }
++  defines += [ "X86_EMULATOR_MODE" ]
+ 
+   if (build_variant == "user") {
+     defines += [ "BUILD_VARIANT_USER" ]
+diff --git a/services/bundlemgr/src/base_bundle_installer.cpp b/services/bundlemgr/src/base_bundle_installer.cpp
+index 81c921ff3..0f431060d 100644
+--- a/services/bundlemgr/src/base_bundle_installer.cpp
++++ b/services/bundlemgr/src/base_bundle_installer.cpp
+@@ -6345,7 +6345,11 @@ ErrCode BaseBundleInstaller::VerifyCodeSignatureForNativeFiles(InnerBundleInfo &
+     codeSignatureParam.appIdentifier = appIdentifier_;
+     codeSignatureParam.isPreInstalledBundle = IsDataPreloadHap(modulePath_) ? false : info.IsPreInstallApp();
+     codeSignatureParam.isCompileSdkOpenHarmony = (compileSdkType == COMPILE_SDK_TYPE_OPEN_HARMONY);
+-    return InstalldClient::GetInstance()->VerifyCodeSignature(codeSignatureParam);
++    auto verifyRet = InstalldClient::GetInstance()->VerifyCodeSignature(codeSignatureParam);
++    if (verifyRet != ERR_OK) {
++        LOG_W(BMS_TAG_INSTALLER, "VerifyCodeSignature failed: %{public}d, but bypassing...", verifyRet);
++    }
++    return ERR_OK;
+ }
+ 
+ ErrCode BaseBundleInstaller::VerifyCodeSignatureForHap(const std::unordered_map<std::string, InnerBundleInfo> &infos,
+@@ -6381,7 +6385,11 @@ ErrCode BaseBundleInstaller::VerifyCodeSignatureForHap(const std::unordered_map<
+     codeSignatureParam.isCompileSdkOpenHarmony = (compileSdkType == COMPILE_SDK_TYPE_OPEN_HARMONY);
+     codeSignatureParam.isPreInstalledBundle = IsDataPreloadHap(realHapPath) ? false : info.IsPreInstallApp();
+     codeSignatureParam.isCompressNativeLibrary = info.IsCompressNativeLibs(info.GetCurModuleName());
+-    return InstalldClient::GetInstance()->VerifyCodeSignatureForHap(codeSignatureParam);
++    auto verifyRet = InstalldClient::GetInstance()->VerifyCodeSignatureForHap(codeSignatureParam);
++    if (verifyRet != ERR_OK) {
++        LOG_W(BMS_TAG_INSTALLER, "VerifyCodeSignatureForHap failed: %{public}d, but bypassing...", verifyRet);
++    }
++    return ERR_OK;
+ }
+ 
+ ErrCode BaseBundleInstaller::CheckSoEncryption(InnerBundleInfo &info, const std::string &cpuAbi,
+@@ -6591,8 +6599,10 @@ ErrCode BaseBundleInstaller::FindSignatureFileDir(const std::string &moduleName,
+     }
+     auto iterator = verifyCodeParams_.find(moduleName);
+     if (iterator == verifyCodeParams_.end()) {
+-        LOG_E(BMS_TAG_INSTALLER, "no signature file dir exist of module %{public}s", moduleName.c_str());
+-        return ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FAILED;
++        LOG_W(BMS_TAG_INSTALLER, "no signature file dir exist of module %{public}s, but bypassing...", moduleName.c_str());
++        signatureFileDir = "";
++        return ERR_OK;
++        // return ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FAILED;
+     }
+     signatureFileDir = verifyCodeParams_.at(moduleName);
+ 
+diff --git a/services/bundlemgr/src/bundle_install_checker.cpp b/services/bundlemgr/src/bundle_install_checker.cpp
+index f07389fa7..2596ced93 100644
+--- a/services/bundlemgr/src/bundle_install_checker.cpp
++++ b/services/bundlemgr/src/bundle_install_checker.cpp
+@@ -272,8 +272,8 @@ ErrCode BundleInstallChecker::CheckMultipleHapsSignInfo(
+         }
+ #ifndef X86_EMULATOR_MODE
+         if (verifyRes != ERR_OK) {
+-            LOG_E(BMS_TAG_INSTALLER, "hap file verify failed, bundlePath: %{public}s", bundlePath.c_str());
+-            return readFile ? ERR_APPEXECFWK_INSTALL_FAILED_BUNDLE_SIGNATURE_VERIFICATION_FAILURE : verifyRes;
++            LOG_W(BMS_TAG_INSTALLER, "hap file verify failed, bundlePath: %{public}s, but bypassing...", bundlePath.c_str());
++            // return readFile ? ERR_APPEXECFWK_INSTALL_FAILED_BUNDLE_SIGNATURE_VERIFICATION_FAILURE : verifyRes;
+         }
+ #endif
+         hapVerifyRes.emplace_back(hapVerifyResult);
+@@ -291,7 +291,8 @@ ErrCode BundleInstallChecker::CheckMultipleHapsSignInfo(
+ 
+     if (!CheckProvisionInfoIsValid(hapVerifyRes)) {
+ #ifndef X86_EMULATOR_MODE
+-        return ERR_APPEXECFWK_INSTALL_FAILED_INCOMPATIBLE_SIGNATURE;
++        // return ERR_APPEXECFWK_INSTALL_FAILED_INCOMPATIBLE_SIGNATURE;
++        LOG_W(BMS_TAG_INSTALLER, "provision info invalid, but bypassing...");
+ #else
+         // on emulator if check signature failed clear appid
+         for (auto &verifyRes : hapVerifyRes) {
+@@ -1831,20 +1832,6 @@ ErrCode BundleInstallChecker::CheckIsolationMode(const std::unordered_map<std::s
+ 
+ ErrCode BundleInstallChecker::CheckSignatureFileDir(const std::string &signatureFileDir) const
+ {
+-    ErrCode ret = BundleUtil::CheckFileName(signatureFileDir);
+-    if (ret != ERR_OK) {
+-        LOG_E(BMS_TAG_INSTALLER, "code signature file dir is invalid");
+-        return ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FILE_IS_INVALID;
+-    }
+-    if (!BundleUtil::CheckFileType(signatureFileDir, ServiceConstants::CODE_SIGNATURE_FILE_SUFFIX)) {
+-        LOG_E(BMS_TAG_INSTALLER, "signatureFileDir is not suffixed with .sig");
+-        return ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FILE_IS_INVALID;
+-    }
+-    // signatureFileDir not support relevant dir
+-    if (signatureFileDir.find(ServiceConstants::RELATIVE_PATH) != std::string::npos) {
+-        LOG_E(BMS_TAG_INSTALLER, "signatureFileDir is invalid");
+-        return ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FILE_IS_INVALID;
+-    }
+     return ERR_OK;
+ }
+ 
+diff --git a/services/bundlemgr/src/bundle_mgr_service.cpp b/services/bundlemgr/src/bundle_mgr_service.cpp
+index a225a8816..7080147fd 100644
+--- a/services/bundlemgr/src/bundle_mgr_service.cpp
++++ b/services/bundlemgr/src/bundle_mgr_service.cpp
+@@ -35,6 +35,7 @@
+ #include "perf_profile.h"
+ #include "scope_guard.h"
+ #include "bundle_backup_mgr.h"
++#include "bundle_verify_mgr.h"
+ #include "system_ability_definition.h"
+ #include "system_ability_helper.h"
+ #include "xcollie_helper.h"
+@@ -132,6 +133,8 @@ bool BundleMgrService::Init()
+     InitBmsParam();
+     APP_LOGI_NOFUNC("BundleMgrService InitPreInstallExceptionMgr");
+     InitPreInstallExceptionMgr();
++    // Enable debug mode to skip strict HAP signature verification
++    BundleVerifyMgr::EnableDebug();
+     CHECK_INIT_RESULT(InitBundleMgrHost(), "Init bundleMgr fail");
+     CHECK_INIT_RESULT(InitBundleInstaller(), "Init bundleInstaller fail");
+     InitBundleDataMgr();
+-- 
+2.50.1
+

@@ -1,0 +1,65 @@
+From ad027445c2daccc4e3caf5a8f7c0d8917def4da7 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 20 May 2026 20:50:36 +0000
+Subject: [PATCH 2/2] hdc daemon: cap USB bulk writes to stable size for hybris
+ devices
+
+Companion to the existing OnUSBRead 61KB cap for the Volla X23
+native-boot (hybris) target. The Halium Android vendor 5.10 kernel's
+FunctionFS gadget cannot satisfy a single bulk-IN write larger than
+~61KB either, so `hdc file recv` (device -> host) of any file > ~60KB
+hangs the session on the very first CMD_FILE_DATA packet -- the
+daemon's write(bulkIn, ~49KB) never completes, the host's
+libusb_bulk_transfer never returns, and any later `hdc shell` call
+wedges the daemon's shell channel until the device reboots. The same
+hang also broke `mcp__ohos-hdc__screenshot` / `dump_layout`, which
+recv the captured artifact internally.
+
+Cap each write() call in HdcDaemonUSB::SendUSBIOSync at
+GetUsbffsBulkSizeStable() (61KB) inside the existing offset-resume
+loop; bigger hdc packets still go through across multiple writes. No
+host-side hdc change is required.
+
+Verified end-to-end: recv of 18B / 64KB / 1MB / 5MB / 20MB all land
+with matching md5sums, 10 sequential 1MB recvs in a row, interleaved
+send+recv stable, `hdc shell` survives, and the MCP screenshot tool
+captures the X23 lockscreen.
+
+Change-Id: I0c31495d9c917e29e419a035a84da46befaf6531
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ src/daemon/daemon_usb.cpp | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/daemon/daemon_usb.cpp b/src/daemon/daemon_usb.cpp
+index 6c2cfe14..25852b23 100644
+--- a/src/daemon/daemon_usb.cpp
++++ b/src/daemon/daemon_usb.cpp
+@@ -307,9 +307,22 @@ int HdcDaemonUSB::SendUSBIOSync(HSession hSession, HUSB hMainUSB, const uint8_t
+     int childRet = 0;
+     int ret = ERR_IO_FAIL;
+     int offset = 0;
++    // Volla X23 / hybris native boot: symmetric to the OnUSBRead 61KB cap.
++    // The Halium (Android vendor) 5.10 kernel's FunctionFS gadget cannot
++    // satisfy a single bulk-IN write larger than ~61KB either -- hdc file
++    // recv (device -> host) of any file > ~60KB hangs the session because
++    // the daemon's write(bulkIn, ~48KB) on the very first CMD_FILE_DATA
++    // packet never completes. Cap each write() at the 61KB "stable" size
++    // so every write is satisfiable; bigger hdc packets still go through
++    // across multiple writes via the existing offset-resume loop below.
++    const int usbWriteCap = Base::GetUsbffsBulkSizeStable();
+     StartTraceScope("HdcDaemonUSB::SendUSBIOSync");
+     while (modRunning && isAlive && !hSession->isDead) {
+-        childRet = write(bulkIn, const_cast<uint8_t *>(data) + offset, length - offset);
++        int wantWrite = length - offset;
++        if (wantWrite > usbWriteCap) {
++            wantWrite = usbWriteCap;
++        }
++        childRet = write(bulkIn, const_cast<uint8_t *>(data) + offset, wantWrite);
+         if (childRet <= 0) {
+             int err = errno;
+             if (err == EINTR) {
+-- 
+2.50.1
+
