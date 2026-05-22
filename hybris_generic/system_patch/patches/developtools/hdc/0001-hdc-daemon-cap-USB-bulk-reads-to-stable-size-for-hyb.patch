@@ -1,7 +1,7 @@
 From 7223d4ad570b4bfcde60d4988fa219c122317fdf Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 18 May 2026 13:03:04 +0000
-Subject: [PATCH] hdc daemon: cap USB bulk reads to stable size for hybris
+Subject: [PATCH 1/2] hdc daemon: cap USB bulk reads to stable size for hybris
  devices
 
 The Volla X23 native-boot (hybris) target runs the Halium Android
