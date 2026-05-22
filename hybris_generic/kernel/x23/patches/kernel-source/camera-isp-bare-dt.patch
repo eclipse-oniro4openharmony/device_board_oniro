@@ -1,5 +1,5 @@
 From: Francesco Pham <francesco.pham1@h-partners.com>
-Subject: cameraisp: WPE/DIP probe + init fixes for Volla X23 native boot
+Subject: cameraisp: WPE/DIP probe fixes for Volla X23 native boot
 
 The vidofnir mt6789.dts has DT issues for WPE+DIP camera subsystems:
 - wpe_a@15011000 / wpe_b@15811000: bare nodes (compatible/reg/interrupts only)
@@ -20,20 +20,14 @@ Fixes:
    only consumer is conditional on DIP_IMG_MFB_DIP / DIP_IMG_DIP2 clocks
    being present, which they aren't on this device.
 
-3. WPE_Init + DIP_Init: temporarily disable cmdqCoreRegisterCB +
-   register_pm_notifier under VOLLAX23_BISECT.  These calls deadlock
-   on this kernel for reasons not yet root-caused; the rest of probe
-   + chardev creation works fine without them.  Camera works at reduced
-   level (no GCE/MDP suspend integration, no pm suspend hooks).
-
-4. pr_emerg bisection markers retained for future debug.
-
-After this patch + chmod 666 on /dev/camera-* (separate ueventd commit) +
-the matching init.x23.cfg insmod chain, the Halium MTK HAL gets past the
-original /dev/camera-rsc and /dev/camera-dip blocks and into P1Node /
-P2Node configuration.  Frame delivery is still blocked further downstream
-(IspDrv_B::setLCE_D1 SEGV — userspace HAL hits a NULL deref while the
-"set tpipe mem info" kernel ioctl fails — see phase_n12_camera_modulemap.md).
+The earlier VOLLAX23_BISECT `#if 0` of cmdqCoreRegisterCB + register_pm_notifier
+in WPE_Init / DIP_Init has been REMOVED — it let modules insmod without hanging,
+but the runtime DIP ioctls (set tpipe mem info, setLCE_D1, etc.) then ran without
+the cmdq/pm hooks registered and reliably crashed the SoC.  UBports loads these
+modules late (systemd-modules-load.service post-userspace) so cmdq is already
+fully initialized when these calls run.  The matching change is to defer
+camera_wpe_isp6s + camera_dip_isp6s insmod out of OHOS pre-init into a later
+boot stage (see init.x23.cfg).
 
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
 
@@ -59,56 +53,6 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  	/* Check platform_device parameters */
  #ifdef CONFIG_OF
  
-@@ -5574,7 +5587,7 @@
- };
- 
- #if IS_ENABLED(CONFIG_PM)
--static struct notifier_block wpe_suspend_pm_notifier_func = {
-+static struct notifier_block __maybe_unused wpe_suspend_pm_notifier_func = {
- 	.notifier_call = wpe_suspend_pm_event,
- 	.priority = 0,
- };
-@@ -5806,8 +5819,10 @@
- 	GKI_IMG1_LARB_ON = CG_DISABLE;
- 	/*  */
- 	LOG_INF("- E. WPE_Init");
-+	pr_emerg("[WPE_DBG] M1: before platform_driver_register\n");
- 	/*  */
- 	Ret = platform_driver_register(&WPEDriver);
-+	pr_emerg("[WPE_DBG] M2: after platform_driver_register Ret=%d\n", Ret);
- 	if (Ret < 0) {
- 		LOG_INF("- platform_driver_register fail");
- 		LOG_ERR("platform_driver_register fail");
-@@ -5866,22 +5881,29 @@
- 
- 	/* Cmdq */
- 	/* Register WPE callback */
-+#if 0  /* VOLLAX23_BISECT: disable cmdq + pm_notifier registrations */
- #ifndef EP_CODE_MARK_CMDQ
-+	pr_emerg("[WPE_DBG] M3: before cmdqCoreRegisterCB\n");
- 	LOG_INF("register wpe callback for CMDQ");
- 	cmdqCoreRegisterCB(mdp_get_group_wpe(),
- 			   WPE_ClockOnCallback,
- 			   WPE_DumpCallback,
- 			   WPE_ResetCallback,
- 			   WPE_ClockOffCallback);
-+	pr_emerg("[WPE_DBG] M4: after cmdqCoreRegisterCB\n");
- #endif
- 
- #if IS_ENABLED(CONFIG_PM)
-+	pr_emerg("[WPE_DBG] M5: before register_pm_notifier\n");
- 	Ret = register_pm_notifier(&wpe_suspend_pm_notifier_func);
-+	pr_emerg("[WPE_DBG] M6: after register_pm_notifier Ret=%d\n", Ret);
- 	if (Ret) {
- 		pr_debug("[Camera WPE] Failed to register PM notifier.\n");
- 		return Ret;
- 	}
- #endif
-+#endif  /* VOLLAX23_BISECT */
-+	pr_emerg("[WPE_DBG] M7: skipped cmdq + pm_notifier (bisect)\n");
- 
- 	LOG_INF("[WPE_init]CG_IMG_LARB11_ON = %d ,CG_IMG1_ON = %d , GKI_IMG1_LARB_ON = %d \n",CG_IMG_LARB11_ON, CG_IMG1_ON, GKI_IMG1_LARB_ON);
- 	LOG_DBG("- X. Ret: %d.", Ret);
 --- a/drivers/misc/mediatek/cameraisp/dip/isp_6s/camera_dip.c	2026-05-21 15:55:27.548631206 +0000
 +++ b/drivers/misc/mediatek/cameraisp/dip/isp_6s/camera_dip.c	2026-05-21 16:44:52.676926061 +0000
 @@ -7240,6 +7240,19 @@
@@ -162,69 +106,3 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  	}
  
  #if defined(CONFIG_MTK_IOMMU_PGTABLE_EXT) && \
-@@ -7709,7 +7724,7 @@
- };
- 
- #if IS_ENABLED(CONFIG_PM)
--static struct notifier_block dip_suspend_pm_notifier_func = {
-+static struct notifier_block __maybe_unused dip_suspend_pm_notifier_func = {
- 	.notifier_call = dip_suspend_pm_event,
- 	.priority = 0,
- };
-@@ -8435,8 +8450,10 @@
- 	int i;
- 	/*  */
- 	LOG_DBG("- E. Magic: %d", DIP_MAGIC);
-+	pr_emerg("[DIP_DBG] M1: before platform_driver_register\n");
- 	/*  */
- 	Ret = platform_driver_register(&DipDriver);
-+	pr_emerg("[DIP_DBG] M2: after platform_driver_register Ret=%d\n", Ret);
- 	if ((Ret) < 0) {
- 		LOG_ERR("platform_driver_register fail");
- 		return Ret;
-@@ -8508,7 +8525,9 @@
- 		}
- 	}
- 
-+#if 0  /* VOLLAX23_BISECT: disable cmdq registrations */
- #ifndef EP_CODE_MARK_CMDQ
-+	pr_emerg("[DIP_DBG] M3: before cmdqCoreRegisterCB\n");
- 	/* Register DIP callback */
- 	LOG_INF("register dip callback for MDP");
- 	cmdqCoreRegisterCB(mdp_get_group_isp(),
-@@ -8516,11 +8535,15 @@
- 			   DIP_MDPDumpCallback,
- 			   DIP_MDPResetCallback,
- 			   DIP_MDPClockOffCallback);
-+	pr_emerg("[DIP_DBG] M4: after cmdqCoreRegisterCB\n");
- 	/* Register GCE callback for dumping DIP register */
- 	LOG_DBG("register dip callback for GCE");
- 	cmdqCoreRegisterDebugRegDumpCB
- 		(DIP_BeginGCECallback, DIP_EndGCECallback);
-+	pr_emerg("[DIP_DBG] M5: after cmdqCoreRegisterDebugRegDumpCB\n");
- #endif
-+#endif  /* VOLLAX23_BISECT */
-+	pr_emerg("[DIP_DBG] M5b: skipped cmdq registrations (bisect)\n");
- 	/* m4u_enable_tf(M4U_PORT_CAM_IMGI, 0);*/
- #ifdef CONFIG_MTK_ION /* [GKI Modify]+ */
- #ifdef CONFIG_MTK_IOMMU_V2
-@@ -8688,13 +8711,19 @@
- #endif
- #endif
- #endif
-+#if 0  /* VOLLAX23_BISECT: disable register_pm_notifier */
- #if IS_ENABLED(CONFIG_PM)
-+	pr_emerg("[DIP_DBG] M6: before register_pm_notifier\n");
- 	Ret = register_pm_notifier(&dip_suspend_pm_notifier_func);
-+	pr_emerg("[DIP_DBG] M7: after register_pm_notifier Ret=%d\n", Ret);
- 	if (Ret) {
- 		pr_debug("[Camera DIP] Failed to register PM notifier.\n");
- 		return Ret;
- 	}
- #endif
-+#endif  /* VOLLAX23_BISECT */
-+	pr_emerg("[DIP_DBG] M7b: skipped register_pm_notifier (bisect)\n");
-+	pr_emerg("[DIP_DBG] M8: DIP_Init returning\n");
- 	LOG_DBG("- X. Ret: %d.", Ret);
- 	return Ret;
- }

@@ -605,6 +605,181 @@ the userspace `setMemInfo` + `setLCE_D1` path opens, and
 audit `dip_devs->larb11` derefs for any outside the
 clock-gated `mtk_smi_larb_{get,put}` paths.
 
+### Update 2026-05-22 (part 2) — UBports comparison + late-load pivot
+
+User pointed at UBports' working camera on this device.  Pulled the
+device kernel + overlay tree at `kernel/linux/volla-vidofnir/`
+(`gitlab.com/ubports/porting/reference-device-ports/halium12/
+volla-x23/kernel-volla-mt6789` branch `halium-12.0`).  Findings:
+
+1. **UT camera works on the X23 via the same MTK HAL.**  No V4L2,
+   no alternative stack.  The MT6789/ISP6s SoC exposes camera
+   only through MTK proprietary chardevs (`/dev/kd_camera_hw`,
+   `/dev/seninf`, `/dev/camera-{isp,mem,rsc,dip}`); only
+   `/dev/video0` exists and it's `mtk-jpeg-enc` (not a capture
+   device).  V4L2 bypass is a dead end.
+
+2. **UT loads camera modules LATE** via
+   `overlay/system/usr/lib/modules-load.d/vidofnir.conf` →
+   `systemd-modules-load.service`, which runs AFTER UT userspace
+   is up.  Subset loaded: `imgsensor_isp6s`, `camera_eeprom`,
+   `camera_dip_isp6s`, `camera_mem`, `camera_isp`, `cam_qos`,
+   `camera_rsc_isp60`, `camera_fdvt_isp51`.  **NOT loaded**:
+   `camera_wpe_isp6s`, `camera_mfb_isp6s`, `camera_dpe_isp60`,
+   `camera_pda`, `camera_af_media`.
+
+3. **UT overlays `libmtkcam_metastore.so`** from a newer VollaOS
+   vendor image (1101560 bytes vs 786168 in stock Halium 12).
+   Commit `d0b1b0a` describes it as ">12 MP main rear camera
+   resolution fix".  The lib is at
+   `overlay/system/usr/share/halium-overlay/vendor/lib64/`.
+
+4. **UT's Halium init.mt6789.rc `on post-fs-data`** chmod 0660 +
+   chown system:camera the camera chardevs (`/dev/camera-{isp,mem,
+   rsc,dip,…}`) — same as ours since we use the same Halium
+   blobs.  The block runs early (no real `wait_for_prop` since
+   `vendor.all.modules.ready=1` is set in `on early-init`), so
+   any chardev created later (after the trigger fired) misses the
+   chmod and lands at the default 0600 root:root.  UT works around
+   this by loading camera_dip_isp6s LATE enough that some other
+   mechanism re-applies perms — concretely, after camera-dip is
+   created, *something* in the UT/Halium stack chmods it to a state
+   `cameraserver` (uid 1047, group camera=1006) can open.  We
+   couldn't pin down what; the safest reproduction is to apply
+   the chmod ourselves after the late insmod.
+
+**Live experiment 2026-05-22**: bind-mounted UT
+`libmtkcam_metastore.so` over `/vendor/lib64/libmtkcam_metastore.so`
+in the Halium NS via `halium_exec`-style setns+chroot, then
+chmod-ed `/dev/camera-dip` to 0660 system:camera in the Halium NS,
+restarted `camerahalserver`, opened Camera HAP → **SoC watchdog
+reboot**.  This is the same crash as before: now that
+`cameraserver` can actually open `/dev/camera-dip`, the kernel
+DIP ioctl path runs and trips the SoC.
+
+Diagnosis sharpened: the blocker is **kernel-side DIP runtime**,
+not userspace.  Our earlier `#if 0`-of-cmdqCoreRegisterCB +
+register_pm_notifier in WPE_Init/DIP_Init was an "insmod doesn't
+hang" hack — it let modules load but broke runtime behavior.
+UT's stock kernel keeps those calls but loads the modules LATE,
+when cmdq/pm are fully initialized and the calls don't hang.
+
+**The fix** (in flight 2026-05-22):
+
+- **Patch update**: remove the `#if 0 VOLLAX23_BISECT` block
+  from `camera-isp-bare-dt.patch`.  Keep the bare-DT bail and the
+  NULL-safe larb fix (those are correct and don't affect runtime).
+- **init.x23.cfg restructure**: drop `camera_wpe_isp6s` and
+  `camera_dip_isp6s` from pre-init.  Add a new `oneshot`
+  service `late-camera-modules` started under `on boot`.
+- **New helper binary**:
+  `device/board/oniro/hybris_generic/launcher/late-camera-modules.c`.
+  Polls until `hwservicemanager` shows up (= Halium init has
+  reached post-fs-data and HAL services are spawning, so cmdq
+  is fully wired); then `finit_module`s WPE + DIP.  After insmod
+  it chmods `/dev/camera-{dip,wpe}` on OHOS side AND uses
+  setns+chroot into the Halium NS (locating `camerahalserver`'s
+  PID) to chmod 0660 + chown system:camera the same nodes inside
+  Halium's `/dev` tmpfs.  Then `SIGTERM`s `camerahalserver` so
+  Halium init respawns it with valid fd state.
+- **`libmtkcam_metastore.so` overlay**: deferred for now — the
+  >12 MP fix matters for full-resolution rear capture, but the
+  initial goal is preview-on-screen.  If preview works with the
+  stock metastore, we can ship as-is and add the overlay later
+  via the `module_update/halium-debug/` bind path that androidd
+  already supports.
+
+### Update 2026-05-22 (part 3) — Late-load pivot blew up boot; reverted
+
+Tested the kernel-patch-trim + late-load plan from part 2.  Outcome:
+
+- **Kernel rebuilt without the `#if 0` block** (only bare-DT bail +
+  NULL-safe larb retained in `camera-isp-bare-dt.patch`).
+- **`init.x23.cfg`** restructured: WPE + DIP removed from pre-init;
+  new `late-camera-modules` service started under `on boot`.
+- **`launcher/late-camera-modules.c`** (new): C helper that polls
+  for `hwservicemanager`, then `finit_module`s WPE + DIP, chmods +
+  chowns the Halium-NS `/dev/camera-{dip,wpe}`, then `SIGTERM`s
+  `camerahalserver` to force respawn with the new perms.
+
+**Boot result: device boot-looped.**  USB cycle: ~3 s preloader →
+3 s preloader DA → 2.7 s OHOS hdc (12d1:5000) → reset, repeat.
+hdc client too slow to grab the brief OHOS window — couldn't send
+`hdc target boot -bootloader` to escape (tried tight-loop on host
+and on the Pi; ~200 attempts; only the very rare `WINDOW-39`-style
+hit ever made it through, and then the subsequent shell command
+failed).  Recovered via physical `Vol-Down + Power`.
+
+Bisection back from the failed image:
+1. Rebuilt kernel WITHOUT my patch (i.e., patch directory empty of
+   `camera-isp-bare-dt.patch`).  Flashed new boot + vendor_boot;
+   kept the same broken super.img.  Device **still** boot-looped.
+   → **Kernel changes are not the culprit.**
+2. Rebuilt OHOS clean (no `--fast-rebuild`) with my init.x23.cfg
+   reverted and the `late_camera_modules` BUILD.gn target +
+   `late-camera-modules.c` dropped from the build group.  Device
+   **boots cleanly.**
+   → **OHOS-side additions caused the boot-anim crash.**
+
+Most likely culprit (untested in isolation): the new `param:` /
+`condition` job + the `late-camera-modules` service entry I added
+to `init.x23.cfg` triggered something in init that crashed the
+boot sequence well before late-camera-modules ever would have run.
+
+**Live experiment results from earlier in the day** (with the
+pre-pivot `#if 0` kernel still flashed):
+- Bind-mounting the UBports/VollaOS `libmtkcam_metastore.so` over
+  the Halium stock copy in the Halium NS, plus chmod 0660
+  system:camera on `/dev/camera-dip` in the Halium NS, plus
+  restarting `camerahalserver` → **SoC watchdog reboot when the
+  Camera HAP was opened.**  This confirmed the userspace
+  `setLCE_D1` SIGSEGV from the earlier #if-0-kernel session was a
+  secondary symptom: once we let `cameraserver` actually open
+  `/dev/camera-dip`, the kernel runtime DIP ioctl path is what
+  trips the watchdog.  We never reached the point where the
+  metastore overlay made any visible difference, because the
+  kernel went down first.
+
+**Net of the day**:
+- Camera still doesn't preview.  Both candidate failure modes —
+  userspace NULL-deref under the #if-0 kernel, and kernel ioctl
+  hazard under no-#if-0 kernel — block frames from flowing.
+- Tree saved as a stable baseline.  `camera-isp-bare-dt.patch`
+  is committed in its short form (bare-DT bail + NULL-safe larb
+  only — the `#if 0` block deliberately omitted because runtime
+  ioctls need cmdq + pm_notifier wiring).  `init.x23.cfg`
+  loads camera modules up to and including `camera_mfb_isp6s`,
+  but stops short of WPE + DIP — those need the late-load
+  path to be made safe before we can re-enable them.
+  `launcher/late-camera-modules.c` is kept in the tree (not
+  hooked into the build) as a starting point for whoever
+  resumes this, but the `BUILD.gn` integration is deferred
+  until we figure out which OHOS-side addition crashed boot.
+- Three cameras still enumerate end-to-end through the N12.D
+  droidmedia loader (`HybrisCameraHostVdiImpl`).  The Camera HAP
+  launches, sensor frames are captured into P1, but P2/DIP
+  postproc never delivers metadata → cameraserver timeout →
+  HAL respawn → black preview.
+
+**Where to resume**:
+1. Build a single-change OHOS rebuild to isolate which addition
+   (BUILD.gn target / `late-camera-modules.c` / `init.x23.cfg`
+   `param:` job / service entry) crashes boot.  Most likely
+   candidate is the `param:` trigger syntax or the service
+   block's `caps` array, since the binary itself never runs
+   when `hybris.camera.enable` is unset.
+2. Investigate the kernel DIP runtime ioctl hazard (the actual
+   blocker).  `set tpipe mem info` ioctl is failing — the
+   userspace HAL hands `memPa:0xfc000000` which has no
+   `/proc/iomem` entry on our DT.  Likely needs a
+   `reserved-memory` node in `mt6789.dts` for DIP's tpipe
+   region.  Audit `dip_devs->larb11` derefs in the runtime
+   ioctl handlers too.
+3. Compare UT's full Halium runtime side-by-side to find
+   whether they're (a) avoiding the DIP postproc path
+   entirely via a config flag, or (b) loading additional
+   firmware/metadata the stock Halium image is missing.
+
 ## New modules to add — dependency-resolved load order
 
 22 modules, broken into three sub-blocks.  See "Empirical load
