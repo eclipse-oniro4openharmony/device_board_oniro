@@ -1,7 +1,7 @@
 From 74d6735bbb0a5240144ae167d05b13dce08fac30 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 21:53:50 +0000
-Subject: [PATCH] replace wallpaperdefault with Oniro wallpaper
+Subject: [PATCH 2/2] replace wallpaperdefault with Oniro wallpaper
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

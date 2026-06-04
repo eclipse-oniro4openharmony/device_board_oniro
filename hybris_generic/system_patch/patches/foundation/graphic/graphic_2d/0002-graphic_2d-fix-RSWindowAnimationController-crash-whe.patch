@@ -1,0 +1,241 @@
+From c3fe8304d6981217f89f28cad315d1cfc486f9d5 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 4 Jun 2026 12:13:32 +0000
+Subject: [PATCH 2/2] graphic_2d: fix RSWindowAnimationController crash when
+ registered off the main runner
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+setController() from a launcher window's ArkUI thread (not the main event
+runner) made the first controller callback SIGBUS in libace_napi. Three
+distinct bugs, each surfacing only after the previous was fixed:
+
+  1. Wrong thread. The On* callbacks arrive on a binder thread and were
+     posted via an EventHandler bound to GetMainEventRunner(), but env_ and
+     the JS controller live on the registering thread. Replace handler_ with
+     PostTaskToJsThread(), which dispatches via napi_send_event(env_, ...) so
+     the task always runs on env_'s own JS thread.
+
+  2. No handle scope. napi_send_event invokes the task outside any native
+     callback scope; the task creates napi values (CreateJsWindowAnimation*)
+     and so dereferenced a null scope. Wrap the dispatched task in
+     napi_open_handle_scope / napi_close_handle_scope.
+
+  3. Double-deref in CallJsFunction. NativeReference::Get() already returns
+     the referenced napi_value, but the code re-interpreted it as a napi_ref
+     and called napi_get_reference_value() on it — dereferencing a value as a
+     reference (the actual SIGBUS in native_api.cpp). Use Get() directly.
+
+Also make jsController_ a per-instance member (was a namespace thread_local,
+which only worked when SetJsController and the callback ran on the same
+thread) and include napi/native_node_api.h for napi_send_event.
+
+Change-Id: Id3861f4b7ce12e1cc647ae36d730ae12f43a9d55
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ .../rs_window_animation_controller.cpp        | 87 +++++++++----------
+ .../rs_window_animation_controller.h          | 13 ++-
+ 2 files changed, 52 insertions(+), 48 deletions(-)
+
+diff --git a/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.cpp b/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.cpp
+index f122e05fb7..6c81778d10 100644
+--- a/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.cpp
++++ b/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.cpp
+@@ -20,6 +20,7 @@
+ #include <js_runtime_utils.h>
+ #include <rs_window_animation_log.h>
+ 
++#include "napi/native_node_api.h"  // napi_send_event
+ #include "rs_trace.h"
+ #include "rs_window_animation_utils.h"
+ #ifdef SOC_PERF_ENABLE
+@@ -32,13 +33,35 @@ using namespace AbilityRuntime;
+ constexpr size_t ARGC_ONE = 1;
+ constexpr size_t ARGC_TWO = 2;
+ constexpr size_t ARGC_THREE = 3;
+-thread_local std::unique_ptr<NativeReference> jsController_ = nullptr;
+ 
+ RSWindowAnimationController::RSWindowAnimationController(napi_env env)
+-    : env_(env),
+-    handler_(std::make_shared<AppExecFwk::EventHandler>(AppExecFwk::EventRunner::GetMainEventRunner()))
++    : env_(env)
+ {}
+ 
++void RSWindowAnimationController::PostTaskToJsThread(const std::function<void()>& task, const char* name)
++{
++    napi_env env = env_;
++    // Wrap the task in a handle scope: it creates napi values
++    // (CreateJsWindowAnimationTarget / CreateJsWindowAnimationFinishedCallback)
++    // and calls the JS callback. napi_send_event invokes this outside any
++    // native-callback scope, so without an explicit scope the value creation
++    // dereferences a null scope and SIGBUSes in libace_napi. (The window
++    // manager's own napi_send_event task gets a scope for free via
++    // NapiAsyncTask::Resolve.)
++    auto scopedTask = [env, task]() {
++        napi_handle_scope scope = nullptr;
++        if (napi_open_handle_scope(env, &scope) != napi_status::napi_ok || scope == nullptr) {
++            WALOGE("Failed to open handle scope for animation callback.");
++            return;
++        }
++        task();
++        napi_close_handle_scope(env, scope);
++    };
++    if (napi_send_event(env, scopedTask, napi_eprio_high, name) != napi_status::napi_ok) {
++        WALOGE("Failed to send event to js thread: %{public}s.", name);
++    }
++}
++
+ void RSWindowAnimationController::SetJsController(napi_value jsController)
+ {
+     WALOGD("SetJsController.");
+@@ -67,11 +90,7 @@ void RSWindowAnimationController::OnStartApp(StartingAppType type,
+         controllerSptr->HandleOnStartApp(type, startingWindowTarget, finishedCallback);
+     };
+ 
+-    if (handler_ == nullptr) {
+-        WALOGE("Window animation controller on start app error, handler is nullptr.");
+-        return;
+-    }
+-    handler_->PostTask(task);
++    PostTaskToJsThread(task, "OnStartApp");
+ }
+ 
+ void RSWindowAnimationController::OnAppTransition(const sptr<RSWindowAnimationTarget>& fromWindowTarget,
+@@ -94,11 +113,7 @@ void RSWindowAnimationController::OnAppTransition(const sptr<RSWindowAnimationTa
+         controllerSptr->HandleOnAppTransition(fromWindowTarget, toWindowTarget, finishedCallback);
+     };
+ 
+-    if (handler_ == nullptr) {
+-        WALOGE("Window animation controller on app transition error, handler is nullptr.");
+-        return;
+-    }
+-    handler_->PostTask(task);
++    PostTaskToJsThread(task, "OnAppTransitionOrWallpaperUpdate");
+ }
+ 
+ void RSWindowAnimationController::OnAppBackTransition(const sptr<RSWindowAnimationTarget>& fromWindowTarget,
+@@ -118,11 +133,7 @@ void RSWindowAnimationController::OnAppBackTransition(const sptr<RSWindowAnimati
+         controllerSptr->HandleOnAppBackTransition(fromWindowTarget, toWindowTarget, finishedCallback);
+     };
+ 
+-    if (handler_ == nullptr) {
+-        WALOGE("Window animation controller on app back transition error, handler is nullptr.");
+-        return;
+-    }
+-    handler_->PostTask(task);
++    PostTaskToJsThread(task, "OnAppBackTransition");
+ }
+ 
+ void RSWindowAnimationController::OnMinimizeWindow(const sptr<RSWindowAnimationTarget>& minimizingWindowTarget,
+@@ -144,11 +155,7 @@ void RSWindowAnimationController::OnMinimizeWindow(const sptr<RSWindowAnimationT
+         controllerSptr->HandleOnMinimizeWindow(minimizingWindowTarget, finishedCallback);
+     };
+ 
+-    if (handler_ == nullptr) {
+-        WALOGE("Window animation controller on minimize window error, handler is nullptr.");
+-        return;
+-    }
+-    handler_->PostTask(task);
++    PostTaskToJsThread(task, "OnMinimizeWindow");
+ }
+ 
+ void RSWindowAnimationController::OnMinimizeAllWindow(
+@@ -187,11 +194,7 @@ void RSWindowAnimationController::OnCloseWindow(const sptr<RSWindowAnimationTarg
+         controllerSptr->HandleOnCloseWindow(closingWindowTarget, finishedCallback);
+     };
+ 
+-    if (handler_ == nullptr) {
+-        WALOGE("Window animation controller on close window error, handler is nullptr.");
+-        return;
+-    }
+-    handler_->PostTask(task);
++    PostTaskToJsThread(task, "OnCloseWindow");
+ }
+ 
+ void RSWindowAnimationController::OnScreenUnlock(const sptr<RSIWindowAnimationFinishedCallback>& finishedCallback)
+@@ -215,11 +218,7 @@ void RSWindowAnimationController::OnScreenUnlock(const sptr<RSIWindowAnimationFi
+     constexpr int32_t ACTION_TYPE_CPU_BOOST_CMDID = 10050;
+     OHOS::SOCPERF::SocPerfClient::GetInstance().PerfRequestEx(ACTION_TYPE_CPU_BOOST_CMDID, true, "");
+ #endif
+-    if (handler_ == nullptr) {
+-        WALOGE("Window animation controller on screen unlock error, handler is nullptr.");
+-        return;
+-    }
+-    handler_->PostTask(task);
++    PostTaskToJsThread(task, "OnScreenUnlock");
+ }
+ 
+ void RSWindowAnimationController::OnWindowAnimationTargetsUpdate(
+@@ -242,11 +241,7 @@ void RSWindowAnimationController::OnWindowAnimationTargetsUpdate(
+         controllerSptr->HandleOnWindowAnimationTargetsUpdate(fullScreenWindowTarget, floatingWindowTargets);
+     };
+ 
+-    if (handler_ == nullptr) {
+-        WALOGE("Window animation controller on window animation targets update error, handler is nullptr.");
+-        return;
+-    }
+-    handler_->PostTask(task);
++    PostTaskToJsThread(task, "OnWindowAnimationTargetsUpdate");
+ }
+ 
+ void RSWindowAnimationController::OnWallpaperUpdate(const sptr<RSWindowAnimationTarget>& wallpaperTarget)
+@@ -264,11 +259,7 @@ void RSWindowAnimationController::OnWallpaperUpdate(const sptr<RSWindowAnimation
+         controllerSptr->HandleOnWallpaperUpdate(wallpaperTarget);
+     };
+ 
+-    if (handler_ == nullptr) {
+-        WALOGE("Window animation controller on app transition error, handler is nullptr.");
+-        return;
+-    }
+-    handler_->PostTask(task);
++    PostTaskToJsThread(task, "OnAppTransitionOrWallpaperUpdate");
+ }
+ 
+ void RSWindowAnimationController::HandleOnStartApp(StartingAppType type,
+@@ -384,10 +375,12 @@ void RSWindowAnimationController::CallJsFunction(const std::string& methodName,
+         return;
+     }
+     
+-    auto jsController_get = jsController_->Get();
+-    napi_ref ref = reinterpret_cast<napi_ref>(jsController_get);
+-    napi_value jsControllerValue = nullptr;
+-    napi_get_reference_value(env_, ref, &jsControllerValue);
++    // NativeReference::Get() already returns the referenced napi_value (the JS
++    // controller object). The old code then re-interpreted that value as a
++    // napi_ref and called napi_get_reference_value on it, dereferencing a
++    // napi_value as a reference — SIGBUS in napi_get_reference_value
++    // (native_api.cpp). Use the value directly.
++    napi_value jsControllerValue = jsController_->Get();
+ 
+     if (jsControllerValue == nullptr) {
+         WALOGE("jsControllerValue is null!");
+diff --git a/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.h b/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.h
+index 8a01c8e67f..39001f99f9 100644
+--- a/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.h
++++ b/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.h
+@@ -90,8 +90,19 @@ private:
+ 
+     void CallJsFunction(const std::string& methodName, napi_value const *argv, size_t argc);
+ 
++    // Dispatch a controller callback onto env_'s own JS thread via
++    // napi_send_event. The On* callbacks arrive on a binder/IPC thread; the
++    // JS callbacks and env_ are only valid on the thread that registered the
++    // controller (setController). Posting through an EventHandler bound to
++    // GetMainEventRunner() crashed (SIGBUS in libace_napi) whenever the
++    // registering thread was NOT the main event runner — e.g. a launcher
++    // window's ArkUI thread. napi_send_event always lands on env_'s thread.
++    void PostTaskToJsThread(const std::function<void()>& task, const char* name);
++
+     napi_env env_;
+-    std::shared_ptr<AppExecFwk::EventHandler> handler_;
++    // Owned per-controller (was a namespace thread_local, which only worked
++    // when SetJsController and the callback ran on the same thread).
++    std::unique_ptr<NativeReference> jsController_;
+ };
+ } // namespace Rosen
+ } // namespace OHOS
+-- 
+2.50.1
+

@@ -1,7 +1,7 @@
 From 3fc9621d9811d3c0173c20d96410be1b837470a3 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:36:35 +0000
-Subject: [PATCH] graphic_2d: adapt render service and EGL stack for
+Subject: [PATCH 1/2] graphic_2d: adapt render service and EGL stack for
  hybris_generic container
 
 Multiple fixes to make the OHOS Rosen render pipeline work with Android HALs

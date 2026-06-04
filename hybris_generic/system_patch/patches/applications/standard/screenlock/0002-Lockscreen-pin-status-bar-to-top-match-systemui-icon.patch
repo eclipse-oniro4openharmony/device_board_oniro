@@ -1,0 +1,252 @@
+From 75df88a293cd4d9bae928c5d4db21ff43351ad26 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 22 May 2026 12:15:30 +0000
+Subject: [PATCH 2/2] Lockscreen: pin status bar to top, match systemui icon
+ size
+
+The keyguard window (z=4) was inset by SystemUi_StatusBar's safe area
+even with setWindowLayoutFullScreen + expandSafeArea, leaving a ~72px
+gap above the lockscreen status bar icons. The lockscreen status bar
+also rendered smaller than systemui's because the bundled SVG assets
+in screenlock have different internal padding than systemui's.
+
+- StatusBar wrapper gets .offset({y: -36}) to pull it into the safe-area
+  region the system reserves for the system status bar (36vp on the X23).
+- status_bar_height bumped 24vp -> 36vp so the lockscreen bar matches
+  the systemui bar height. status_bar_margin_top 4vp -> 0 (the offset
+  alone positions it).
+- accounts_area_margin_top 40vp -> 32vp to keep the rest of the lockscreen
+  layout (clock, prompt, accounts) at the same y as before.
+- signal/wifi SVG assets in screenlock/features/{signal,wifi}component
+  replaced with the matching systemui assets (only signal_{3,4,no} differ
+  byte-wise; the rest were already identical). The shared assets render
+  with the same internal padding so the icon shapes match the unlocked
+  status bar.
+- common base float: signal_fontSize 16fp -> 12fp; battery_fontSize added
+  at 12fp so the lockscreen text matches systemui's 12fp rendering.
+- product/phone base float: also gets status_bar_height 36vp and the
+  matching status_bar_margin_top/accounts_area_margin_top overrides.
+- Drop the unused mHeightPx arg from the SlideScreenLock call in
+  product/phone/.../pages/index.ets; SlideScreenlock never declared
+  mHeightPx so newer ArkTS treated this as an error.
+
+Change-Id: I765fa753712fd3e798415c6bb9f8f975ad7ca6a4
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+---
+ common/src/main/resources/base/element/float.json     |  6 +++++-
+ common/src/main/resources/phone/element/float.json    |  4 ++++
+ .../src/main/resources/base/element/float.json        |  6 +++---
+ .../src/main/resources/phone/element/float.json       |  4 ++--
+ .../resources/phone/media/ic_statusbar_signal_3.svg   |  2 +-
+ .../resources/phone/media/ic_statusbar_signal_4.svg   |  2 +-
+ .../resources/phone/media/ic_statusbar_signal_no.svg  |  4 ++--
+ product/phone/src/main/ets/pages/index.ets            |  2 +-
+ product/phone/src/main/ets/pages/slidescreenlock.ets  |  3 ++-
+ .../phone/src/main/resources/base/element/float.json  | 11 +++++------
+ 10 files changed, 26 insertions(+), 18 deletions(-)
+
+diff --git a/common/src/main/resources/base/element/float.json b/common/src/main/resources/base/element/float.json
+index 03bfc6f..e94dc14 100644
+--- a/common/src/main/resources/base/element/float.json
++++ b/common/src/main/resources/base/element/float.json
+@@ -6,7 +6,11 @@
+     },
+     {
+       "name": "signal_fontSize",
+-      "value": "16fp"
++      "value": "12fp"
++    },
++    {
++      "name": "battery_fontSize",
++      "value": "12fp"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/common/src/main/resources/phone/element/float.json b/common/src/main/resources/phone/element/float.json
+index ffc86e2..229100c 100644
+--- a/common/src/main/resources/phone/element/float.json
++++ b/common/src/main/resources/phone/element/float.json
+@@ -7,6 +7,10 @@
+     {
+       "name": "signal_fontSize",
+       "value": "12fp"
++    },
++    {
++      "name": "battery_fontSize",
++      "value": "12fp"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/features/screenlock/src/main/resources/base/element/float.json b/features/screenlock/src/main/resources/base/element/float.json
+index aaab976..70a60e9 100644
+--- a/features/screenlock/src/main/resources/base/element/float.json
++++ b/features/screenlock/src/main/resources/base/element/float.json
+@@ -226,11 +226,11 @@
+     },
+     {
+       "name": "status_bar_height",
+-      "value": "48vp"
++      "value": "36vp"
+     },
+     {
+       "name": "status_bar_padding_left_right",
+-      "value": "0"
++      "value": "24vp"
+     },
+     {
+       "name": "status_bar_margin_top",
+@@ -238,7 +238,7 @@
+     },
+     {
+       "name": "status_bar_opacity",
+-      "value": "1"
++      "value": "0.7"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/features/screenlock/src/main/resources/phone/element/float.json b/features/screenlock/src/main/resources/phone/element/float.json
+index c50dbba..f4d7c92 100644
+--- a/features/screenlock/src/main/resources/phone/element/float.json
++++ b/features/screenlock/src/main/resources/phone/element/float.json
+@@ -226,7 +226,7 @@
+     },
+     {
+       "name": "status_bar_height",
+-      "value": "24vp"
++      "value": "36vp"
+     },
+     {
+       "name": "status_bar_padding_left_right",
+@@ -234,7 +234,7 @@
+     },
+     {
+       "name": "status_bar_margin_top",
+-      "value": "4vp"
++      "value": "0"
+     },
+     {
+       "name": "status_bar_opacity",
+diff --git a/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_3.svg b/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_3.svg
+index cac3487..5f0cb34 100644
+--- a/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_3.svg
++++ b/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_3.svg
+@@ -11,7 +11,7 @@
+             <path d="M37.9999,49.0001 C37.9999,50.6561 36.6569,52.0001 34.9999,52.0001 C33.3429,52.0001 31.9999,50.6561 31.9999,49.0001 L31.9999,46.0001 C31.9999,44.3441 33.3429,43.0001 34.9999,43.0001 C36.6569,43.0001 37.9999,44.3441 37.9999,46.0001 L37.9999,49.0001 Z" id="形状结合" fill="#000000"></path>
+             <g filter="url(#filter-1)" id="编组-2">
+                 <g transform="translate(41.999900, 8.000100)">
+-                    <path d="M6,41 C6,42.656 4.657,44 3,44 C1.343,44 0,42.656 0,41 L0,29 C0,27.344 1.343,26 3,26 C4.657,26 6,27.344 6,29 L6,41 Z" id="Fill-5" fill="#000000"></path>
++                    <path d="M6,41 C6,42.656 4.657,44 3,44 C1.343,44 0,42.656 0,41 L0,29 C0,27.344 1.343,26 3,26 C4.657,26 6,27.344 6,29 L6,41 Z" id="Fill-5" fill="#000000" ></path>
+                     <path d="M16,41 C16,42.656 14.657,44 13,44 C11.343,44 10,42.656 10,41 L10,20 C10,18.344 11.343,17 13,17 C14.657,17 16,18.344 16,20 L16,41 Z" id="Fill-7" fill="#000000"></path>
+                     <path d="M26,41 C26,42.656 24.657,44 23,44 C21.343,44 20,42.656 20,41 L20,11 C20,9.344 21.343,8 23,8 C24.657,8 26,9.344 26,11 L26,41 Z" id="Fill-9" fill="#000000" opacity="0.2"></path>
+                     <path d="M36,41 C36,42.656 34.657,44 33,44 C31.343,44 30,42.656 30,41 L30,3 C30,1.344 31.343,0 33,0 C34.657,0 36,1.344 36,3 L36,41 Z" id="Fill-11" fill="#000000" opacity="0.2"></path>
+diff --git a/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_4.svg b/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_4.svg
+index e7b903a..bf9f9cc 100644
+--- a/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_4.svg
++++ b/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_4.svg
+@@ -13,7 +13,7 @@
+                 <g transform="translate(41.999900, 8.000100)">
+                     <path d="M6,41 C6,42.656 4.657,44 3,44 C1.343,44 0,42.656 0,41 L0,29 C0,27.344 1.343,26 3,26 C4.657,26 6,27.344 6,29 L6,41 Z" id="Fill-5" fill="#000000"></path>
+                     <path d="M16,41 C16,42.656 14.657,44 13,44 C11.343,44 10,42.656 10,41 L10,20 C10,18.344 11.343,17 13,17 C14.657,17 16,18.344 16,20 L16,41 Z" id="Fill-7" fill="#000000"></path>
+-                    <path d="M26,41 C26,42.656 24.657,44 23,44 C21.343,44 20,42.656 20,41 L20,11 C20,9.344 21.343,8 23,8 C24.657,8 26,9.344 26,11 L26,41 Z" id="Fill-9" fill="#000000"></path>
++                    <path d="M26,41 C26,42.656 24.657,44 23,44 C21.343,44 20,42.656 20,41 L20,11 C20,9.344 21.343,8 23,8 C24.657,8 26,9.344 26,11 L26,41 Z" id="Fill-9" fill="#000000" ></path>
+                     <path d="M36,41 C36,42.656 34.657,44 33,44 C31.343,44 30,42.656 30,41 L30,3 C30,1.344 31.343,0 33,0 C34.657,0 36,1.344 36,3 L36,41 Z" id="Fill-11" fill="#000000" opacity="0.2"></path>
+                 </g>
+             </g>
+diff --git a/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_no.svg b/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_no.svg
+index 7498a24..a1c7d5c 100644
+--- a/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_no.svg
++++ b/features/signalcomponent/src/main/resources/phone/media/ic_statusbar_signal_no.svg
+@@ -2,8 +2,8 @@
+ <svg width="64.5px" height="45px" viewBox="0 0 86 60" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+     <title>ic_statusbar_signal_single0</title>
+     <g id="ic_statusbar_signal_single0" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" opacity="0.2">
+-        <g id="编组" fill="#000000" opacity="0.2">
+-            <path d="M34.9999,43.0001 C36.6569,43.0001 37.9999,44.3441 37.9999,46.0001 L37.9999,49.0001 C37.9999,50.6561 36.6569,52.0001 34.9999,52.0001 C33.3429,52.0001 31.9999,50.6561 31.9999,49.0001 L31.9999,46.0001 C31.9999,44.3441 33.3429,43.0001 34.9999,43.0001 Z M44.9999,34.0001 C46.6569,34.0001 47.9999,35.3441 47.9999,37.0001 L47.9999,49.0001 C47.9999,50.6561 46.6569,52.0001 44.9999,52.0001 C43.3429,52.0001 41.9999,50.6561 41.9999,49.0001 L41.9999,37.0001 C41.9999,35.3441 43.3429,34.0001 44.9999,34.0001 Z M54.9999,25.0001 C56.6569,25.0001 57.9999,26.3441 57.9999,28.0001 L57.9999,49.0001 C57.9999,50.6561 56.6569,52.0001 54.9999,52.0001 C53.3429,52.0001 51.9999,50.6561 51.9999,49.0001 L51.9999,28.0001 C51.9999,26.3441 53.3429,25.0001 54.9999,25.0001 Z M64.9999,16.0001 C66.6569,16.0001 67.9999,17.3441 67.9999,19.0001 L67.9999,49.0001 C67.9999,50.6561 66.6569,52.0001 64.9999,52.0001 C63.3429,52.0001 61.9999,50.6561 61.9999,49.0001 L61.9999,19.0001 C61.9999,17.3441 63.3429,16.0001 64.9999,16.0001 Z M74.9999,8.0001 C76.6569,8.0001 77.9999,9.3441 77.9999,11.0001 L77.9999,49.0001 C77.9999,50.6561 76.6569,52.0001 74.9999,52.0001 C73.3429,52.0001 71.9999,50.6561 71.9999,49.0001 L71.9999,11.0001 C71.9999,9.3441 73.3429,8.0001 74.9999,8.0001 Z"  id="形状结合"></path>
++        <g id="编组" fill="#000000">
++            <path d="M34.9999,43.0001 C36.6569,43.0001 37.9999,44.3441 37.9999,46.0001 L37.9999,49.0001 C37.9999,50.6561 36.6569,52.0001 34.9999,52.0001 C33.3429,52.0001 31.9999,50.6561 31.9999,49.0001 L31.9999,46.0001 C31.9999,44.3441 33.3429,43.0001 34.9999,43.0001 Z M44.9999,34.0001 C46.6569,34.0001 47.9999,35.3441 47.9999,37.0001 L47.9999,49.0001 C47.9999,50.6561 46.6569,52.0001 44.9999,52.0001 C43.3429,52.0001 41.9999,50.6561 41.9999,49.0001 L41.9999,37.0001 C41.9999,35.3441 43.3429,34.0001 44.9999,34.0001 Z M54.9999,25.0001 C56.6569,25.0001 57.9999,26.3441 57.9999,28.0001 L57.9999,49.0001 C57.9999,50.6561 56.6569,52.0001 54.9999,52.0001 C53.3429,52.0001 51.9999,50.6561 51.9999,49.0001 L51.9999,28.0001 C51.9999,26.3441 53.3429,25.0001 54.9999,25.0001 Z M64.9999,16.0001 C66.6569,16.0001 67.9999,17.3441 67.9999,19.0001 L67.9999,49.0001 C67.9999,50.6561 66.6569,52.0001 64.9999,52.0001 C63.3429,52.0001 61.9999,50.6561 61.9999,49.0001 L61.9999,19.0001 C61.9999,17.3441 63.3429,16.0001 64.9999,16.0001 Z M74.9999,8.0001 C76.6569,8.0001 77.9999,9.3441 77.9999,11.0001 L77.9999,49.0001 C77.9999,50.6561 76.6569,52.0001 74.9999,52.0001 C73.3429,52.0001 71.9999,50.6561 71.9999,49.0001 L71.9999,11.0001 C71.9999,9.3441 73.3429,8.0001 74.9999,8.0001 Z" id="形状结合"></path>
+         </g>
+     </g>
+ </svg>
+\ No newline at end of file
+diff --git a/product/phone/src/main/ets/pages/index.ets b/product/phone/src/main/ets/pages/index.ets
+index 8126a42..c9d26fd 100644
+--- a/product/phone/src/main/ets/pages/index.ets
++++ b/product/phone/src/main/ets/pages/index.ets
+@@ -82,7 +82,7 @@ struct Index {
+     Flex({ direction: FlexDirection.Column, alignItems: ItemAlign.Center, justifyContent: FlexAlign.Center }) {
+       if (this.mViewModel.mode == LockStyleMode.SlideScreenLock) {
+         // Slide of lock screen
+-        SlideScreenLock({ pageStatus: this.pageStatus, mHeightPx: this.mHeightPx })
++        SlideScreenLock({ pageStatus: this.pageStatus })
+       } else if (this.mViewModel.mode == LockStyleMode.JournalScreenLock) {
+         JournalScreenLock()
+       } else if (this.mViewModel.mode == LockStyleMode.CustomScreenLock) {
+diff --git a/product/phone/src/main/ets/pages/slidescreenlock.ets b/product/phone/src/main/ets/pages/slidescreenlock.ets
+index f566256..ba41ab9 100644
+--- a/product/phone/src/main/ets/pages/slidescreenlock.ets
++++ b/product/phone/src/main/ets/pages/slidescreenlock.ets
+@@ -81,10 +81,11 @@ export default struct SlideScreenlock {
+       })
+ 
+       Flex({ direction: FlexDirection.Column, alignItems: ItemAlign.Center, justifyContent: FlexAlign.Start }) {
++
+         Column() {
+           StatusBar()
+         }
+-
++        .offset({ y: -36 })
+         Column() {
+           Row() {
+             Blank()
+diff --git a/product/phone/src/main/resources/base/element/float.json b/product/phone/src/main/resources/base/element/float.json
+index 2d8171a..c6d32ff 100644
+--- a/product/phone/src/main/resources/base/element/float.json
++++ b/product/phone/src/main/resources/base/element/float.json
+@@ -2,7 +2,7 @@
+   "float": [
+     {
+       "name": "status_bar_height",
+-      "value": "24vp"
++      "value": "36vp"
+     },
+     {
+       "name": "DateTime_margin_top",
+@@ -12,13 +12,13 @@
+       "name": "DateTime_margin_bottom",
+       "value": "52vp"
+     },
+-
+-    { "name": "status_bar_padding_left_right",
++    {
++      "name": "status_bar_padding_left_right",
+       "value": "24vp"
+     },
+     {
+       "name": "status_bar_margin_top",
+-      "value": "4vp"
++      "value": "0"
+     },
+     {
+       "name": "status_bar_opacity",
+@@ -130,12 +130,11 @@
+     },
+     {
+       "name": "accounts_area_margin_top",
+-      "value": "40vp"
++      "value": "32vp"
+     },
+     {
+       "name": "accounts_area_height",
+       "value": "80vp"
+-
+     }
+   ]
+ }
+\ No newline at end of file
+-- 
+2.50.1
+

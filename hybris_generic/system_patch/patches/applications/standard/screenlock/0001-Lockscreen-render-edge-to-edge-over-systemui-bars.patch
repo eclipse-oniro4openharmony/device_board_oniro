@@ -1,7 +1,7 @@
 From 41eaeed4d3f3014f4bb1b30eceb759cc0fcc72c1 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 27 Apr 2026 08:31:18 +0000
-Subject: [PATCH] Lockscreen: render edge-to-edge over systemui bars
+Subject: [PATCH 1/2] Lockscreen: render edge-to-edge over systemui bars
 
 Configure the keyguard window for transparent fullscreen rendering
 (transparent background, layout-fullscreen, own bars hidden) and let
