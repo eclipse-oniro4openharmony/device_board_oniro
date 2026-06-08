@@ -89,7 +89,8 @@ bash "$PATCHES/kernel-source/hdf_patch.sh" \
      "$ROOT_DIR" "$KERNEL_SRC_TMP_PATH" "$PATCHES/kernel-source/hdf.patch"
 
 for p in "$PATCHES"/kernel-source/*.patch; do
-    [ "$(basename "$p")" = "hdf.patch" ] && continue   # applied via hdf_patch.sh above
+    [ "$(basename "$p")" = "hdf.patch" ] && continue        # applied via hdf_patch.sh above
+    [ "$(basename "$p")" = "hyperhold.patch" ] && continue  # applied via hyperhold_patch.sh below
     echo "Applying $(basename "$p")..."
     patch -p1 -d "$KERNEL_SRC_TMP_PATH" < "$p"
 done
@@ -97,6 +98,12 @@ done
 # QoS Auth (helper-script driven, like HDF).
 echo "Applying QoS Auth..."
 bash "$ROOT_DIR/kernel/linux/common_modules/qos_auth/apply_qos_auth.sh" "$ROOT_DIR" "$KERNEL_SRC_TMP_PATH"
+
+# HYPERHOLD (helper-script driven, like HDF/QoS Auth): copies HYPERHOLD's new
+# source files from the OHOS reference kernel ($ROOT/kernel/linux/linux-5.10)
+# and applies the core-edit patch (hyperhold.patch) onto the MT6789 mm/zram.
+echo "Applying HYPERHOLD..."
+bash "$PATCHES/kernel-source/hyperhold_patch.sh" "$ROOT_DIR" "$KERNEL_SRC_TMP_PATH" "$PATCHES/kernel-source/hyperhold.patch"
 
 # Kernel defconfig fragment.
 cp "$CONFIG_DIR/openharmony.config" "$KERNEL_SRC_TMP_PATH/arch/arm64/configs/openharmony.config"
