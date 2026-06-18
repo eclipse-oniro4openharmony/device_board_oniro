@@ -1,0 +1,68 @@
+From db4d4b8a11e66e60272b0f44de2fd956f64ea005 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 5 Jun 2026 19:25:31 +0000
+Subject: [PATCH] memmgr: keep the SA published when HyperHold reclaim init
+ fails
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+On devices whose kernel lacks the OHOS HyperHold/zswapd memcg extensions
+(e.g. hybris_generic on the Volla X23 — OHOS on a Halium MT6789 5.10 kernel:
+no /dev/memcg/memory.app_score, memory.zswapd_single_memcg_param), the
+HyperHold-gated ReclaimStrategyManager::Init() fails. That made
+MemMgrService::Init() return false, so OnStart() never Publish()ed the
+Memory Manager system ability (MEMORY_MANAGER_SA_ID, 1909) even though the
+memmgrservice process was running.
+
+With SA 1909 absent, every GetSystemAbility(MEMORY_MANAGER_SA_ID) caller hit
+the samgr GetSaWrap retry loop (RETRY_TIME_OUT_NUMBER=6 x SLEEP_INTERVAL_TIME
+200ms = ~1.2s) before failing. The legacy window manager calls
+MemMgrClient::OnWindowVisibilityChanged() on its single handler thread for
+every window-visibility change, so each app transition blocked that thread
+for ~1.2s, stalling the whole UI (deferred occlusion callbacks, system-bar
+tint and post-animation layout).
+
+Make the HyperHold ReclaimStrategyManager::Init() failure non-fatal: log a
+warning and continue so the SA still publishes. ReclaimStrategyManager
+self-guards every entry point on initialized_, so proactive reclaim is simply
+inactive while the kernel-independent features (reclaim priority, low-memory
+killer, window-visibility reporting) keep working.
+
+Change-Id: I9f4fed848cbc778bea8938d00c4606a0555f8547
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ services/memmgrservice/src/mem_mgr_service.cpp | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/services/memmgrservice/src/mem_mgr_service.cpp b/services/memmgrservice/src/mem_mgr_service.cpp
+index 4e4e61d..987a56d 100644
+--- a/services/memmgrservice/src/mem_mgr_service.cpp
++++ b/services/memmgrservice/src/mem_mgr_service.cpp
+@@ -65,10 +65,19 @@ bool MemMgrService::Init()
+     MultiAccountManager::GetInstance().Init();
+ 
+ #ifdef USE_HYPERHOLD_MEMORY
+-    // init reclaim strategy manager
++    // init reclaim strategy manager.
++    // hybris_generic: this device runs OHOS on a Halium kernel that lacks the OHOS
++    // HyperHold/zswapd memcg extensions (no /dev/memcg/memory.app_score,
++    // memory.zswapd_single_memcg_param), so ReclaimStrategyManager::Init() fails.
++    // Treat it as non-fatal so the memmgr SA still publishes: the manager self-guards
++    // every entry point on initialized_, and the kernel-independent features
++    // (reclaim-priority, low-memory-killer, window-visibility reporting) keep working.
++    // Without this, MemMgrService never Publish()es SA 1909, and every caller of
++    // GetSystemAbility(MEMORY_MANAGER_SA_ID) — notably WMS on every window-visibility
++    // change — burns ~1.2 s in the samgr GetSaWrap retry, stalling the whole UI.
+     if (!ReclaimStrategyManager::GetInstance().Init()) {
+-        HILOGE("ReclaimStrategyManager init failed");
+-        return false;
++        HILOGW("ReclaimStrategyManager init failed; continuing with proactive reclaim "
++               "disabled (kernel lacks HyperHold memcg support)");
+     }
+ #endif
+ 
+-- 
+2.50.1
+
