@@ -20,7 +20,6 @@ group("x86_group") {
     "cfg:init_configs",
     "distributedhardware:distributedhardware",
     "kernel:kernel",
-    "firmware:firmware",
     # "bluetooth:libbt_vendor",
     # "modules:modules_group",
     "test:test",
