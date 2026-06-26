@@ -22,7 +22,6 @@ group("x86_group") {
     "kernel:kernel",
     # "bluetooth:libbt_vendor",
     # "modules:modules_group",
-    "test:test",
   ]
 }
 
