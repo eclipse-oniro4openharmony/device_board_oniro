@@ -25,30 +25,8 @@ group("x86_group") {
   ]
 }
 
-action("x86_bootimg") {
-    script = "build_bootimg.py"
-    outputs = [ "$root_build_dir/packages/phone/images/boot.img" ]
-    args = [ rebase_path("//") ]
-}
-#./build.sh --product-name x86_general --ccache --build-target x86_image
-action("x86_image") {
-  deps = [ 
-  ":x86_bootimg",
-  # "//build/core/gn:images",
-  "ptgenbuild:ptgen($host_toolchain)"
-   ]
-  script = "./make_rpi_sdcard_image.py"
-  outputs = [ "$root_build_dir/packages/phone/images/x86_image.img" ]
-  args = [
-    "--output",
-    rebase_path("$root_build_dir/packages/phone/images/x86_image.img"),
-    "--userdata",
-    "1000M",
-    rebase_path("$root_build_dir/packages/phone/images/boot.img"),
-    rebase_path("$root_build_dir/packages/phone/images/system.img"),
-    rebase_path("$root_build_dir/packages/phone/images/vendor.img"),
-    rebase_path("$root_build_dir/packages/phone/images/userdata.img"),
-    "--ptpath",
-    rebase_path("$root_build_dir/clang_x64/device_x86_general/device_x86_general")
-  ]
-}
+# NOTE: the x86_general target is QEMU-emulator-only. The emulator boots the
+# kernel directly via QEMU `-kernel`/`-initrd` (see kernel/run.sh), so it does
+# not use a bootloader. The former `x86_bootimg` (GRUB boot.img) and `x86_image`
+# (flashable SD-card/disk image via ptgen) actions, which targeted bare-metal
+# UEFI boot, were removed along with their prebuilt GRUB binaries.
