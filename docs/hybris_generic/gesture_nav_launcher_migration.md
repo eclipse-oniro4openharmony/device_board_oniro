@@ -126,8 +126,8 @@ tips the balance now.
 
 ## 3. AOSP reference (verified in-tree)
 
-Reference trees: `/home/mrfrank/Download/Launcher3/quickstep`,
-`/home/mrfrank/Download/aosp_platform_frameworks_base/packages/SystemUI`.
+Reference trees (AOSP): `packages/apps/Launcher3/quickstep`,
+`frameworks/base/packages/SystemUI`.
 
 **Home / overview / swipe-to-home → Launcher (Quickstep).** SystemUI only binds
 to the launcher's `TouchInteractionService` (via `OverviewProxyService` →

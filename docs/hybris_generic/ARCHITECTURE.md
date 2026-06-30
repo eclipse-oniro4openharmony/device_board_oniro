@@ -356,8 +356,8 @@ overlay and `insmod`'d at pre-init. It enumerates as
 `const.security.developermode.state=true` is set. The device
 enumerates to a USB host as `12d1:5000 "Phone X23"` and answers
 `hdc shell`. Because this dev machine isn't aarch64, all `hdc` traffic
-is relayed through a Raspberry Pi (`frankpi`) with the X23 plugged in
-— see `HDC_AARCH64_HOST.md`.
+is relayed through an aarch64 host (e.g. a Raspberry Pi) with the X23
+plugged in — see `HDC_AARCH64_HOST.md`.
 
 ---
 
