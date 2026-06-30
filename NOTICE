@@ -1,0 +1,40 @@
+# Notices for Eclipse Oniro for OpenHarmony
+
+This content is produced and maintained by the Eclipse Oniro for OpenHarmony
+project (Board Support Packages).
+
+## Source Code
+
+The project maintains the following source code repository for this content:
+
+* https://github.com/eclipse-oniro4openharmony/device_board_oniro
+
+## Copyright
+
+All content is the property of the respective authors or their employers. For
+more information regarding authorship of content, please consult the listed
+source code repository logs.
+
+## Declared Project License
+
+This program and the accompanying materials are made available under the terms
+of the Apache License, Version 2.0, which is available at
+https://www.apache.org/licenses/LICENSE-2.0.
+
+    SPDX-License-Identifier: Apache-2.0
+
+## Third-party Content
+
+This repository bundles or builds upon the following third-party content. Their
+licenses govern those files, not the project's declared Apache-2.0 license.
+
+AOSP `lpunpack` utility
+* Files: hybris_generic/utils/host/lpunpack.py
+* License: Apache-2.0
+* Project: https://android.googlesource.com/platform/system/extras
+
+Linux kernel / MediaTek BSP adaptation patches
+* Files: hybris_generic/kernel/*/patches/** (diffs only; the kernel sources they
+  apply to are fetched at build time and are not committed here)
+* License: GPL-2.0-only (the patched kernel sources)
+* Project: https://www.kernel.org/

@@ -660,11 +660,11 @@ All 13A code changes were stashed (2026-04-15) under the label `phase13a-libhybr
 To restore 13A (e.g. if 13B stalls and libhybris bridge becomes a viable fallback again):
 
 ```bash
-cd /home/mrfrank/openharmony-6.1/drivers/peripheral/audio       && git stash pop  # upstream patches (rendrId typo + C-in-.c stub)
-cd /home/mrfrank/openharmony-6.1/vendor/oniro/hybris_generic    && git stash pop  # product.gni, config.json, device_info.hcs
-cd /home/mrfrank/openharmony-6.1/device/soc/oniro/hybris_generic && git stash pop  # BUILD.gn + hardware/audio/ VDI plugin tree
-cd /home/mrfrank/openharmony-6.1/device/board/oniro             && git stash pop  # utils/{lxc/config,*.sh} + utils/audio_overlays/
-cd /home/mrfrank/openharmony-6.1/developtools/integration_verification && git stash pop  # passthrough_info.json entry
+cd $OHOS_ROOT/drivers/peripheral/audio       && git stash pop  # upstream patches (rendrId typo + C-in-.c stub)
+cd $OHOS_ROOT/vendor/oniro/hybris_generic    && git stash pop  # product.gni, config.json, device_info.hcs
+cd $OHOS_ROOT/device/soc/oniro/hybris_generic && git stash pop  # BUILD.gn + hardware/audio/ VDI plugin tree
+cd $OHOS_ROOT/device/board/oniro             && git stash pop  # utils/{lxc/config,*.sh} + utils/audio_overlays/
+cd $OHOS_ROOT/developtools/integration_verification && git stash pop  # passthrough_info.json entry
 ```
 
 Each repo has exactly one stash with the label (verify with `git stash list`). If `git stash pop` conflicts against 13B changes in those same files, `git stash show stash@{0} -p` is the patch; `git stash drop` after manual merge.

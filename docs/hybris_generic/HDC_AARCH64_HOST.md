@@ -24,7 +24,7 @@ files, ~1.1 GB).  Easiest is to copy them all out of the build tree, plus
 the musl loader:
 
 ```
-HOST=frankpi    # ssh alias for the Pi
+HOST=mypi    # ssh alias for your aarch64 host (e.g. a Raspberry Pi)
 
 # Copy hdc binary
 ssh "$HOST" 'sudo mkdir -p /opt/hdc/lib && sudo chown -R $(id -u):$(id -g) /opt/hdc'
@@ -62,7 +62,7 @@ ssh "$HOST" 'sudo tee /usr/local/bin/hdc > /dev/null' << 'WRAPEOF'
 #!/bin/bash
 # Stale-pidfile cleanup: server crashed-but-not-cleaned will fool the
 # client into thinking it's still up.
-for pidfile in /root/.HDCServer.pid /home/frankpi/.HDCServer.pid; do
+for pidfile in /root/.HDCServer.pid "$HOME"/.HDCServer.pid; do
     [ -f "$pidfile" ] || continue
     pid=$(cat "$pidfile" 2>/dev/null)
     if [ -n "$pid" ] && [ ! -d "/proc/$pid" ]; then
