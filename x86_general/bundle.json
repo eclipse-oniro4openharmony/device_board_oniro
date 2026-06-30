@@ -34,7 +34,6 @@
       "build": {
         "sub_component": [
           "//device/board/oniro/x86_general:x86_group",
-          "//device/board/oniro/x86_general/ptgenbuild:ptgen",
           "//third_party/alsa-utils:alsa-utils"
         ],
         "test": []
