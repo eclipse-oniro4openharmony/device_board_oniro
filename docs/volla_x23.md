@@ -1,100 +1,142 @@
 # Volla X23
 
-This documentation provides instructions for building and deploying OpenHarmony on the Volla X23 device using the `hybris_generic` target. OpenHarmony runs as an LXC container on top of Ubuntu Touch (Halium 12), using libhybris to bridge Android HALs for graphics, input, and other hardware access.
+Build and deploy **OpenHarmony (Oniro)** on the Volla X23 phone using the
+`hybris_generic` target. Oniro boots **natively** — there is no Ubuntu Touch
+host and no LXC container. A Halium boot image chain-loads directly into OHOS
+`init` (`OHOS_NATIVE_BOOT=1 chroot`), and a companion `androidd` process runs
+the device's Android (Halium) HAL services in a child mount/PID namespace so the
+OHOS graphics/HAL stack can reach the MediaTek hardware through **libhybris**.
 
 <img src="./images/screenshot-launcher.jpg" alt="launcher on volla x23" width="300"/>
 <img src="./images/screenshot-settings.jpg" alt="settings on volla x23" width="300"/>
 
+> **The earlier LXC path is retired.** Oniro previously ran as an LXC guest on
+> top of an Ubuntu Touch / Halium host. That approach is no longer used — its
+> container infrastructure (LXC config, start/stop hooks, deploy scripts) has
+> been removed. The per-feature bring-up notes from that era are kept as
+> `legacy_*.md` references under [docs/hybris_generic/](hybris_generic/README.md);
+> most of their HAL/driver detail still applies under native boot.
+
 ## Prerequisites
 
-- Volla X23 (MT6789 / Helio G99, aarch64)
-- Device flashed with Ubuntu Touch via the [UBports Installer](https://devices.ubuntu-touch.io/device/vidofnir/)
-- ADB connection to the device (`adb devices`)
-- OpenHarmony source tree with the `hybris_generic` product target set up (see [Phase 1](hybris_generic/phase1_infrastructure_target_setup.md))
+- **Volla X23** (`vidofnir`, MT6789 / Helio G99, aarch64) with an unlocked
+  bootloader.
+- **`fastboot`** (Android platform-tools) on the host.
+- An **aarch64 USB host** (e.g. a Raspberry Pi) to relay `hdc` — the X23
+  enumerates as an aarch64 hdc device, so a non-aarch64 dev machine cannot talk
+  to it directly. See [HDC_AARCH64_HOST.md](hybris_generic/HDC_AARCH64_HOST.md).
+- An OHOS source tree and build container (see the
+  [emulator README](../README.md#-set-up-the-build-container) for the Docker
+  image).
+- **Halium 12 blobs** for the X23, fetched host-side (SHA256-pinned). These
+  provide the Android `system`/`vendor` HALs and the reused boot image; they are
+  required for graphics but an OHOS-only image builds without them.
 
-## Building the RootFS
-
-Apply the system patches, then build the `hybris_generic` product:
+## Build
 
 ```bash
-chmod +x device/board/oniro/system_patch/system_patch.sh
-./device/board/oniro/system_patch/system_patch.sh
-
+# 1. Build the OHOS rootfs (system / vendor / sys_prod / chip_prod images).
 ./build.sh --product-name hybris_generic --ccache
+
+# 2. (once) Fetch the Halium Android system/vendor/boot blobs.
+bash device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh
+
+# 3. Pack the LP-formatted `super` image (OHOS + Halium logical partitions).
+bash device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh
+
+# 4. Build the chain-load boot image (Halium boot.img with /init replaced).
+bash device/board/oniro/hybris_generic/kernel/x23/build_boot_img_chainload.sh
 ```
 
-The built rootfs will be at `out/hybris_generic/packages/phone/`.
+Artifacts land in `out/hybris_generic/` — `super.img` and `boot-chainload.img`.
 
-## Deploying the LXC Container
-
-The deploy script packages the rootfs, transfers it to the device, configures the LXC container, and sets up a systemd service for automatic startup:
+**Kernel (optional).** The chain-load boot image can carry the OHOS-patched
+kernel (staging drivers: `access_tokenid`, `hilog`, `hievent`, binder
+token-id). Build it — and its matching `vendor_boot.img` modules — with:
 
 ```bash
-chmod +x device/board/oniro/hybris_generic/utils/deploy-lxc-container.sh
-./device/board/oniro/hybris_generic/utils/deploy-lxc-container.sh
+bash device/board/oniro/hybris_generic/kernel/x23/build_kernel.sh
 ```
 
-Options:
-- `-p <tarball>` — use a prebuilt rootfs tarball instead of creating one from the build output
-- `-d` — disable the OHOS systemd service and reboot (useful for debugging)
+Output (`boot.img`, `vendor_boot.img`, `dtbo.img`, `modules.tar.gz`) lands in
+`kernel/linux/volla-vidofnir/out/`. `build_boot_img_chainload.sh` picks up this
+kernel automatically when present; the matching `vendor_boot.img` must be
+flashed too, or drivers fail with a vermagic mismatch.
 
-The LXC container configuration is at `device/board/oniro/hybris_generic/utils/lxc/config` and gets deployed to `/var/lib/lxc/openharmony/config` on the device.
+## Flash
 
-## Building and Deploying the Kernel
-
-The kernel build and deployment are fully automated via scripts in `device/board/oniro/hybris_generic/kernel/x23/`.
-
-### Build
-
-The build script clones the Volla X23 kernel tree, applies all OpenHarmony patches (HDF, binder, staging drivers, config fragments), and builds using the Halium build system:
+Put the device into LK fastboot (hold **Volume-Down + Power**, or
+`hdc shell "reboot bootloader"`), then flash `super`, `boot_a`, and
+`vendor_boot_a` in a single pass:
 
 ```bash
-chmod +x device/board/oniro/hybris_generic/kernel/x23/build_kernel.sh
-./device/board/oniro/hybris_generic/kernel/x23/build_kernel.sh
+bash device/board/oniro/hybris_generic/utils/host/flash-native.sh
 ```
 
-Build artifacts (`boot.img`, `vendor_boot.img`, `dtbo.img`, `modules.tar.gz`) are placed in `kernel/linux/volla-vidofnir/out/`.
+No `fastbootd` switch is needed — `super` is written as a whole physical
+partition.
 
-### Deploy
+## Verify
 
-The deploy script pushes the kernel images and modules to the device, flashes the correct boot slot, and reboots:
+~60–70 s after reboot the device enumerates over USB as `12d1:5000 "Phone X23"`
+and answers hdc (relayed through the aarch64 USB host):
 
 ```bash
-chmod +x device/board/oniro/hybris_generic/kernel/x23/deploy-kernel.sh
-./device/board/oniro/hybris_generic/kernel/x23/deploy-kernel.sh
+hdc list targets
+hdc shell "uname -a"          # aarch64, Linux 5.10.x
 ```
 
-For details on the kernel adaptation, see [Phase 2 — Kernel Adaptation](hybris_generic/phase2_kernel_adaptation.md).
+The OHOS lockscreen renders on the physical 720×1560 panel.
 
-## Architecture Overview
+## Architecture
 
-The system runs as two LXC containers on the Ubuntu Touch host:
+```
+  MTK LK bootloader
+        │  (loads boot_a — a modified Halium boot.img)
+        ▼
+  Linux kernel  +  Halium ramdisk   (ramdisk /init = init-chainload.sh)
+        │  • modprobe vendor modules  • parse-android-dynparts → /dev/mapper/*
+        │  • mount OHOS system_a at /root, Halium system at /root/android
+        ▼
+  exec env OHOS_NATIVE_BOOT=1 chroot /root /system/bin/init --second-stage
+        │  (kernel keeps PID 1 across exec — OHOS init becomes PID 1)
+        ▼
+  OHOS userspace: samgr, hdf, render_service, launcher …
+        └── androidd → clone() child NS → Halium /system/bin/init
+                        → hwservicemanager, composer@2.x, gralloc@4.0 (Android HALs)
+```
 
-| Container | Purpose | Rootfs |
-|-----------|---------|--------|
-| `android` | Android HAL services (hwservicemanager, allocator, etc.) | `/var/lib/lxc/android/` |
-| `openharmony` | OpenHarmony userspace | `/home/phablet/openharmony/rootfs/` |
+The build ships a single custom `super` partition (LP-formatted) with six
+logical partitions:
 
-Both containers share the host IPC namespace so that OHOS can reach Android HAL services via `/dev/hwbinder`. The `libhybris` library translates calls from the OHOS graphics stack (display composer/buffer VDIs) to the Android HWC2 and gralloc HALs.
+| Logical partition | Contents |
+|---|---|
+| `system_a` | OHOS system (becomes `/` after chroot) |
+| `vendor_a` | OHOS vendor |
+| `sys_prod_a` / `chip_prod_a` | OHOS sys_prod / chip_prod |
+| `halium_system_a` | Halium 12 Android `/system` (HAL runtime) |
+| `halium_vendor_a` | Halium 12 MTK `/vendor` (Mali EGL, HAL binaries) |
 
-### Key components
+Android's `hwbinder`/`vndbinder` are shared between the OHOS root namespace and
+`androidd`'s Halium namespace — that shared binder is the bridge over which
+libhybris-based OHOS services (`composer_host`, `allocator_host`) call into the
+Halium HAL services. libhybris loads the Android EGL/HWC2/gralloc `.so`s with an
+embedded bionic linker and remaps `/system`,`/vendor` to `/android/...`.
 
-- **Display:** OHOS RenderService uses custom VDI libraries (`libdisplay_composer_vdi_impl.z.so`, `libdisplay_buffer_vdi_impl.z.so`) that wrap Android HWC2/gralloc via libhybris
-- **Input:** `/dev/input` is bind-mounted into the container; `multimodalinput` uses libinput with `CAP_DAC_OVERRIDE`
-- **Binder:** Separate binderfs devices (`ohos-binder`) for OHOS to avoid collision with the Android binder context
+For the complete structure — chainload internals, `androidd`, binder layout, and
+the graphics data path — see
+[hybris_generic/ARCHITECTURE.md](hybris_generic/ARCHITECTURE.md).
 
-## Detailed Development Roadmap
+## Status & further documentation
 
-For the full development history, per-phase implementation details, bug fixes, and current status, see the [hybris_generic roadmap](hybris_generic/README.md).
+Native boot, USB hdc, display (OHOS lockscreen on the panel), touch, WiFi, and
+audio work end-to-end on the Volla X23; Bluetooth and sensors are in progress.
 
-| Phase | Title | Status |
-|-------|-------|--------|
-| 1 | [Infrastructure & Target Setup](hybris_generic/phase1_infrastructure_target_setup.md) | Complete |
-| 2 | [Kernel Adaptation](hybris_generic/phase2_kernel_adaptation.md) | Complete |
-| 3 | [Core Service Stability](hybris_generic/phase3_core_service_stability.md) | Complete |
-| 4 | [Deployment & Automation](hybris_generic/phase4_deployment_automation.md) | Complete |
-| 5 | [Libhybris Integration & HAL Bridge](hybris_generic/phase5_libhybris_integration.md) | Complete |
-| 6 | [Graphics Stack & RenderService](hybris_generic/phase6_graphics_stack.md) | In Progress |
-| 7 | [Input System Integration](hybris_generic/phase7_input_system.md) | Complete |
-| 8 | [System Stability](hybris_generic/phase8_system_stability.md) | In Progress |
-| 9 | [Volla Tablet (mimir) Bring-Up](hybris_generic/phase9_volla_tablet_mimir.md) | Complete |
+- **Roadmap, current status, and per-phase bring-up docs** —
+  [hybris_generic/README.md](hybris_generic/README.md)
+- **Running-system architecture** —
+  [hybris_generic/ARCHITECTURE.md](hybris_generic/ARCHITECTURE.md)
+- **Original native-boot design rationale** —
+  [hybris_generic/native_boot_design.md](hybris_generic/native_boot_design.md)
+- **aarch64 hdc USB host setup** —
+  [hybris_generic/HDC_AARCH64_HOST.md](hybris_generic/HDC_AARCH64_HOST.md)
