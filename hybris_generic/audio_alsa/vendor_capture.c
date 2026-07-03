@@ -60,10 +60,12 @@ static int32_t CaptureInitImpl(struct AlsaCapture *captureIns)
     return HDF_SUCCESS;
 }
 
-static int32_t CaptureSelectSceneImpl(struct AlsaCapture *captureIns, enum AudioPortPin descPins,
-    const struct PathDeviceInfo *deviceInfo)
+static int32_t CaptureSelectSceneImpl(struct AlsaCapture *captureIns, const struct AudioHwCaptureParam *handleData)
 {
-    captureIns->descPins = descPins;
+    /* MT6789 has a single analog capture path, so scene selection is a no-op;
+     * the mic topology is programmed in CaptureStartImpl. */
+    (void)captureIns;
+    (void)handleData;
     return HDF_SUCCESS;
 }
 
@@ -140,8 +142,9 @@ static int32_t CaptureSetMuteImpl(struct AlsaCapture *captureIns, bool muteFlag)
     return HDF_SUCCESS;
 }
 
-static int32_t CaptureStartImpl(struct AlsaCapture *captureIns)
+static int32_t CaptureStartImpl(struct AlsaCapture *captureIns, const struct AudioHwCaptureParam *handleData)
 {
+    (void)handleData;
     struct AlsaMixerCtlElement elem;
     struct AlsaSoundCard *cardIns = (struct AlsaSoundCard *)captureIns;
     CHECK_NULL_PTR_RETURN_DEFAULT(captureIns);
@@ -226,4 +229,16 @@ int32_t CaptureOverrideFunc(struct AlsaCapture *captureIns)
         captureIns->SetMute = CaptureSetMuteImpl;
     }
     return HDF_SUCCESS;
+}
+
+/*
+ * Map an audio scene to a PCM sub-device index for card-list selection.
+ * The MT6789 exposes a single AFE capture PCM device; call audio is routed
+ * through the Halium/Android RIL path rather than this ALSA adapter, so every
+ * scene resolves to the default device (-1 => let the adapter pick card 0).
+ */
+int32_t CaptureGetSceneDev(enum AudioCategory scene)
+{
+    (void)scene;
+    return -1;
 }

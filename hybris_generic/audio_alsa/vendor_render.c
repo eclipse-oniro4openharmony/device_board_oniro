@@ -177,10 +177,12 @@ static int32_t RenderInitImpl(struct AlsaRender *renderIns)
     return HDF_SUCCESS;
 }
 
-static int32_t RenderSelectSceneImpl(struct AlsaRender *renderIns, enum AudioPortPin descPins,
-    const struct PathDeviceInfo *deviceInfo)
+static int32_t RenderSelectSceneImpl(struct AlsaRender *renderIns, const struct AudioHwRenderParam *handleData)
 {
-    renderIns->descPins = descPins;
+    /* MT6789 routing is fixed per output device and programmed in
+     * RenderStartImpl, so scene selection is a no-op here. */
+    (void)renderIns;
+    (void)handleData;
     return HDF_SUCCESS;
 }
 
@@ -267,8 +269,9 @@ static int32_t RenderSetMuteImpl(struct AlsaRender *renderIns, bool muteFlag)
     return HDF_SUCCESS;
 }
 
-static int32_t RenderStartImpl(struct AlsaRender *renderIns)
+static int32_t RenderStartImpl(struct AlsaRender *renderIns, const struct AudioHwRenderParam *handleData)
 {
+    (void)handleData;
     int32_t ret;
     struct AlsaMixerCtlElement elem;
     struct AlsaSoundCard *cardIns = (struct AlsaSoundCard *)renderIns;
@@ -433,4 +436,16 @@ int32_t RenderOverrideFunc(struct AlsaRender *renderIns)
         renderIns->SetChannelMode = RenderSetChannelModeImpl;
     }
     return HDF_SUCCESS;
+}
+
+/*
+ * Map an audio scene to a PCM sub-device index for card-list selection.
+ * The MT6789 exposes a single AFE playback PCM device; call audio is routed
+ * through the Halium/Android RIL path rather than this ALSA adapter, so every
+ * scene resolves to the default device (-1 => let the adapter pick card 0).
+ */
+int32_t RenderGetSceneDev(enum AudioCategory scene)
+{
+    (void)scene;
+    return -1;
 }

@@ -1,4 +1,4 @@
-From 96d0c5da72db0e3524501f8fdf397eec724bd17e Mon Sep 17 00:00:00 2001
+From a5a7d3464f88bed23fd0b4828b4cb3751b69b831 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:36:01 +0000
 Subject: [PATCH] appspawn: add hybris env vars, /android+/apex sandbox mounts,
@@ -20,6 +20,7 @@ Phase 6.14 (launcher/HAP install) and Phase 8.18 (webview/nweb fix) for
 hybris_generic.
 
 Change-Id: I1f4110344495ec61a018b314f63b58bffb4a8a4a
+(cherry picked from commit 96d0c5da72db0e3524501f8fdf397eec724bd17e)
 ---
  appdata-sandbox.json                | 15 +++++++++++++++
  appspawn.cfg                        |  9 ++++++++-

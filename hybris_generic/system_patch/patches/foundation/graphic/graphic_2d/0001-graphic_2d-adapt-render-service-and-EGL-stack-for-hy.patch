@@ -1,4 +1,4 @@
-From 3fc9621d9811d3c0173c20d96410be1b837470a3 Mon Sep 17 00:00:00 2001
+From 3fd4e8330d58bf1bdbf66083a0382ee14e328aad Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:36:35 +0000
 Subject: [PATCH 1/2] graphic_2d: adapt render service and EGL stack for
@@ -46,6 +46,7 @@ Covers Phase 6.11-6.12 (boot animation, first frame), Phase 6.10D (IPC token
 fallback), and Phase 8 stability fixes for hybris_generic.
 
 Change-Id: I5a70ed987ec6c3628492b4101b9b69bdb7ea6047
+(cherry picked from commit 3fc9621d9811d3c0173c20d96410be1b837470a3)
 ---
  .../src/boot_compatible_display_strategy.cpp  | 31 ++++++++++++-
  .../src/EGL/egl_wrapper_display.cpp           | 15 ++++---

@@ -1,4 +1,4 @@
-From abbe7f7598f2600d0262ef8fad85995491f2c9a5 Mon Sep 17 00:00:00 2001
+From ffc77df2201fc202adfe181d45add845b8c0b761 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:35:54 +0000
 Subject: [PATCH] selinux_adapter: skip selabel_open when no file_contexts
@@ -14,6 +14,7 @@ SELinux is fully disabled for container operation; the Ubuntu Touch host
 manages the SELinux policy.
 
 Change-Id: I091fc1833af2b6fb653eecb076b7c69ea61b8197
+(cherry picked from commit abbe7f7598f2600d0262ef8fad85995491f2c9a5)
 ---
  framework/policycoreutils/src/selinux_restorecon.c | 6 ++++++
  1 file changed, 6 insertions(+)

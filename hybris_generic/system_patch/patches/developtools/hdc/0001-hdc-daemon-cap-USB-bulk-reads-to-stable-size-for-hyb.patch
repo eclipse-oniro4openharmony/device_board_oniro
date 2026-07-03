@@ -1,4 +1,4 @@
-From 7223d4ad570b4bfcde60d4988fa219c122317fdf Mon Sep 17 00:00:00 2001
+From 36874f1b2297365bd36c3402e6fe7d95bf3752f4 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 18 May 2026 13:03:04 +0000
 Subject: [PATCH 1/2] hdc daemon: cap USB bulk reads to stable size for hybris
@@ -20,6 +20,7 @@ is required.
 
 Change-Id: Icdf721e77d589bb37de5ad2afd4bbe68ccac8226
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit 7223d4ad570b4bfcde60d4988fa219c122317fdf)
 ---
  src/common/transfer.cpp   | 13 +++++++++++++
  src/daemon/daemon_usb.cpp |  9 ++++++++-

@@ -1,7 +1,7 @@
-From ba7f4ee5a6e87f41c83f79a7db22efa920f2dba7 Mon Sep 17 00:00:00 2001
+From be51218aa49901cae96d9e672459575aa2b14cb7 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Sun, 17 May 2026 09:18:20 +0000
-Subject: [PATCH 2/2] =?UTF-8?q?build:=20speed=20up=20dev=20builds=20?=
+Subject: [PATCH 1/2] =?UTF-8?q?build:=20speed=20up=20dev=20builds=20?=
  =?UTF-8?q?=E2=80=94=20disable=20ThinLTO,=20fix=20always-dirty=20actions?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -27,6 +27,7 @@ cascading rebuilds every build:
 
 Change-Id: Ice248fbbf5759d9e080a780ba73e3d583833b736
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit ba7f4ee5a6e87f41c83f79a7db22efa920f2dba7)
 ---
  config/compiler/compiler.gni              | 11 +++++++++--
  config/components/idl_tool/idl.gni        | 17 ++++++++---------

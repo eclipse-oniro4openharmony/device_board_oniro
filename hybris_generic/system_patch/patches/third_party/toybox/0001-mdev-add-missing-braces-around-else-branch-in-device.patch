@@ -1,4 +1,4 @@
-From 4ac14cf1e7ca6c71cf35f8c4d927d875486c961d Mon Sep 17 00:00:00 2001
+From f56951460ab8303859e3fa00f53ecdd325c87a3b Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:35:26 +0000
 Subject: [PATCH] mdev: add missing braces around else branch in device node
@@ -12,6 +12,7 @@ Found during Phase 3 (core service stability) testing on the hybris_generic
 LXC container target.
 
 Change-Id: I8127c3df6ab0575883a4050ed53e069a1ead7ab3
+(cherry picked from commit 4ac14cf1e7ca6c71cf35f8c4d927d875486c961d)
 ---
  toys/pending/mdev.c | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)

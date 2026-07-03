@@ -1,4 +1,4 @@
-From db4d4b8a11e66e60272b0f44de2fd956f64ea005 Mon Sep 17 00:00:00 2001
+From a9e7d766df63e99f098b0c968a137ae20f8e3438 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Fri, 5 Jun 2026 19:25:31 +0000
 Subject: [PATCH] memmgr: keep the SA published when HyperHold reclaim init
@@ -31,6 +31,7 @@ killer, window-visibility reporting) keep working.
 
 Change-Id: I9f4fed848cbc778bea8938d00c4606a0555f8547
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit db4d4b8a11e66e60272b0f44de2fd956f64ea005)
 ---
  services/memmgrservice/src/mem_mgr_service.cpp | 15 ++++++++++++---
  1 file changed, 12 insertions(+), 3 deletions(-)

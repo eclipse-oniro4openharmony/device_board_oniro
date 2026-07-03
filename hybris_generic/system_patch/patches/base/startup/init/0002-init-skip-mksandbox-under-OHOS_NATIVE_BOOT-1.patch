@@ -1,4 +1,4 @@
-From 5a06f567a18bb13e7f5dbcb0d0a3b36f6e7d0fce Mon Sep 17 00:00:00 2001
+From 0123a2cb410b79bb800fba4f17450b3ccdc8a0c9 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Tue, 19 May 2026 16:36:07 +0000
 Subject: [PATCH 2/3] init: skip mksandbox under OHOS_NATIVE_BOOT=1
@@ -18,6 +18,7 @@ bring-up path.
 
 Change-Id: I08ffee5d8a974a53980c40766b933c0f72a30d1e
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit 5a06f567a18bb13e7f5dbcb0d0a3b36f6e7d0fce)
 ---
  services/init/standard/init_cmds.c | 12 ++++++++++++
  1 file changed, 12 insertions(+)
