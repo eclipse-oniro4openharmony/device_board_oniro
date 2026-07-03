@@ -1,8 +1,8 @@
-From e60eebdf9447ee81f2a51be8eb2026f38ad34936 Mon Sep 17 00:00:00 2001
+From aaa5c4f9a98f9d019a140699a446ba166adccc9b Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:37:43 +0000
-Subject: [PATCH] integration_verification: register hybris_generic VDI libs in
- deps guard rules
+Subject: [PATCH 1/2] integration_verification: register hybris_generic VDI
+ libs in deps guard rules
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -20,6 +20,7 @@ otherwise fail the chipsetsdk dependency check.
 Part of Phase 5 (libhybris integration & HAL bridge) for hybris_generic.
 
 Change-Id: I85823334c979ac78360b0b8dc4621967fb1e08d9
+(cherry picked from commit e60eebdf9447ee81f2a51be8eb2026f38ad34936)
 ---
  .../rules/Passthrough/passthrough_info.json   | 12 +++++++
  .../rules/chipsetsdk_dep_whitelist.json       | 35 +++++++++++++++++++
@@ -49,7 +50,7 @@ index be6f7b5..6633297 100755
          "name": "hdf:libusb_host_interface_service_2.0",
          "so_file_name": "libusb_host_interface_service_2.0.z.so",
 diff --git a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
-index 13306b3..483fa03 100644
+index 0860a2b..7939ca7 100644
 --- a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
 +++ b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
 @@ -4773,6 +4773,41 @@

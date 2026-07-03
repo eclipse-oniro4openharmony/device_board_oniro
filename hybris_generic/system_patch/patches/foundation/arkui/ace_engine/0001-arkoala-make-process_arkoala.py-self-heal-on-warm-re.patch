@@ -1,4 +1,4 @@
-From 8d2c99ca37eca0e19ad3e5adfcd1b039ad5aa230 Mon Sep 17 00:00:00 2001
+From 1c3b5fd1226bd8bbff6a2b451920924c3c4537c3 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Tue, 19 May 2026 13:51:37 +0000
 Subject: [PATCH] arkoala: make process_arkoala.py self-heal on warm rebuilds
@@ -24,6 +24,7 @@ The build is now idempotent under both warm and cold builds.
 
 Change-Id: I7edb9f089efb903fa8d9e30f36da86f8d634ea52
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit 8d2c99ca37eca0e19ad3e5adfcd1b039ad5aa230)
 ---
  .../arkts_frontend/arkoala/process_arkoala.py | 29 +++++++++++++++++++
  1 file changed, 29 insertions(+)

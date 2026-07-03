@@ -140,12 +140,18 @@ export PATCHES_DIR
 # kernel/linux/volla-* port repos — those are transient build clones owned
 # by device/board/oniro/hybris_generic/kernel/*/build_kernel.sh, not
 # OHOS-checkout repos that system_patch should manage.
+#
+# applications/* is also excluded: those app repos (launcher, systemui,
+# screenlock, settings, filepicker, ...) are maintained in the frankplus
+# forks and built from there, so their changes are tracked in the forks
+# rather than replayed onto vanilla OHOS apps via system_patch.
 if [[ "$MODE" == "list-dirty" ]]; then
     find "$ROOT_DIR" -name ".git" \( -type d -o -type l \) \
         ! -path "$ROOT_DIR/.repo/*" \
         ! -path "$ROOT_DIR/device/board/oniro/*" \
         ! -path "$ROOT_DIR/device/soc/oniro/*" \
         ! -path "$ROOT_DIR/vendor/oniro/*" \
+        ! -path "$ROOT_DIR/applications/*" \
         ! -path "$ROOT_DIR/kernel/linux/volla-*" \
         -exec bash -c 'list_dirty "$(dirname "{}")" "$ROOT_DIR"' \;
 else
@@ -154,6 +160,7 @@ else
         ! -path "$ROOT_DIR/device/board/oniro/*" \
         ! -path "$ROOT_DIR/device/soc/oniro/*" \
         ! -path "$ROOT_DIR/vendor/oniro/*" \
+        ! -path "$ROOT_DIR/applications/*" \
         ! -path "$ROOT_DIR/kernel/linux/volla-*" \
         -exec bash -c 'generate_patch "$(dirname "{}")" "$ROOT_DIR" "$PATCHES_DIR"' \;
 

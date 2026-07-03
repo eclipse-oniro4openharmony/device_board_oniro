@@ -1,4 +1,4 @@
-From e11276ea6f467cc64ea0b8bf75f062378b3be7ff Mon Sep 17 00:00:00 2001
+From 529ad69cce6d237b3bc77b2ea8007270fc6b80fa Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Tue, 19 May 2026 16:37:12 +0000
 Subject: [PATCH 3/3] init: skip securebits lock for androidd service
@@ -26,6 +26,7 @@ device/board/oniro/docs/hybris_generic/phase_n4_androidd.md.
 
 Change-Id: Id5a2b41a412987dd194dab5975db12dbb1198380
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit e11276ea6f467cc64ea0b8bf75f062378b3be7ff)
 ---
  services/init/adapter/init_adapter.c | 13 +++++++++++++
  1 file changed, 13 insertions(+)

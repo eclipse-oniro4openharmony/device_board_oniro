@@ -1,0 +1,45 @@
+From b5b7f0afb6d13d13deb59f7b47c05218861a78f2 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 21 May 2026 14:00:28 +0000
+Subject: [PATCH 2/2] =?UTF-8?q?deps=5Fguard:=20whitelist=20libcamera=5Fhos?=
+ =?UTF-8?q?t=5Fvdi=5Fimpl=E2=86=92libhybris-common?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The N12.D droidmedia pivot (see
+device/board/oniro/docs/hybris_generic/phase_n12_camera_droidmedia.md)
+links libcamera_host_vdi_impl_1.0.z.so against libhybris-common so
+it can hybris_dlopen /android/system/lib64/libdroidmedia.so.
+libhybris lives under system/lib64 (chipset-sdk-restricted), so
+this dependency requires a deps_guard entry to pass the
+inter-partition-deps build check.
+
+Change-Id: I65c673242197f6967128b23efcdf6639ac7b93cd
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit 0a2b84ec0e10bcb235e3e5fa62ec67c5126a5b34)
+---
+ tools/deps_guard/rules/chipsetsdk_dep_whitelist.json | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+index 7939ca7..8b532e5 100644
+--- a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
++++ b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+@@ -4808,6 +4808,13 @@
+         "dep_file_path": "system/lib64/chipset-sdk/libhilog.so",
+         "description": "hybris_generic: libdisplay_composer_vdi_impl.z.so (passthrough) depends on libhilog (chipsetsdk)"
+     },
++    {
++        "so_file_name": "libcamera_host_vdi_impl_1.0.z.so",
++        "so_file_path": "vendor/lib64/libcamera_host_vdi_impl_1.0.z.so",
++        "dep_file_name": "libhybris-common.z.so",
++        "dep_file_path": "system/lib64/libhybris/libhybris-common.z.so",
++        "description": "hybris_generic: libcamera_host_vdi_impl_1.0.z.so depends on libhybris-common (system-only) — N12.D droidmedia pivot uses libhybris to dlopen /android/system/lib64/libdroidmedia.so"
++    },
+     {
+         "so_file_name": "libmemory_tracker_interface_service_1.0.z.so",
+         "so_file_path": "vendor/lib/passthrough/libmemory_tracker_interface_service_1.0.z.so",
+-- 
+2.50.1
+

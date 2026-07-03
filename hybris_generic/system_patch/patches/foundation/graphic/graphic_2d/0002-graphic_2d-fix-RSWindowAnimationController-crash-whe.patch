@@ -1,4 +1,4 @@
-From c3fe8304d6981217f89f28cad315d1cfc486f9d5 Mon Sep 17 00:00:00 2001
+From 2cbb4bb2bf5229cfc81358d92266f96e77e44e59 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 4 Jun 2026 12:13:32 +0000
 Subject: [PATCH 2/2] graphic_2d: fix RSWindowAnimationController crash when
@@ -33,6 +33,7 @@ thread) and include napi/native_node_api.h for napi_send_event.
 
 Change-Id: Id3861f4b7ce12e1cc647ae36d730ae12f43a9d55
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit c3fe8304d6981217f89f28cad315d1cfc486f9d5)
 ---
  .../rs_window_animation_controller.cpp        | 87 +++++++++----------
  .../rs_window_animation_controller.h          | 13 ++-

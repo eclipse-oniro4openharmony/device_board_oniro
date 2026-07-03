@@ -1,4 +1,4 @@
-From ad027445c2daccc4e3caf5a8f7c0d8917def4da7 Mon Sep 17 00:00:00 2001
+From 423a18401ed1e333c9b49600b428ebdf24ec52e4 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 20 May 2026 20:50:36 +0000
 Subject: [PATCH 2/2] hdc daemon: cap USB bulk writes to stable size for hybris
@@ -27,6 +27,7 @@ captures the X23 lockscreen.
 
 Change-Id: I0c31495d9c917e29e419a035a84da46befaf6531
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit ad027445c2daccc4e3caf5a8f7c0d8917def4da7)
 ---
  src/daemon/daemon_usb.cpp | 15 ++++++++++++++-
  1 file changed, 14 insertions(+), 1 deletion(-)

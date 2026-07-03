@@ -1,4 +1,4 @@
-From e211dee2b893b7c97b534f16cd9310bc88f21de5 Mon Sep 17 00:00:00 2001
+From ffe5b3fbee833fb64b8a825d1c5d6382ad0d06b4 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Sun, 17 May 2026 09:18:27 +0000
 Subject: [PATCH] ets2panda: fix perpetually-dirty
@@ -12,6 +12,7 @@ lists it compares as inputs so it re-runs only when they change.
 
 Change-Id: I889b8772218206fc22d5ca2b66d6d7f7372175d0
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+(cherry picked from commit e211dee2b893b7c97b534f16cd9310bc88f21de5)
 ---
  ets2panda/BUILD.gn                               | 16 ++++++++++++++--
  .../scripts/check_build_system_consistency.py    |  6 ++++++
