@@ -1,0 +1,74 @@
+From 0cee42f3615c562bf36830a10b2bf6f106d3b4d6 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 3 Jul 2026 15:51:36 +0000
+Subject: [PATCH] hap: use the wukong100 hap set for oniro hybris_generic
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+hybris_generic runs SceneBoard as its system UI and takes the wukong100 hap
+variants in place of the minimal upstream prebuilts: set hap_src_dir =
+"wukong100/" for hybris_generic (same as wukong100 itself) so its Settings,
+Photos, Camera, Mms, Contacts, ... resolve to the richer, SceneBoard-matched
+wukong100 builds, and add a hybris_generic deps block that pulls the SceneBoard
+hap set (SceneBoard/NotificationManagement/ThemeService/ThemeComponent) into
+group("hap").
+
+The legacy launcher/systemui haps stay in deps but are dormant at runtime — with
+window_manager_use_sceneboard=true the ability manager launches
+com.ohos.sceneboard as home instead of com.ohos.launcher, so keeping them
+installed makes rollback a pure config change.
+
+Enables com.ohos.sceneboard as the system UI on hybris_generic (see
+vendor/oniro config.json window_manager_use_sceneboard=true).
+
+Change-Id: I5fa9f5c856a7fdfc15146984f28adb596600426c
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 17a7309..cf1e3a2 100755
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -13,8 +13,13 @@
+ 
+ import("//build/ohos.gni")
+ 
++# oniro hybris_generic runs SceneBoard and uses the wukong100 hap variants (the
++# richer, SceneBoard-matched Settings/Photos/Camera/... plus the SceneBoard hap
++# set) in place of the minimal upstream prebuilts, so it takes the same
++# hap_src_dir = "wukong100/" as wukong100 itself.
+ hap_src_dir = ""
+-if (defined(product_name) && (product_name == "wukong100")) {
++if (defined(product_name) &&
++    (product_name == "wukong100" || product_name == "hybris_generic")) {
+   hap_src_dir = "wukong100/"
+ }
+ 
+@@ -514,6 +519,21 @@ group("hap") {
+     ]
+   }
+ 
++  # Oniro hybris_generic runs SceneBoard as the home/system-UI. Pull in the
++  # sceneboard hap set (from wukong100/ via hap_src_dir). The legacy
++  # launcher/systemui haps stay in deps but are dormant at runtime — with
++  # window_manager_use_sceneboard=true the ability manager launches
++  # com.ohos.sceneboard as home instead of com.ohos.launcher, so keeping them
++  # installed makes rollback a pure config change.
++  if (defined(product_name) && product_name == "hybris_generic") {
++    deps += [
++      "//applications/standard/hap:sceneboard_hap",
++      "//applications/standard/hap:sceneboard_notificationManagement_hap",
++      "//applications/standard/hap:themeservice_hap",
++      "//applications/standard/hap:themecomponent_hap",
++    ]
++  }
++
+   if (defined(product_name) && product_name == "watchos") {
+     deps -= [
+       ":calendarData_hap",
+-- 
+2.50.1
+
