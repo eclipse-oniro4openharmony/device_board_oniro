@@ -99,6 +99,38 @@ These symlinks are created by `init.x23.cfg` pre-init, before any service that o
 - ✅ **N6.3** — `create_binderfs_device()` in C in `androidd.c` (Phase N4.2)
 - ✅ **N6.4** — OHOS symlinks shipped (Phase N3.3)
 
+## Known gotcha — `GetCallingPid() == 0` on oneway (async) binder calls
+
+This port boots OHOS on the Volla X23's **Android/Halium kernel binder**, and that
+driver does **not deliver `sender_pid` for oneway (`TF_ASYNC`) transactions** the way
+the OHOS kernel binder does. On the receiving side `IPCSkeleton::GetCallingPid()`
+returns **0** for every async call. Synchronous (`TF_SYNC`) calls are unaffected, and
+the calling **token** (`GetCallingTokenID()`) is still delivered — it travels in the
+parcel/RPC header, not the binder transaction metadata — so token-based permission
+checks keep working. This is why the rest of the system looks healthy: almost all
+sensitive IPC is sync or token-gated.
+
+Confirmed universal (a device-side diagnostic showed system apps' async commits also
+see `callingPid == 0`), so treat **any** code that reads `GetCallingPid()`/
+`GetCallingUid()` inside a **oneway** handler as unreliable on this port.
+
+**First victim found:** RenderService's `CommitTransaction` is oneway. RS validates
+each command with `RSTransactionData::IsCallingPidValid`, which requires
+`callingPid == ExtractPid(nodeId)` (the node's owning pid) for non-system callers.
+With `callingPid == 0` this always fails, so **every render command from a non-system
+app is silently dropped** (`SetCallingPidValid(false)` → skipped in `Process()`).
+System apps (`/system/app`) bypass the check and render fine, which masked it; the
+visible failure was the sample IME keyboard (`com.example.kikakeyboard`) drawing a
+blank/empty surface even though it bound, laid out, and hit-tested correctly.
+
+**Fix applied** (graphic_2d, `system_patch/patches/foundation/graphic/graphic_2d/0003-*`):
+`IsCallingPidValid` falls back to the client-stamped sending pid
+(`SetSendingPid(GetRealPid())`, already trusted by RS for routing) when
+`callingPid == 0`. The fallback engages only for the `== 0` case, so validation is
+unchanged on a normal OHOS kernel. If other oneway RS/IPC calling-pid checks surface
+similar symptoms (a non-system client's effects silently missing), apply the same
+`callingPid == 0` fallback pattern. See also `phase_n8_graphics_native.md`.
+
 ## Next phase entry condition
 
 N7 needs: kernel UDC node identification (✅ from N0 — `musb-hdrc`), USB configfs setup precedent (✅ — `/vendor/etc/init/init.usb.configfs.cfg` exists). Move forward to N7.

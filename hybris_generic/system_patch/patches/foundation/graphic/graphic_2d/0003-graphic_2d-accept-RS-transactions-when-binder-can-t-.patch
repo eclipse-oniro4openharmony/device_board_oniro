@@ -1,0 +1,81 @@
+From b038625a8d057112d3407914fa9616359567ed7f Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 21 Jul 2026 20:01:48 +0000
+Subject: [PATCH 3/3] graphic_2d: accept RS transactions when binder can't
+ supply the caller pid
+
+On the hybris_generic port OHOS runs on the Volla X23's Android/Halium
+kernel binder. RenderService's CommitTransaction is a oneway (TF_ASYNC)
+binder call, and on this kernel the async path does not deliver the sender
+pid to the receiver: RSClientToServiceConnectionStub::OnRemoteRequest sees
+GetCallingPid() == 0 for every async commit. The calling *token* is still
+delivered (it is carried in the parcel, not the binder transaction header),
+so isNonSystemAppCalling is still classified correctly.
+
+RSTransactionData::IsCallingPidValid rejects any command whose owning pid
+(ExtractPid(nodeId)) does not match the binder calling pid, unless the node
+is a UIExtension surface. With callingPid == 0 this never matches for a
+non-system app, so every command is marked invalid and skipped in
+Process() -- the app's surface/root/attach/content commands never execute
+on the server. The check is gated behind isNonSystemAppCalling, so system
+apps (all of /system/app: launcher, sceneboard, Notes, ...) bypass it and
+render normally, which masked the problem. The one non-system app in a
+default image is the sample IME (com.example.kikakeyboard): its panel
+surface stayed DEFAULT/childless on the server and composited an empty
+buffer, so the on-screen keyboard bound and hit-tested correctly but never
+drew. Any third-party (non-system) app would fail to render the same way.
+
+When binder cannot supply the caller identity (callingPid == 0), fall back
+to the pid the client stamps into the transaction payload via
+SetSendingPid(GetRealPid()) -- the same value RS already trusts to route
+transactions (RSUnmarshalThread cachedTransactionDataMap_). The fallback
+only engages when callingPid == 0, so validation is unchanged on a normal
+OHOS kernel that reports the caller pid for oneway calls.
+
+Deeper cause: the Android/Halium binder driver this port boots on does not
+deliver sender_pid for oneway transactions the way the OHOS kernel binder
+does. Any code relying on IPCSkeleton::GetCallingPid() over a oneway call
+observes 0 here; synchronous calls and the calling token are unaffected. A
+device-side diagnostic confirmed the 0 is universal -- system apps' async
+commits see it too -- not specific to the IME; the IME was merely the only
+non-system app subject to the IsCallingPidValid gate. This is consistent
+with the keyboard rendering on the OHOS-kernel emulator (which delivers the
+oneway pid) but not on-device.
+
+Change-Id: Ifc886dfaaab42c0b31fcbf13fda56f08063b94db
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../src/transaction/rs_transaction_data.cpp            | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/rosen/modules/render_service_base/src/transaction/rs_transaction_data.cpp b/rosen/modules/render_service_base/src/transaction/rs_transaction_data.cpp
+index c2bbb54207..829ab2fd75 100644
+--- a/rosen/modules/render_service_base/src/transaction/rs_transaction_data.cpp
++++ b/rosen/modules/render_service_base/src/transaction/rs_transaction_data.cpp
+@@ -364,6 +364,14 @@ bool RSTransactionData::UnmarshallingCommand(Parcel& parcel)
+ 
+ bool RSTransactionData::IsCallingPidValid(pid_t callingPid, const RSRenderNodeMap& nodeMap) const
+ {
++    // hybris_generic port: OHOS runs on the Volla X23's Android/Halium-kernel binder, where the
++    // async (TF_ASYNC) CommitTransaction path can surface GetCallingPid() == 0 on the RS server even
++    // for a genuine cross-process commit (the binder caller identity is not delivered for oneway here,
++    // though the calling token still is). When binder cannot supply the caller pid, fall back to the
++    // pid the client stamped into the transaction payload (SetSendingPid) -- the same value RS already
++    // trusts for routing (RSUnmarshalThread cachedTransactionDataMap_). Only engaged when callingPid == 0,
++    // so strict validation is unchanged on kernels that report the caller pid correctly.
++    const pid_t effectiveCallingPid = (callingPid == 0) ? pid_ : callingPid;
+     std::unordered_map<pid_t, std::unordered_map<NodeId, std::set<
+         std::pair<uint16_t, uint16_t>>>> inaccessibleCommandMap;
+     std::unique_lock<std::mutex> lock(commandMutex_);
+@@ -374,7 +382,7 @@ bool RSTransactionData::IsCallingPidValid(pid_t callingPid, const RSRenderNodeMa
+         const NodeId nodeId = command->GetNodeId();
+         const pid_t commandPid = ExtractPid(nodeId);
+         bool allowNonSystemAppCalling = command->GetAccessPermission() != RSCommandPermissionType::PERMISSION_SYSTEM;
+-        if (allowNonSystemAppCalling && (callingPid == commandPid || nodeMap.IsUIExtensionSurfaceNode(nodeId))) {
++        if (allowNonSystemAppCalling && (effectiveCallingPid == commandPid || nodeMap.IsUIExtensionSurfaceNode(nodeId))) {
+             continue;
+         }
+         inaccessibleCommandMap[commandPid][nodeId].insert(command->GetUniqueType());
+-- 
+2.50.1
+

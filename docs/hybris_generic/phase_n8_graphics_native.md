@@ -421,6 +421,30 @@ A physical finger-on-glass coordinate test still needs hands on the device, but 
 
 **Unrelated anomaly (not touch).**  Two PMIC-class i2c chips fail to bind under native boot — `rt5133` (`5-0018`, probe `-ENXIO`) and `mt6375` (`5-0034`).  The touch does not depend on them.  Tracked separately if a consumer ever needs those rails.
 
+## N8.14 — non-system apps render blank: RS drops their commands (`callingPid==0`, 2026-07-21)
+
+**Symptom.**  The on-screen keyboard (`com.example.kikakeyboard`) bound, laid out, and
+hit-tested correctly (blind taps typed the right keys) but never drew — its panel
+surface (`softKeyboard1`) sat on the RS server as a childless `IsPureContainer` with
+`surfaceType:0` (never flipped to `APP_WINDOW_NODE`), compositing an empty buffer.
+
+**Cause.**  RenderService rejects a non-system app's whole transaction when
+`RSTransactionData::IsCallingPidValid` fails, i.e. when the binder-reported
+`GetCallingPid()` ≠ the node's owning pid. RS's `CommitTransaction` is a **oneway**
+binder call, and this port's Android/Halium kernel binder delivers **`callingPid==0`
+for all oneway calls** — so every command from a non-system app is marked invalid and
+skipped in `Process()`. System apps (`/system/app`) bypass the check and render, which
+hid the bug; the sample IME was the only non-system app in the image. This is a general
+binder-behaviour gotcha, **not** graphics-specific — see
+[`phase_n6_binder.md`](./phase_n6_binder.md) "Known gotcha — `GetCallingPid() == 0` on
+oneway (async) binder calls" for the deeper cause and the universality diagnostic.
+
+**Fix.**  `IsCallingPidValid` falls back to the client-stamped sending pid when
+`callingPid==0` (`system_patch/patches/foundation/graphic/graphic_2d/0003-*`). Verified:
+`softKeyboard1` flips to `surfaceType:1` with content children, the RS
+`IsCallingPidValid check failed` log goes to zero, and the full QWERTY keyboard renders
+and types. Also unblocks any other third-party (non-system) app's rendering.
+
 ## N8.6 — Expect Phase 8 stability bugs to reproduce
 
 Native boot doesn't change the EGL teardown sequence, the HWC2 spec violations, or the Mali driver's NULL+0x1d8 crash on dropdown close. Specifically:
