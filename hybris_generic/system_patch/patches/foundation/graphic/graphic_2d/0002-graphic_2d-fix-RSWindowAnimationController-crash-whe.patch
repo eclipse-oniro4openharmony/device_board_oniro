@@ -1,7 +1,7 @@
 From 2cbb4bb2bf5229cfc81358d92266f96e77e44e59 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 4 Jun 2026 12:13:32 +0000
-Subject: [PATCH 2/2] graphic_2d: fix RSWindowAnimationController crash when
+Subject: [PATCH 2/3] graphic_2d: fix RSWindowAnimationController crash when
  registered off the main runner
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
