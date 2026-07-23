@@ -1,0 +1,2528 @@
+diff --git a/arch/arm64/configs/openharmony.config b/arch/arm64/configs/openharmony.config
+new file mode 100644
+index 000000000..62e57f936
+--- /dev/null
++++ b/arch/arm64/configs/openharmony.config
+@@ -0,0 +1,18 @@
++# OpenHarmony driver enablement for the ansuz (Volla Phone Plinius)
++# android14-6.1-halium GKI kernel — stage 1 (minimal boot set).
++#
++# KMI rule for every addition here: nothing may change the layout of a
++# struct that stock prebuilt vendor modules see, and no existing
++# exported symbol's signature may change (CONFIG_MODVERSIONS CRCs).
++# access_tokenid deliberately keeps its tokens OUT of task_struct — see
++# drivers/accesstokenid/access_token_store.c in ohos-adaptation.patch.
++#
++# Staged later (mirroring the X23 set as needs prove out): HDF, hmdfs,
++# sharefs, hyperhold, hisysevent, blackbox, hungtask, zerohung, HCK.
++
++CONFIG_ACCESS_TOKENID=y
++CONFIG_HILOG=y
++CONFIG_HILOG_BUFFER_SIZE=4096
++CONFIG_HIEVENT=y
++CONFIG_BBOX_BUFFER_SIZE=2048
++CONFIG_BINDER_SENDER_INFO=y
+diff --git a/drivers/Kconfig b/drivers/Kconfig
+index 19ee995bd..9aa3bb268 100644
+--- a/drivers/Kconfig
++++ b/drivers/Kconfig
+@@ -205,6 +205,8 @@ source "drivers/thunderbolt/Kconfig"
+ 
+ source "drivers/android/Kconfig"
+ 
++source "drivers/accesstokenid/Kconfig"
++
+ source "drivers/gpu/trace/Kconfig"
+ 
+ source "drivers/nvdimm/Kconfig"
+diff --git a/drivers/Makefile b/drivers/Makefile
+index bdf1c6614..05b25f071 100644
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -177,6 +177,7 @@ obj-y				+= hwtracing/intel_th/
+ obj-$(CONFIG_STM)		+= hwtracing/stm/
+ obj-$(CONFIG_HISI_PTT)		+= hwtracing/ptt/
+ obj-y				+= android/
++obj-$(CONFIG_ACCESS_TOKENID)	+= accesstokenid/
+ obj-$(CONFIG_NVMEM)		+= nvmem/
+ obj-$(CONFIG_FPGA)		+= fpga/
+ obj-$(CONFIG_FSI)		+= fsi/
+diff --git a/drivers/accesstokenid/Kconfig b/drivers/accesstokenid/Kconfig
+new file mode 100644
+index 000000000..a9bd8c496
+--- /dev/null
++++ b/drivers/accesstokenid/Kconfig
+@@ -0,0 +1,9 @@
++# SPDX-License-Identifier: GPL-2.0
++config ACCESS_TOKENID
++	bool "Access task's token"
++	depends on TRACEPOINTS
++	default n
++	help
++	  OpenHarmony access token id driver (/dev/access_token_id).
++	  This port keeps tokens in an external store (tracepoint-driven)
++	  instead of task_struct fields so the GKI KMI stays intact.
+diff --git a/drivers/accesstokenid/Makefile b/drivers/accesstokenid/Makefile
+new file mode 100644
+index 000000000..a3291d70d
+--- /dev/null
++++ b/drivers/accesstokenid/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_ACCESS_TOKENID) += access_tokenid.o access_token_store.o
+diff --git a/drivers/accesstokenid/access_token_store.c b/drivers/accesstokenid/access_token_store.c
+new file mode 100644
+index 000000000..93f63be36
+--- /dev/null
++++ b/drivers/accesstokenid/access_token_store.c
+@@ -0,0 +1,165 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * access_token_store.c — out-of-task_struct token storage.
++ *
++ * Replaces OHOS upstream's `current->token` / `current->ftoken`
++ * task_struct fields with an RCU hash table keyed by task_struct
++ * pointer, so the GKI task_struct layout (and with it the MODVERSIONS
++ * CRCs the stock MTK vendor modules were built against) stays intact.
++ *
++ * Inheritance semantics mirror OHOS dup_task_struct: on fork/clone the
++ * child inherits the parent's token, ftoken starts at 0 (see OHOS
++ * kernel_linux_6.6 kernel/fork.c). Implemented with the
++ * sched_process_fork tracepoint; entries are dropped at
++ * sched_process_free (after the final put_task_struct, so the key can
++ * not be reused while an entry is live).
++ *
++ * Tracepoint probes run with preemption disabled — all allocation is
++ * GFP_ATOMIC and the write lock is irqsave.
++ */
++
++#define pr_fmt(fmt) "access_token_id: " fmt
++
++#include <linux/hashtable.h>
++#include <linux/rcupdate.h>
++#include <linux/sched.h>
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <trace/events/sched.h>
++#include <linux/ohos_access_token.h>
++
++#define TOKEN_STORE_HASH_BITS 10
++
++static DEFINE_HASHTABLE(token_store, TOKEN_STORE_HASH_BITS);
++static DEFINE_SPINLOCK(token_store_lock);
++
++struct token_entry {
++	struct hlist_node node;
++	struct task_struct *task;	/* key only — no reference held */
++	u64 token;
++	u64 ftoken;
++	struct rcu_head rcu;
++};
++
++/* Safe under rcu_read_lock() or token_store_lock. */
++static struct token_entry *token_entry_lookup(struct task_struct *task)
++{
++	struct token_entry *e;
++
++	hash_for_each_possible_rcu(token_store, e, node, (unsigned long)task)
++		if (e->task == task)
++			return e;
++	return NULL;
++}
++
++u64 ohos_access_token_get(struct task_struct *task)
++{
++	struct token_entry *e;
++	u64 v = 0;
++
++	rcu_read_lock();
++	e = token_entry_lookup(task);
++	if (e)
++		v = READ_ONCE(e->token);
++	rcu_read_unlock();
++	return v;
++}
++
++u64 ohos_access_ftoken_get(struct task_struct *task)
++{
++	struct token_entry *e;
++	u64 v = 0;
++
++	rcu_read_lock();
++	e = token_entry_lookup(task);
++	if (e)
++		v = READ_ONCE(e->ftoken);
++	rcu_read_unlock();
++	return v;
++}
++
++/* Insert-or-update; NULL means "leave that field alone" for an
++ * existing entry / "0" for a fresh one. */
++static int token_entry_update(struct task_struct *task,
++			      const u64 *token, const u64 *ftoken)
++{
++	struct token_entry *e;
++	unsigned long flags;
++
++	spin_lock_irqsave(&token_store_lock, flags);
++	e = token_entry_lookup(task);
++	if (!e) {
++		e = kzalloc(sizeof(*e), GFP_ATOMIC);
++		if (!e) {
++			spin_unlock_irqrestore(&token_store_lock, flags);
++			return -ENOMEM;
++		}
++		e->task = task;
++		if (token)
++			e->token = *token;
++		if (ftoken)
++			e->ftoken = *ftoken;
++		hash_add_rcu(token_store, &e->node, (unsigned long)task);
++	} else {
++		if (token)
++			WRITE_ONCE(e->token, *token);
++		if (ftoken)
++			WRITE_ONCE(e->ftoken, *ftoken);
++	}
++	spin_unlock_irqrestore(&token_store_lock, flags);
++	return 0;
++}
++
++int ohos_access_token_set(struct task_struct *task, u64 token)
++{
++	return token_entry_update(task, &token, NULL);
++}
++
++int ohos_access_ftoken_set(struct task_struct *task, u64 ftoken)
++{
++	return token_entry_update(task, NULL, &ftoken);
++}
++
++static void token_fork_probe(void *data, struct task_struct *parent,
++			     struct task_struct *child)
++{
++	u64 token = ohos_access_token_get(parent);
++
++	/* Sparse store: only carriers of a token get an entry. */
++	if (token &&
++	    token_entry_update(child, &token, NULL))
++		pr_warn_ratelimited("token inherit alloc failed for pid %d\n",
++				    child->pid);
++}
++
++static void token_free_probe(void *data, struct task_struct *task)
++{
++	struct token_entry *e;
++	unsigned long flags;
++
++	spin_lock_irqsave(&token_store_lock, flags);
++	e = token_entry_lookup(task);
++	if (e)
++		hash_del_rcu(&e->node);
++	spin_unlock_irqrestore(&token_store_lock, flags);
++	if (e)
++		kfree_rcu(e, rcu);
++}
++
++int __init ohos_access_token_store_init(void)
++{
++	int ret;
++
++	ret = register_trace_sched_process_fork(token_fork_probe, NULL);
++	if (ret) {
++		pr_err("fork tracepoint register failed: %d\n", ret);
++		return ret;
++	}
++	ret = register_trace_sched_process_free(token_free_probe, NULL);
++	if (ret) {
++		pr_err("free tracepoint register failed: %d\n", ret);
++		unregister_trace_sched_process_fork(token_fork_probe, NULL);
++		return ret;
++	}
++	return 0;
++}
+diff --git a/drivers/accesstokenid/access_tokenid.c b/drivers/accesstokenid/access_tokenid.c
+new file mode 100644
+index 000000000..a2800dbed
+--- /dev/null
++++ b/drivers/accesstokenid/access_tokenid.c
+@@ -0,0 +1,405 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * access_tokenid.c
++ *
++ * Copyright (C) 2022-2023 Huawei Technologies Co., Ltd. All rights reserved.
++ *
++ */
++
++#define pr_fmt(fmt) "access_token_id: " fmt
++
++#include <linux/errno.h>
++#include <linux/fs.h>
++#include <linux/miscdevice.h>
++#include <linux/module.h>
++#include <linux/rwlock.h>
++#include <linux/sched.h>
++#include <linux/slab.h>
++#include <linux/ohos_access_token.h>
++#include "access_tokenid.h"
++
++DEFINE_RWLOCK(token_rwlock);
++#define ACCESS_TOKEN_UID KUIDT_INIT(3020)
++#define MAX_NODE_NUM 500
++#define UINT32_T_BITS 32
++
++static struct kmem_cache *g_cache = NULL;
++static struct token_perm_node *g_token_perm_root = NULL;
++static size_t g_total_node_num = 0;
++
++int access_tokenid_get_tokenid(struct file *file, void __user *uarg)
++{
++	u64 token = ohos_access_token_get(current);
++
++	return copy_to_user(uarg, &token, sizeof(token)) ? -EFAULT : 0;
++}
++
++static bool check_permission_for_set_tokenid(struct file *file, unsigned long long tokenid)
++{
++	kuid_t uid = current_uid();
++	struct inode *inode = file->f_inode;
++	access_tokenid_inner *tokenid_inner = (access_tokenid_inner *)&tokenid;
++
++	if (inode == NULL) {
++		pr_err("%s: file inode is null\n", __func__);
++		return false;
++	}
++
++	if (uid_eq(uid, GLOBAL_ROOT_UID) ||
++	    uid_eq(uid, inode->i_uid)) {
++		return true;
++	} else if (uid_eq(uid, NWEBSPAWN_UID) && (tokenid_inner->render_flag == 1)) {
++		return true;
++	}
++
++	return false;
++}
++
++int access_tokenid_set_tokenid(struct file *file, void __user *uarg)
++{
++	unsigned long long tmp = 0;
++
++	if (copy_from_user(&tmp, uarg, sizeof(tmp)))
++		return -EFAULT;
++
++	if (!check_permission_for_set_tokenid(file, tmp))
++		return -EPERM;
++
++	return ohos_access_token_set(current, tmp);
++}
++
++static bool check_permission_for_ftokenid(struct file *file)
++{
++	int i;
++	struct group_info *group_info;
++	kuid_t uid = current_uid();
++	struct inode *inode = file->f_inode;
++
++	if (inode == NULL) {
++		pr_err("%s: file inode is null\n", __func__);
++		return false;
++	}
++
++	if (uid_eq(uid, GLOBAL_ROOT_UID))
++		return true;
++
++	group_info = get_current_groups();
++	for (i = 0; i < group_info->ngroups; i++) {
++		kgid_t gid = group_info->gid[i];
++
++		if (gid_eq(gid, inode->i_gid)) {
++			put_group_info(group_info);
++			return true;
++		}
++	}
++
++	put_group_info(group_info);
++	return false;
++}
++
++int access_tokenid_get_ftokenid(struct file *file, void __user *uarg)
++{
++	if (!check_permission_for_ftokenid(file))
++		return -EPERM;
++
++	{
++		u64 ftoken = ohos_access_ftoken_get(current);
++
++		return copy_to_user(uarg, &ftoken, sizeof(ftoken)) ? -EFAULT : 0;
++	}
++}
++
++int access_tokenid_set_ftokenid(struct file *file, void __user *uarg)
++{
++	unsigned long long tmp = 0;
++
++	if (!check_permission_for_ftokenid(file))
++		return -EPERM;
++
++	if (copy_from_user(&tmp, uarg, sizeof(tmp)))
++		return -EFAULT;
++
++	return ohos_access_ftoken_set(current, tmp);
++}
++
++static bool check_permission_for_set_token_permission(void)
++{
++	kuid_t uid = current_uid();
++	return uid_eq(uid, ACCESS_TOKEN_UID);
++}
++
++static void add_node_to_left_tree_tail(struct token_perm_node *root_node, struct token_perm_node *node)
++{
++	if ((root_node == NULL) || (node == NULL))
++		return;
++
++	struct token_perm_node *current_node = root_node;
++	while (true) {
++		if (current_node->left == NULL) {
++			current_node->left = node;
++			break;
++		}
++		current_node = current_node->left;
++	}
++}
++
++static void find_node_by_token(struct token_perm_node *root_node, uint32_t token,
++	struct token_perm_node **target_node, struct token_perm_node **parent_node)
++{
++	*target_node = NULL;
++	*parent_node = NULL;
++	struct token_perm_node *current_node = root_node;
++	while (current_node != NULL) {
++		if (current_node->perm_data.token == token) {
++			*target_node = current_node;
++			break;
++		}
++		*parent_node = current_node;
++		if (current_node->perm_data.token > token) {
++			current_node = current_node->left;
++		} else {
++			current_node = current_node->right;
++		}
++	}
++}
++
++static int add_node_to_tree(struct token_perm_node *root_node, struct token_perm_node *node)
++{
++	struct token_perm_node *target_node = NULL;
++	struct token_perm_node *parent_node = NULL;
++	find_node_by_token(root_node, node->perm_data.token, &target_node, &parent_node);
++	if (target_node != NULL) {
++		target_node->perm_data = node->perm_data;
++		return 0;
++	}
++	if (g_total_node_num >= MAX_NODE_NUM) {
++		pr_err("%s: the number of token nodes is exceeded.\n", __func__);
++		return -EDQUOT;
++	}
++	if (parent_node == NULL) {
++		g_token_perm_root = node;
++	} else if (parent_node->perm_data.token > node->perm_data.token) {
++		parent_node->left = node;
++	} else {
++		parent_node->right = node;
++	}
++	g_total_node_num++;
++	return 1;
++}
++
++static struct token_perm_node *remove_node_by_token(struct token_perm_node *root_node, uint32_t token)
++{
++	struct token_perm_node *target_node = NULL;
++	struct token_perm_node *parent_node = NULL;
++	find_node_by_token(root_node, token, &target_node, &parent_node);
++	if (target_node == NULL) {
++		pr_err("%s: target token to be removed not found.\n", __func__);
++		return NULL;
++	}
++
++	struct token_perm_node **new_node_addr = NULL;
++	if (parent_node == NULL) {
++		new_node_addr = &root_node;
++	} else if (parent_node->perm_data.token > token) {
++		new_node_addr = &(parent_node->left);
++	} else {
++		new_node_addr = &(parent_node->right);
++	}
++	if (target_node->right != NULL) {
++		*new_node_addr = target_node->right;
++		add_node_to_left_tree_tail(target_node->right, target_node->left);
++	} else {
++		*new_node_addr = target_node->left;
++	}
++	g_total_node_num--;
++	return target_node;
++}
++
++int access_tokenid_add_permission(struct file *file, void __user *uarg)
++{
++	if (!check_permission_for_set_token_permission())
++		return -EPERM;
++
++	struct token_perm_node *node = kmem_cache_zalloc(g_cache, GFP_KERNEL);
++	if (node == NULL)
++		return -ENOMEM;
++	if (copy_from_user(&(node->perm_data), uarg, sizeof(ioctl_add_perm_data))) {
++		kmem_cache_free(g_cache, node);
++		return -EFAULT;
++	}
++
++	write_lock(&token_rwlock);
++	int ret = add_node_to_tree(g_token_perm_root, node);
++	write_unlock(&token_rwlock);
++	if (ret <= 0) {
++		kmem_cache_free(g_cache, node);
++		return ret;
++	}
++	return 0;
++}
++
++int access_tokenid_remove_permission(struct file *file, void __user *uarg)
++{
++	if (!check_permission_for_set_token_permission())
++		return -EPERM;
++
++	uint32_t token = 0;
++	if (copy_from_user(&token, uarg, sizeof(token)))
++		return -EFAULT;
++
++	write_lock(&token_rwlock);
++	struct token_perm_node *target_node = remove_node_by_token(g_token_perm_root, token);
++	write_unlock(&token_rwlock);
++
++	if (target_node != NULL)
++		kmem_cache_free(g_cache, target_node);
++
++	return 0;
++}
++
++int access_tokenid_set_permission(struct file *file, void __user *uarg)
++{
++	if (!check_permission_for_set_token_permission())
++		return -EPERM;
++
++	ioctl_set_get_perm_data set_perm_data;
++	if (copy_from_user(&set_perm_data, uarg, sizeof(set_perm_data)))
++		return -EFAULT;
++
++	uint32_t idx = set_perm_data.op_code / UINT32_T_BITS;
++	if (idx >= MAX_PERM_GROUP_NUM) {
++		pr_err("%s: invalid op_code.\n", __func__);
++		return -EINVAL;
++	}
++
++	struct token_perm_node *target_node = NULL;
++	struct token_perm_node *parent_node = NULL;
++	write_lock(&token_rwlock);
++	find_node_by_token(g_token_perm_root, set_perm_data.token, &target_node, &parent_node);
++	if (target_node == NULL) {
++		write_unlock(&token_rwlock);
++		pr_err("%s: token not found.\n", __func__);
++		return -ENODATA;
++	}
++	uint32_t bit_idx = set_perm_data.op_code % UINT32_T_BITS;
++	if (set_perm_data.is_granted) {
++		target_node->perm_data.perm[idx] |= (uint32_t)0x01 << bit_idx;
++	} else {
++		target_node->perm_data.perm[idx] &= ~((uint32_t)0x01 << bit_idx);
++	}
++	write_unlock(&token_rwlock);
++	return 0;
++}
++
++int access_tokenid_get_permission(struct file *file, void __user *uarg)
++{
++	ioctl_set_get_perm_data get_perm_data;
++	if (copy_from_user(&get_perm_data, uarg, sizeof(get_perm_data)))
++		return -EFAULT;
++
++	uint32_t idx = get_perm_data.op_code / UINT32_T_BITS;
++	if (idx >= MAX_PERM_GROUP_NUM) {
++		pr_err("%s: invalid op_code.\n", __func__);
++		return -EINVAL;
++	}
++
++	struct token_perm_node *target_node = NULL;
++	struct token_perm_node *parent_node = NULL;
++	read_lock(&token_rwlock);
++	find_node_by_token(g_token_perm_root, get_perm_data.token, &target_node, &parent_node);
++	read_unlock(&token_rwlock);
++	if (target_node == NULL)
++		return -ENODATA;
++
++	uint32_t bit_idx = get_perm_data.op_code % UINT32_T_BITS;
++	return (target_node->perm_data.perm[idx] & ((uint32_t)0x01 << bit_idx)) >> bit_idx;
++}
++
++typedef int (*access_token_id_func)(struct file *file, void __user *arg);
++
++static access_token_id_func g_func_array[ACCESS_TOKENID_MAX_NR] = {
++	NULL, /* reserved */
++	access_tokenid_get_tokenid,
++	access_tokenid_set_tokenid,
++	access_tokenid_get_ftokenid,
++	access_tokenid_set_ftokenid,
++	access_tokenid_add_permission,
++	access_tokenid_remove_permission,
++	access_tokenid_get_permission,
++	access_tokenid_set_permission,
++};
++
++static long access_tokenid_ioctl(struct file *file, unsigned int cmd,
++				 unsigned long arg)
++{
++	void __user *uarg = (void __user *)arg;
++	unsigned int func_cmd = _IOC_NR(cmd);
++
++	if (uarg == NULL) {
++		pr_err("%s: invalid user uarg\n", __func__);
++		return -EINVAL;
++	}
++
++	if (_IOC_TYPE(cmd) != ACCESS_TOKEN_ID_IOCTL_BASE) {
++		pr_err("%s: access tokenid magic fail, TYPE=%d\n",
++		       __func__, _IOC_TYPE(cmd));
++		return -EINVAL;
++	}
++
++	if (func_cmd >= ACCESS_TOKENID_MAX_NR) {
++		pr_err("%s: access tokenid cmd error, cmd:%d\n",
++			__func__, func_cmd);
++		return -EINVAL;
++	}
++
++	if (g_func_array[func_cmd])
++		return (*g_func_array[func_cmd])(file, uarg);
++
++	return -EINVAL;
++}
++
++static const struct file_operations access_tokenid_fops = {
++	.owner		= THIS_MODULE,
++	.unlocked_ioctl	= access_tokenid_ioctl,
++	.compat_ioctl	= access_tokenid_ioctl,
++};
++
++static struct miscdevice access_tokenid_device = {
++	.minor	= MISC_DYNAMIC_MINOR,
++	.name	= "access_token_id",
++	.fops	= &access_tokenid_fops,
++};
++
++static int access_tokenid_init_module(void)
++{
++	int err;
++
++	err = misc_register(&access_tokenid_device);
++	if (err < 0) {
++		pr_err("access_tokenid register failed\n");
++		return err;
++	}
++
++	g_cache = kmem_cache_create("access_token_node", sizeof(struct token_perm_node), 0, SLAB_HWCACHE_ALIGN, NULL);
++	if (g_cache == NULL) {
++		pr_err("access_tokenid kmem_cache create failed\n");
++		return -ENOMEM;
++	}
++	err = ohos_access_token_store_init();
++	if (err < 0) {
++		pr_err("access_tokenid store init failed\n");
++		return err;
++	}
++	pr_info("access_tokenid init success\n");
++	return 0;
++}
++
++static void access_tokenid_exit_module(void)
++{
++	kmem_cache_destroy(g_cache);
++	misc_deregister(&access_tokenid_device);
++}
++
++/* module entry points */
++module_init(access_tokenid_init_module);
++module_exit(access_tokenid_exit_module);
+diff --git a/drivers/accesstokenid/access_tokenid.h b/drivers/accesstokenid/access_tokenid.h
+new file mode 100644
+index 000000000..47ceaa7ee
+--- /dev/null
++++ b/drivers/accesstokenid/access_tokenid.h
+@@ -0,0 +1,80 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * access_tokenid.h
++ *
++ * Copyright (C) 2022-2023 Huawei Technologies Co., Ltd. All rights reserved.
++ *
++ */
++
++#ifndef _ACCESS_TOKEN_ID_H
++#define _ACCESS_TOKEN_ID_H
++
++#include <linux/ioctl.h>
++#include <linux/types.h>
++#include <linux/uidgid.h>
++
++/* OHOS well-known uids (upstream OHOS keeps these in linux/uidgid.h;
++ * kept driver-local here so the GKI header stays untouched). */
++#ifndef NWEBSPAWN_UID
++#define NWEBSPAWN_UID KUIDT_INIT(3081)
++#endif
++
++#define	ACCESS_TOKEN_ID_IOCTL_BASE	'A'
++#define MAX_PERM_GROUP_NUM 64
++
++enum {
++	GET_TOKEN_ID = 1,
++	SET_TOKEN_ID,
++	GET_FTOKEN_ID,
++	SET_FTOKEN_ID,
++	ADD_PERMISSIONS,
++	REMOVE_PERMISSIONS,
++	GET_PERMISSION,
++	SET_PERMISSION,
++	ACCESS_TOKENID_MAX_NR
++};
++
++typedef struct {
++	unsigned int token_uniqueid : 20;
++	unsigned int res : 5;
++	unsigned int render_flag : 1;
++	unsigned int dlp_flag : 1;
++	unsigned int type : 2;
++	unsigned int version : 3;
++} access_tokenid_inner;
++
++typedef struct {
++	uint32_t token;
++	uint32_t op_code;
++	bool is_granted;
++} ioctl_set_get_perm_data;
++
++typedef struct {
++	uint32_t token;
++	uint32_t perm[MAX_PERM_GROUP_NUM];
++} ioctl_add_perm_data;
++
++struct token_perm_node {
++	ioctl_add_perm_data perm_data;
++	struct token_perm_node *left;
++	struct token_perm_node *right;
++};
++
++#define	ACCESS_TOKENID_GET_TOKENID \
++	_IOR(ACCESS_TOKEN_ID_IOCTL_BASE, GET_TOKEN_ID, unsigned long long)
++#define	ACCESS_TOKENID_SET_TOKENID \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, SET_TOKEN_ID, unsigned long long)
++#define	ACCESS_TOKENID_GET_FTOKENID \
++	_IOR(ACCESS_TOKEN_ID_IOCTL_BASE, GET_FTOKEN_ID, unsigned long long)
++#define	ACCESS_TOKENID_SET_FTOKENID \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, SET_FTOKEN_ID, unsigned long long)
++#define	ACCESS_TOKENID_ADD_PERMISSIONS \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, ADD_PERMISSIONS, ioctl_add_perm_data)
++#define	ACCESS_TOKENID_REMOVE_PERMISSIONS \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, REMOVE_PERMISSIONS, uint32_t)
++#define	ACCESS_TOKENID_GET_PERMISSION \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, GET_PERMISSION, ioctl_set_get_perm_data)
++#define	ACCESS_TOKENID_SET_PERMISSION \
++	_IOW(ACCESS_TOKEN_ID_IOCTL_BASE, SET_PERMISSION, ioctl_set_get_perm_data)
++
++#endif /* _ACCESS_TOKEN_ID_H */
+diff --git a/drivers/android/Kconfig b/drivers/android/Kconfig
+index c3a49e538..1a9376056 100644
+--- a/drivers/android/Kconfig
++++ b/drivers/android/Kconfig
+@@ -113,4 +113,12 @@ config ANDROID_VENDOR_OEM_DATA
+ 
+ 	  If even slightly unsure, say Y.
+ 
++config BINDER_SENDER_INFO
++	bool "Get binder sender info"
++	default n
++	help
++	  Record the sender pid/tokens of the last delivered binder
++	  transaction on the receiving thread and expose them via the
++	  BINDER_GET_SENDER_INFO ioctl (OpenHarmony IPC).
++
+ endmenu
+diff --git a/drivers/android/binder.c b/drivers/android/binder.c
+index 7811ced3a..cb8b4392d 100644
+--- a/drivers/android/binder.c
++++ b/drivers/android/binder.c
+@@ -74,8 +74,26 @@
+ 
+ #include <linux/cacheflush.h>
+ 
++#include <linux/ohos_access_token.h>
+ #include "binder_internal.h"
+ #include "binder_trace.h"
++
++#ifdef CONFIG_ACCESS_TOKENID
++#define ENABLE_ACCESS_TOKENID 1
++#else
++#define ENABLE_ACCESS_TOKENID 0
++#endif /* CONFIG_ACCESS_TOKENID */
++
++#ifdef CONFIG_BINDER_SENDER_INFO
++#define ENABLE_BINDER_SENDER_INFO 1
++#else
++#define ENABLE_BINDER_SENDER_INFO 0
++#endif /* CONFIG_BINDER_SENDER_INFO */
++
++#define ACCESS_TOKENID_FEATURE_VALUE (ENABLE_ACCESS_TOKENID << 0)
++#define BINDER_SENDER_INFO_FEATURE_VALUE (ENABLE_BINDER_SENDER_INFO << 2)
++
++#define BINDER_CURRENT_FEATURE_SET (ACCESS_TOKENID_FEATURE_VALUE | BINDER_SENDER_INFO_FEATURE_VALUE)
+ #include <trace/hooks/binder.h>
+ 
+ static HLIST_HEAD(binder_deferred_list);
+@@ -3497,6 +3515,10 @@ static void binder_transaction(struct binder_proc *proc,
+ 	t->from_pid = proc->pid;
+ 	t->from_tid = thread->pid;
+ 	t->sender_euid = task_euid(proc->tsk);
++#ifdef CONFIG_ACCESS_TOKENID
++	t->sender_tokenid = ohos_access_token_get(current);
++	t->first_tokenid = ohos_access_ftoken_get(current);
++#endif /* CONFIG_ACCESS_TOKENID */
+ 	t->to_proc = target_proc;
+ 	t->to_thread = target_thread;
+ 	t->code = tr->code;
+@@ -5225,9 +5247,19 @@ static int binder_thread_read(struct binder_proc *proc,
+ 			trd->sender_pid =
+ 				task_tgid_nr_ns(sender,
+ 						task_active_pid_ns(current));
++#ifdef CONFIG_BINDER_SENDER_INFO
++			binder_inner_proc_lock(thread->proc);
++			thread->sender_pid_nr = task_tgid_nr(sender);
++			binder_inner_proc_unlock(thread->proc);
++#endif /* CONFIG_BINDER_SENDER_INFO */
+ 			trace_android_vh_sync_txn_recvd(thread->task, t_from->task);
+ 		} else {
+ 			trd->sender_pid = 0;
++#ifdef CONFIG_BINDER_SENDER_INFO
++			binder_inner_proc_lock(thread->proc);
++			thread->sender_pid_nr = 0;
++			binder_inner_proc_unlock(thread->proc);
++#endif /* CONFIG_BINDER_SENDER_INFO */
+ 		}
+ 
+ 		ret = binder_apply_fd_fixups(proc, t);
+@@ -5309,6 +5341,12 @@ static int binder_thread_read(struct binder_proc *proc,
+ 		if (t_from)
+ 			binder_thread_dec_tmpref(t_from);
+ 		t->buffer->allow_user_free = 1;
++#ifdef CONFIG_ACCESS_TOKENID
++		binder_inner_proc_lock(thread->proc);
++		thread->tokens.sender_tokenid = t->sender_tokenid;
++		thread->tokens.first_tokenid = t->first_tokenid;
++		binder_inner_proc_unlock(thread->proc);
++#endif /* CONFIG_ACCESS_TOKENID */
+ 		if (cmd != BR_REPLY && !(t->flags & TF_ONE_WAY)) {
+ 			binder_inner_proc_lock(thread->proc);
+ 			t->to_parent = thread->transaction_stack;
+@@ -6181,6 +6219,77 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ 		if (ret < 0)
+ 			goto err;
+ 		break;
++	case BINDER_FEATURE_SET: {
++		struct binder_feature_set __user *features = ubuf;
++
++		if (size != sizeof(struct binder_feature_set)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		if (put_user(BINDER_CURRENT_FEATURE_SET, &features->feature_set)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		break;
++	}
++#ifdef CONFIG_ACCESS_TOKENID
++	case BINDER_GET_ACCESS_TOKEN: {
++		struct access_token __user *tokens = ubuf;
++		u64 token, ftoken;
++
++		if (size != sizeof(struct access_token)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		binder_inner_proc_lock(proc);
++		token = thread->tokens.sender_tokenid;
++		ftoken = thread->tokens.first_tokenid;
++		binder_inner_proc_unlock(proc);
++		if (put_user(token, &tokens->sender_tokenid)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		if (put_user(ftoken, &tokens->first_tokenid)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		break;
++	}
++#endif /* CONFIG_ACCESS_TOKENID */
++#ifdef CONFIG_BINDER_SENDER_INFO
++	case BINDER_GET_SENDER_INFO: {
++		struct binder_sender_info __user *sender = ubuf;
++		u64 token, ftoken, sender_pid_nr;
++
++		if (size != sizeof(struct binder_sender_info)) {
++			ret = -EINVAL;
++			goto err;
++		}
++		binder_inner_proc_lock(proc);
++#ifdef CONFIG_ACCESS_TOKENID
++		token = thread->tokens.sender_tokenid;
++		ftoken = thread->tokens.first_tokenid;
++#else
++		token = 0;
++		ftoken = 0;
++#endif /* CONFIG_ACCESS_TOKENID */
++		sender_pid_nr = thread->sender_pid_nr;
++		binder_inner_proc_unlock(proc);
++		if (put_user(token, &sender->tokens.sender_tokenid)) {
++			ret = -EFAULT;
++			goto err;
++		}
++		if (put_user(ftoken, &sender->tokens.first_tokenid)) {
++			ret = -EFAULT;
++			goto err;
++		}
++		if (put_user(sender_pid_nr, &sender->sender_pid_nr)) {
++			ret = -EFAULT;
++			goto err;
++		}
++		break;
++	}
++#endif /* CONFIG_BINDER_SENDER_INFO */
+ 	default:
+ 		ret = -EINVAL;
+ 		goto err;
+diff --git a/drivers/android/binder_internal.h b/drivers/android/binder_internal.h
+index 06ac60a7c..1c55f57c2 100644
+--- a/drivers/android/binder_internal.h
++++ b/drivers/android/binder_internal.h
+@@ -609,6 +609,12 @@ struct binder_thread {
+ 	struct binder_stats stats;
+ 	atomic_t tmp_ref;
+ 	bool is_dead;
++#ifdef CONFIG_ACCESS_TOKENID
++	struct access_token tokens;
++#endif /* CONFIG_ACCESS_TOKENID */
++#ifdef CONFIG_BINDER_SENDER_INFO
++	__u64 sender_pid_nr;
++#endif /* CONFIG_BINDER_SENDER_INFO */
+ 	struct task_struct *task;
+ 	spinlock_t prio_lock;
+ 	struct binder_priority prio_next;
+@@ -665,6 +671,10 @@ struct binder_transaction {
+ 	 * during thread teardown
+ 	 */
+ 	spinlock_t lock;
++#ifdef CONFIG_ACCESS_TOKENID
++	u64 sender_tokenid;
++	u64 first_tokenid;
++#endif /* CONFIG_ACCESS_TOKENID */
+ 	ANDROID_VENDOR_DATA(1);
+ };
+ 
+diff --git a/drivers/staging/Kconfig b/drivers/staging/Kconfig
+index 306a484f4..b811aee1d 100644
+--- a/drivers/staging/Kconfig
++++ b/drivers/staging/Kconfig
+@@ -70,6 +70,10 @@ source "drivers/staging/ks7010/Kconfig"
+ 
+ source "drivers/staging/greybus/Kconfig"
+ 
++source "drivers/staging/hilog/Kconfig"
++
++source "drivers/staging/hievent/Kconfig"
++
+ source "drivers/staging/vc04_services/Kconfig"
+ 
+ source "drivers/staging/pi433/Kconfig"
+diff --git a/drivers/staging/Makefile b/drivers/staging/Makefile
+index a37564998..8d13aca4f 100644
+--- a/drivers/staging/Makefile
++++ b/drivers/staging/Makefile
+@@ -25,6 +25,8 @@ obj-$(CONFIG_FB_TFT)		+= fbtft/
+ obj-$(CONFIG_MOST)		+= most/
+ obj-$(CONFIG_KS7010)		+= ks7010/
+ obj-$(CONFIG_GREYBUS)		+= greybus/
++obj-$(CONFIG_HILOG)		+= hilog/
++obj-$(CONFIG_HIEVENT)		+= hievent/
+ obj-$(CONFIG_BCM2835_VCHIQ)	+= vc04_services/
+ obj-$(CONFIG_PI433)		+= pi433/
+ obj-$(CONFIG_XIL_AXIS_FIFO)	+= axis-fifo/
+diff --git a/drivers/staging/hievent/Kconfig b/drivers/staging/hievent/Kconfig
+new file mode 100644
+index 000000000..b445a2b90
+--- /dev/null
++++ b/drivers/staging/hievent/Kconfig
+@@ -0,0 +1,12 @@
++# SPDX-License-Identifier: GPL-2.0
++config HIEVENT
++	tristate "Enable hievent"
++	help
++	  hievent buffer manager
++
++config BBOX_BUFFER_SIZE
++	int "bbox buffer size"
++	depends on HIEVENT
++	default 2048
++	help
++	  Define the default ring buffer size of BBOX
+\ No newline at end of file
+diff --git a/drivers/staging/hievent/Makefile b/drivers/staging/hievent/Makefile
+new file mode 100644
+index 000000000..5b2adc23a
+--- /dev/null
++++ b/drivers/staging/hievent/Makefile
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_HIEVENT)		+= hievent_driver.o
+\ No newline at end of file
+diff --git a/drivers/staging/hievent/hievent_driver.c b/drivers/staging/hievent/hievent_driver.c
+new file mode 100644
+index 000000000..65298c162
+--- /dev/null
++++ b/drivers/staging/hievent/hievent_driver.c
+@@ -0,0 +1,423 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#define pr_fmt(fmt) "hievent_driver " fmt
++
++#include "hievent_driver.h"
++
++#include <linux/device.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/uaccess.h>
++#include <linux/fs.h>
++#include <linux/slab.h>
++#include <linux/cdev.h>
++#include <linux/sched.h>
++#include <linux/time.h>
++#include <linux/timex.h>
++#include <linux/rtc.h>
++#include <linux/version.h>
++#include <linux/uio.h>
++#include <linux/list.h>
++#include <linux/wait.h>
++
++static struct class *hievent_class;
++static dev_t hievent_devno;
++
++#define HIEVENT_BUFFER ((size_t)CONFIG_BBOX_BUFFER_SIZE)
++#define HIEVENT_DRIVER "/dev/bbox"
++#define HIEVENT_DEV_NAME "bbox"
++#define HIEVENT_DEV_NR 1
++
++struct hievent_entry {
++	unsigned short len;
++	unsigned short header_size;
++	char msg[0];
++};
++
++struct hievent_char_device {
++	struct cdev devm;
++	int flag;
++	struct mutex mtx; /* lock to protect read/write buffer */
++	unsigned char *buffer;
++	wait_queue_head_t wq;
++	size_t write_offset;
++	size_t head_offset;
++	size_t size;
++	size_t count;
++} hievent_dev;
++
++static inline unsigned char *hievent_buffer_head(void)
++{
++	if (hievent_dev.head_offset > HIEVENT_BUFFER)
++		hievent_dev.head_offset =
++			hievent_dev.head_offset % HIEVENT_BUFFER;
++
++	return hievent_dev.buffer + hievent_dev.head_offset;
++}
++
++static void hievent_buffer_inc(size_t sz)
++{
++	if (hievent_dev.size + sz <= HIEVENT_BUFFER) {
++		hievent_dev.size += sz;
++		hievent_dev.write_offset += sz;
++		hievent_dev.write_offset %= HIEVENT_BUFFER;
++		hievent_dev.count++;
++	}
++}
++
++static void hievent_buffer_dec(size_t sz)
++{
++	if (hievent_dev.size >= sz) {
++		hievent_dev.size -= sz;
++		hievent_dev.head_offset += sz;
++		hievent_dev.head_offset %= HIEVENT_BUFFER;
++		hievent_dev.count--;
++	}
++}
++
++static int hievent_read_ring_buffer(unsigned char __user *buffer,
++				    size_t buf_len)
++{
++	size_t retval;
++	size_t buf_left = HIEVENT_BUFFER - hievent_dev.head_offset;
++
++	if (buf_left > buf_len) {
++		retval = copy_to_user(buffer, hievent_buffer_head(), buf_len);
++	} else {
++		size_t mem_len = (buf_len > buf_left) ? buf_left : buf_len;
++
++		retval = copy_to_user(buffer, hievent_buffer_head(), mem_len);
++		if (retval < 0)
++			return retval;
++
++		retval = copy_to_user(buffer + buf_left, hievent_dev.buffer,
++				      buf_len - buf_left);
++	}
++	return retval;
++}
++
++static int hievent_read_ring_head_buffer(unsigned char * const buffer,
++					 size_t buf_len)
++{
++	size_t buf_left = HIEVENT_BUFFER - hievent_dev.head_offset;
++
++	if (buf_left > buf_len) {
++		memcpy(buffer, hievent_buffer_head(), buf_len);
++	} else {
++		size_t mem_len = (buf_len > buf_left) ? buf_left : buf_len;
++
++		memcpy(buffer, hievent_buffer_head(), mem_len);
++		memcpy(buffer + buf_left, hievent_dev.buffer,
++		       buf_len - buf_left);
++	}
++	return 0;
++}
++
++static ssize_t hievent_read(struct file *file, char __user *user_buf,
++			    size_t count, loff_t *ppos)
++{
++	size_t retval;
++	struct hievent_entry header;
++
++	(void)file;
++
++	if (wait_event_interruptible(hievent_dev.wq, (hievent_dev.size > 0)))
++		return -EINVAL;
++
++	(void)mutex_lock(&hievent_dev.mtx);
++
++	if (hievent_dev.size == 0) {
++		retval = 0;
++		goto out;
++	}
++
++	retval = hievent_read_ring_head_buffer((unsigned char *)&header,
++					       sizeof(header));
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	if (count < header.len + sizeof(header)) {
++		retval = -ENOMEM;
++		goto out;
++	}
++
++	hievent_buffer_dec(sizeof(header));
++
++	retval = hievent_read_ring_buffer((unsigned char __user *)(user_buf), header.len);
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++	hievent_buffer_dec(header.len);
++
++	retval = header.len + sizeof(header);
++out:
++	if (retval == -ENOMEM) {
++		// clean ring buffer
++		hievent_dev.write_offset = 0;
++		hievent_dev.head_offset = 0;
++		hievent_dev.size = 0;
++		hievent_dev.count = 0;
++	}
++	(void)mutex_unlock(&hievent_dev.mtx);
++
++	return retval;
++}
++
++static int hievent_write_ring_head_buffer(const unsigned char *buffer,
++					  size_t buf_len)
++{
++	size_t buf_left = HIEVENT_BUFFER - hievent_dev.write_offset;
++
++	if (buf_len > buf_left) {
++		memcpy(hievent_dev.buffer + hievent_dev.write_offset,
++		       buffer, buf_left);
++		memcpy(hievent_dev.buffer, buffer + buf_left,
++		       min(HIEVENT_BUFFER, buf_len - buf_left));
++	} else {
++		memcpy(hievent_dev.buffer + hievent_dev.write_offset,
++		       buffer, min(buf_left, buf_len));
++	}
++
++	return 0;
++}
++
++static void hievent_head_init(struct hievent_entry * const header, size_t len)
++{
++	header->len = (unsigned short)len;
++	header->header_size = sizeof(struct hievent_entry);
++}
++
++static void hievent_cover_old_log(size_t buf_len)
++{
++	int retval;
++	struct hievent_entry header;
++	size_t total_size = buf_len + sizeof(struct hievent_entry);
++
++	while (total_size + hievent_dev.size > HIEVENT_BUFFER) {
++		retval = hievent_read_ring_head_buffer((unsigned char *)&header,
++						       sizeof(header));
++		if (retval < 0)
++			break;
++
++		/* let count decrease twice */
++		hievent_buffer_dec(sizeof(header));
++		hievent_buffer_dec(header.len);
++	}
++}
++
++int hievent_write_internal(const char *buffer, size_t buf_len)
++{
++	struct hievent_entry header;
++	int retval;
++
++	if (buf_len < sizeof(int) ||
++	    buf_len > HIEVENT_BUFFER - sizeof(struct hievent_entry))
++		return -EINVAL;
++
++	(void)mutex_lock(&hievent_dev.mtx);
++
++	hievent_cover_old_log(buf_len);
++
++	hievent_head_init(&header, buf_len);
++	retval = hievent_write_ring_head_buffer((unsigned char *)&header,
++						sizeof(header));
++	if (retval) {
++		retval = -EINVAL;
++		goto out;
++	}
++	hievent_buffer_inc(sizeof(header));
++
++	retval = hievent_write_ring_head_buffer((unsigned char *)(buffer),
++						header.len);
++	if (retval) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	hievent_buffer_inc(header.len);
++
++	retval = header.len;
++
++out:
++	(void)mutex_unlock(&hievent_dev.mtx);
++	if (retval > 0)
++		wake_up_interruptible(&hievent_dev.wq);
++
++	return retval;
++}
++EXPORT_SYMBOL(hievent_write_internal);
++
++static unsigned int hievent_poll(struct file *filep, poll_table *wait)
++{
++	unsigned int mask = 0;
++
++	poll_wait(filep, &hievent_dev.wq, wait);
++	if (hievent_dev.size > 0) {
++		mask |= POLLIN | POLLRDNORM;
++		return mask;
++	}
++
++	return 0;
++}
++
++static ssize_t hievent_write_iter(struct kiocb *iocb, struct iov_iter *from)
++{
++	int check_code = 0;
++	unsigned char *temp_buffer = NULL;
++	const struct iovec *iov = from->iov;
++	int retval;
++	size_t buf_len;
++	(void)iocb;
++
++	if (from->nr_segs != 2) { /* must contain 2 segments */
++		pr_err("invalid nr_segs: %ld", from->nr_segs);
++		retval = -EINVAL;
++		goto out;
++	}
++
++	/* seg 0 info is checkcode*/
++	retval = copy_from_user(&check_code, iov[0].iov_base,
++				sizeof(check_code));
++	if (retval || check_code != CHECK_CODE) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	/* seg 1 info */
++	buf_len = iov[1].iov_len;
++	if (buf_len > HIEVENT_BUFFER - sizeof(struct hievent_entry)) {
++		retval = -ENOMEM;
++		goto out;
++	}
++
++	temp_buffer = kmalloc(buf_len, GFP_KERNEL);
++	if (!temp_buffer) {
++		retval = -ENOMEM;
++		goto out;
++	}
++
++	retval = copy_from_user(temp_buffer, iov[1].iov_base, iov[1].iov_len);
++	if (retval) {
++		retval = -EIO;
++		goto free_mem;
++	}
++
++	retval = hievent_write_internal(temp_buffer, buf_len);
++	if (retval < 0) {
++		retval = -EIO;
++		goto free_mem;
++	}
++	retval = buf_len + iov[0].iov_len;
++
++free_mem:
++	kfree(temp_buffer);
++
++out:
++	return retval;
++}
++
++static const struct file_operations hievent_fops = {
++	.read = hievent_read,   /* read */
++	.poll = hievent_poll,   /* poll */
++	.write_iter = hievent_write_iter, /* write_iter */
++};
++
++static int hievent_device_init(void)
++{
++	hievent_dev.buffer = kmalloc(HIEVENT_BUFFER, GFP_KERNEL);
++	if (!hievent_dev.buffer)
++		return -ENOMEM;
++
++	init_waitqueue_head(&hievent_dev.wq);
++	mutex_init(&hievent_dev.mtx);
++	hievent_dev.write_offset = 0;
++	hievent_dev.head_offset = 0;
++	hievent_dev.size = 0;
++	hievent_dev.count = 0;
++
++	return 0;
++}
++
++static int __init hieventdev_init(void)
++{
++	int result;
++	struct device *dev_ret = NULL;
++
++	result = alloc_chrdev_region(&hievent_devno, 0, HIEVENT_DEV_NR, HIEVENT_DEV_NAME);
++	if (result < 0) {
++		pr_err("register %s failed", HIEVENT_DRIVER);
++		return -ENODEV;
++	}
++
++	cdev_init(&hievent_dev.devm, &hievent_fops);
++	hievent_dev.devm.owner = THIS_MODULE;
++
++	result = cdev_add(&hievent_dev.devm, hievent_devno, HIEVENT_DEV_NR);
++	if (result < 0) {
++		pr_err("cdev_add failed");
++		goto unreg_dev;
++	}
++
++	result = hievent_device_init();
++	if (result < 0) {
++		pr_err("hievent_device_init failed");
++		goto del_dev;
++	}
++
++	hievent_class = class_create(THIS_MODULE, HIEVENT_DEV_NAME);
++	if (IS_ERR(hievent_class)) {
++		pr_err("class_create failed");
++		goto del_buffer;
++	}
++
++	dev_ret = device_create(hievent_class, 0, hievent_devno, 0, HIEVENT_DEV_NAME);
++	if (IS_ERR(dev_ret)) {
++		pr_err("device_create failed");
++		goto del_class;
++	}
++
++	return 0;
++
++del_class:
++	class_destroy(hievent_class);
++del_buffer:
++	kfree(hievent_dev.buffer);
++del_dev:
++	cdev_del(&hievent_dev.devm);
++unreg_dev:
++	unregister_chrdev_region(hievent_devno, HIEVENT_DEV_NR);
++
++	return -ENODEV;
++}
++
++static void __exit hievent_exit_module(void)
++{
++	device_destroy(hievent_class, hievent_devno);
++	class_destroy(hievent_class);
++	kfree(hievent_dev.buffer);
++	cdev_del(&hievent_dev.devm);
++	unregister_chrdev_region(hievent_devno, HIEVENT_DEV_NR);
++}
++
++static int __init hievent_init_module(void)
++{
++	int state;
++
++	state = hieventdev_init();
++	return 0;
++}
++
++module_init(hievent_init_module);
++module_exit(hievent_exit_module);
++
++MODULE_AUTHOR("OHOS");
++MODULE_DESCRIPTION("User mode hievent device interface");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("hievent");
+diff --git a/drivers/staging/hievent/hievent_driver.h b/drivers/staging/hievent/hievent_driver.h
+new file mode 100644
+index 000000000..83c67d9d2
+--- /dev/null
++++ b/drivers/staging/hievent/hievent_driver.h
+@@ -0,0 +1,22 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef HIEVENT_DRIVER_H
++#define HIEVENT_DRIVER_H
++
++#include <linux/types.h>
++
++#define CHECK_CODE 0x7BCDABCD
++
++struct idap_header {
++	char level;
++	char category;
++	char log_type;
++	char sn;
++};
++
++int hievent_write_internal(const char *buffer, size_t buf_len);
++
++#endif /* HIEVENT_DRIVER_H */
+diff --git a/drivers/staging/hievent/hiview_hievent.c b/drivers/staging/hievent/hiview_hievent.c
+new file mode 100644
+index 000000000..4533b6fbb
+--- /dev/null
++++ b/drivers/staging/hievent/hiview_hievent.c
+@@ -0,0 +1,488 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#include "hiview_hievent.h"
++#include "hievent_driver.h"
++
++#include <linux/slab.h>
++#include <linux/string.h>
++
++#define INT_TYPE_MAX_LEN    21
++
++#define MAX_PATH_LEN        256
++#define MAX_STR_LEN         (10 * 1024)
++
++/* CONFIG_BBOX_BUFFER_SIZE is max length of /dev/bbox */
++#define EVENT_INFO_BUF_LEN         ((size_t)CONFIG_BBOX_BUFFER_SIZE)
++#define EVENT_INFO_PACK_BUF_LEN    min((size_t)CONFIG_BBOX_BUFFER_SIZE, 2048)
++
++#define BUF_POINTER_FORWARD             \
++do {                                    \
++	if (tmplen < len) {             \
++		tmp += tmplen;          \
++		len -= tmplen;          \
++	} else {                        \
++		tmp += len;             \
++		len = 0;                \
++	}                               \
++} while (0)
++
++struct hievent_payload {
++	char *key;
++	char *value;
++	struct hievent_payload *next;
++};
++
++static int hievent_convert_string(struct hiview_hievent *event, char **pbuf);
++
++static struct hievent_payload *hievent_payload_create(void);
++
++static void hievent_payload_destroy(struct hievent_payload *p);
++
++static struct hievent_payload *hievent_get_payload(struct hievent_payload *head,
++						   const char *key);
++
++static void hievent_add_payload(struct hiview_hievent *obj,
++				struct hievent_payload *payload);
++
++static struct hievent_payload *hievent_payload_create(void)
++{
++	struct hievent_payload *payload = NULL;
++
++	payload = kmalloc(sizeof(*payload), GFP_KERNEL);
++	if (!payload)
++		return NULL;
++
++	payload->key = NULL;
++	payload->value = NULL;
++	payload->next = NULL;
++
++	return payload;
++}
++
++static void hievent_payload_destroy(struct hievent_payload *p)
++{
++	if (!p)
++		return;
++
++	kfree(p->value);
++	kfree(p->key);
++	kfree(p);
++}
++
++static struct hievent_payload *hievent_get_payload(struct hievent_payload *head,
++						   const char *key)
++{
++	struct hievent_payload *p = head;
++
++	while (p) {
++		if (key && p->key) {
++			if (strcmp(p->key, key) == 0)
++				return p;
++		}
++		p = p->next;
++	}
++
++	return NULL;
++}
++
++static void hievent_add_payload(struct hiview_hievent *obj,
++				struct hievent_payload *payload)
++{
++	if (!obj->head) {
++		obj->head = payload;
++	} else {
++		struct hievent_payload *p = obj->head;
++
++		while (p->next)
++			p = p->next;
++		p->next = payload;
++	}
++}
++
++struct hiview_hievent *hievent_create(unsigned int eventid)
++{
++	struct hiview_hievent *event = NULL;
++
++	/* combined event obj struct */
++	event = kmalloc(sizeof(*event), GFP_KERNEL);
++	if (!event)
++		return NULL;
++
++	memset(event, 0, sizeof(*event));
++	event->eventid = eventid;
++	pr_debug("%s : %u\n", __func__, eventid);
++
++	return (void *)event;
++}
++
++int hievent_put_integer(struct hiview_hievent *event,
++			const char *key, long value)
++{
++	int ret;
++	struct hievent_payload *payload = NULL;
++
++	if ((!event) || (!key)) {
++		pr_err("Bad input event or key for %s", __func__);
++		return -EINVAL;
++	}
++
++	payload = hievent_get_payload(event->head, key);
++	if (!payload) {
++		payload = hievent_payload_create();
++		if (!payload)
++			return -ENOMEM;
++		payload->key = kstrdup(key, GFP_KERNEL);
++		hievent_add_payload(event, payload);
++	}
++
++	kfree(payload->value);
++
++	payload->value = kmalloc(INT_TYPE_MAX_LEN, GFP_KERNEL);
++	if (!payload->value)
++		return -ENOMEM;
++
++	(void)memset(payload->value, 0, INT_TYPE_MAX_LEN);
++	ret = snprintf(payload->value, INT_TYPE_MAX_LEN, "%d", (int)value);
++	if (ret < 0)
++		return -ENOMEM;
++
++	return 0;
++}
++
++int hievent_put_string(struct hiview_hievent *event,
++		       const char *key, const char *value)
++{
++	struct hievent_payload *payload = NULL;
++	int len;
++
++	if ((!event) || (!key) || (!value)) {
++		pr_err("Bad key for %s", __func__);
++		return -EINVAL;
++	}
++
++	payload = hievent_get_payload(event->head, key);
++	if (!payload) {
++		payload = hievent_payload_create();
++		if (!payload)
++			return -ENOMEM;
++
++		payload->key = kstrdup(key, GFP_KERNEL);
++		hievent_add_payload(event, payload);
++	}
++
++	kfree(payload->value);
++
++	len = strlen(value);
++	/* prevent length larger than MAX_STR_LEN */
++	if (len > MAX_STR_LEN)
++		len = MAX_STR_LEN;
++
++	payload->value = kmalloc(len + 1, GFP_KERNEL);
++	if (!payload->value)
++		return -ENOMEM;
++
++	(void)memset(payload->value, 0, len + 1);
++	if (strncpy(payload->value, value, len) > 0)
++		payload->value[len] = '\0';
++
++	return 0;
++}
++
++int hievent_set_time(struct hiview_hievent *event, long long seconds)
++{
++	if ((!event) || (seconds == 0)) {
++		pr_err("Bad input for %s", __func__);
++		return -EINVAL;
++	}
++	event->time = seconds;
++	return 0;
++}
++
++static int append_array_item(char **pool, int pool_len, const char *path)
++{
++	int i;
++
++	if ((!path) || (path[0] == 0)) {
++		pr_err("Bad path %s", __func__);
++		return -EINVAL;
++	}
++
++	if (strlen(path) > MAX_PATH_LEN) {
++		pr_err("file path over max: %d", MAX_PATH_LEN);
++		return -EINVAL;
++	}
++
++	for (i = 0; i < pool_len; i++) {
++		if (pool[i] != 0)
++			continue;
++
++		pool[i] = kstrdup(path, GFP_KERNEL);
++		if (!pool[i])
++			return -ENOMEM;
++
++		break;
++	}
++
++	if (i == MAX_PATH_NUMBER) {
++		pr_err("Too many paths");
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++int hievent_add_filepath(struct hiview_hievent *event, const char *path)
++{
++	if (!event) {
++		pr_err("Bad path %s", __func__);
++		return -EINVAL;
++	}
++	return append_array_item(event->file_path, MAX_PATH_NUMBER, path);
++}
++
++/* make string ":" to "::", ";" to ";;", and remove newline character
++ * for example: "abc:def;ghi" transfer to "abc::def;;ghi"
++ */
++static char *hievent_make_regular(char *value)
++{
++	int count = 0;
++	int len = 0;
++	char *temp = value;
++	char *regular = NULL;
++	char *regular_tmp = NULL;
++	size_t regular_len;
++
++	while (*temp != '\0') {
++		if (*temp == ':')
++			count++;
++		else if (*temp == ';')
++			count++;
++		else if ((*temp == '\n') || (*temp == '\r'))
++			*temp = ' ';
++
++		temp++;
++		len++;
++	}
++
++	/* no need to transfer, just return old value */
++	if (count == 0)
++		return value;
++
++	regular_len = len + count * 2 + 1; // 2 char in a byte
++	regular = kmalloc(regular_len, GFP_KERNEL);
++	if (!regular)
++		return NULL;
++
++	(void)memset(regular, 0, regular_len);
++	regular_tmp = regular;
++	temp = value;
++	while (*temp != 0) {
++		if ((*temp == ':') || (*temp == ';'))
++			*regular_tmp++ = *temp;
++
++		*regular_tmp++ = *temp;
++		temp++;
++	}
++	*regular_tmp = '\0';
++
++	return regular;
++}
++
++int logbuff_to_exception(char category, int level, char log_type,
++			 char sn, const char *msg, int msglen)
++{
++	struct idap_header *hdr = NULL;
++	size_t buf_len = sizeof(int) + sizeof(struct idap_header) + msglen;
++	int ret;
++	int *check_code = NULL;
++	char *buffer = kmalloc(buf_len, GFP_KERNEL);
++
++	if (!buffer)
++		return -ENOMEM;
++
++	check_code = (int *)buffer;
++	*check_code = CHECK_CODE;
++
++	hdr = (struct idap_header *)(buffer + sizeof(int));
++	hdr->level = level;
++	hdr->category = category;
++	hdr->log_type = log_type;
++	hdr->sn = sn;
++
++	memcpy(buffer + sizeof(int) + sizeof(struct idap_header), msg, msglen);
++
++	ret = hievent_write_internal(buffer, buf_len);
++
++	kfree(buffer);
++
++	return ret;
++}
++
++static int hievent_fill_payload(struct hiview_hievent *event, char **pbuf,
++				char *tmp, int length)
++{
++	struct hievent_payload *p = event->head;
++	int len = length;
++	int tmplen;
++	unsigned int keycount = 0;
++
++	while (p) {
++		char *value = NULL;
++		char *regular_value = NULL;
++		int need_free = 1;
++
++		if (!p->value) {
++			p = p->next;
++			continue;
++		}
++		if (keycount == 0) {
++			tmplen = snprintf(tmp, len - 1, " --extra ");
++			BUF_POINTER_FORWARD;
++		}
++		keycount++;
++
++		/* fill key */
++		if (p->key)
++			tmplen = snprintf(tmp, len - 1, "%s:", p->key);
++
++		BUF_POINTER_FORWARD;
++		/* fill value */
++		tmplen = 0;
++
++		value = p->value;
++		regular_value = hievent_make_regular(value);
++		if (!regular_value) {
++			regular_value = "NULL";
++			need_free = 0;
++		}
++		tmplen = snprintf(tmp, len - 1, "%s;", regular_value);
++		if ((value != regular_value) && need_free)
++			kfree(regular_value);
++
++		BUF_POINTER_FORWARD;
++		p = p->next;
++	}
++	return len;
++}
++
++static int hievent_convert_string(struct hiview_hievent *event, char **pbuf)
++{
++	int len;
++	char *tmp = NULL;
++	int tmplen;
++	unsigned int i;
++
++	char *buf = kmalloc(EVENT_INFO_BUF_LEN, GFP_KERNEL);
++
++	if (!buf) {
++		*pbuf = NULL;
++		return 0;
++	}
++
++	(void)memset(buf, 0, EVENT_INFO_BUF_LEN);
++	len = EVENT_INFO_BUF_LEN;
++	tmp = buf;
++
++	/* fill eventid */
++	tmplen = snprintf(tmp, len - 1, "eventid %d", event->eventid);
++	BUF_POINTER_FORWARD;
++
++	/* fill the path */
++	for (i = 0; i < MAX_PATH_NUMBER; i++) {
++		if (!event->file_path[i])
++			break;
++
++		tmplen = snprintf(tmp, len - 1, " -i %s", event->file_path[i]);
++		BUF_POINTER_FORWARD;
++	}
++
++	/* fill time */
++	if (event->time) {
++		tmplen = snprintf(tmp, len - 1, " -t %lld",  event->time);
++		BUF_POINTER_FORWARD;
++	}
++
++	/* fill the payload info */
++	len = hievent_fill_payload(event, pbuf, tmp, len);
++	*pbuf = buf;
++	return (EVENT_INFO_BUF_LEN - len);
++}
++
++#define IDAP_LOGTYPE_CMD 1
++static int hievent_write_logexception(char *str, const int strlen)
++{
++	char tempchr;
++	char *strptr = str;
++	int left_buf_len = strlen + 1;
++	int sent_cnt = 0;
++
++	while (left_buf_len > 0) {
++		if (left_buf_len > EVENT_INFO_PACK_BUF_LEN) {
++			tempchr = strptr[EVENT_INFO_PACK_BUF_LEN - 1];
++			strptr[EVENT_INFO_PACK_BUF_LEN - 1] = '\0';
++			logbuff_to_exception(0, 0, IDAP_LOGTYPE_CMD, 1, strptr,
++					     EVENT_INFO_PACK_BUF_LEN);
++			left_buf_len -= (EVENT_INFO_PACK_BUF_LEN - 1);
++			strptr += (EVENT_INFO_PACK_BUF_LEN - 1);
++			strptr[0] = tempchr;
++			sent_cnt++;
++		} else {
++			logbuff_to_exception(0, 0, IDAP_LOGTYPE_CMD, 0, strptr,
++					     left_buf_len);
++			sent_cnt++;
++			break;
++		}
++	}
++
++	return sent_cnt;
++}
++
++int hievent_report(struct hiview_hievent *obj)
++{
++	char *str = NULL;
++	int buf_len;
++	int sent_packet;
++
++	if (!obj) {
++		pr_err("Bad event %s", __func__);
++		return -EINVAL;
++	}
++
++	buf_len = hievent_convert_string(obj, &str);
++	if (!str)
++		return -EINVAL;
++
++	sent_packet = hievent_write_logexception(str, buf_len);
++	pr_err("report: %s", str);
++	kfree(str);
++
++	return sent_packet;
++}
++
++void hievent_destroy(struct hiview_hievent *event)
++{
++	int i;
++	struct hievent_payload *p = NULL;
++
++	if (!event)
++		return;
++
++	p = event->head;
++	while (p) {
++		struct hievent_payload *del = p;
++
++		p = p->next;
++		hievent_payload_destroy(del);
++	}
++
++	event->head = NULL;
++	for (i = 0; i < MAX_PATH_NUMBER; i++) {
++		kfree(event->file_path[i]);
++		event->file_path[i] = NULL;
++	}
++
++	kfree(event);
++}
+diff --git a/drivers/staging/hievent/hiview_hievent.h b/drivers/staging/hievent/hiview_hievent.h
+new file mode 100644
+index 000000000..c1c003510
+--- /dev/null
++++ b/drivers/staging/hievent/hiview_hievent.h
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ */
++
++#ifndef HIVIEW_HIEVENT_H
++#define HIVIEW_HIEVENT_H
++
++#define MAX_PATH_NUMBER     10
++
++/* hievent struct */
++struct hiview_hievent {
++	unsigned int eventid;
++
++	long long time;
++
++	/* payload linked list */
++	struct hievent_payload *head;
++
++	/* file path needs uploaded */
++	char *file_path[MAX_PATH_NUMBER];
++};
++
++struct hiview_hievent *hievent_create(unsigned int eventid);
++int hievent_put_integer(struct hiview_hievent *event,
++			const char *key, long value);
++int hievent_put_string(struct hiview_hievent *event,
++		       const char *key, const char *value);
++int hievent_set_time(struct hiview_hievent *event, long long seconds);
++int hievent_add_filepath(struct hiview_hievent *event, const char *path);
++int hievent_report(struct hiview_hievent *obj);
++void hievent_destroy(struct hiview_hievent *event);
++
++#endif /* HIVIEW_HIEVENT_H */
+diff --git a/drivers/staging/hilog/Kconfig b/drivers/staging/hilog/Kconfig
+new file mode 100644
+index 000000000..243934c4c
+--- /dev/null
++++ b/drivers/staging/hilog/Kconfig
+@@ -0,0 +1,22 @@
++#
++# Sensor device configuration
++#
++
++config HILOG
++	tristate "Hilog support"
++	default n
++	help
++	  hilog buffer manager.
++
++	  Hilog is a simple log manager for OpenHarmonyOS.
++	  log string write to /dev/hilog, and the hilog driver copy it
++	  to the ring buffer. Ring buffer can be read from userspace.
++
++	  If unsure, say N.
++
++config HILOG_BUFFER_SIZE
++	int "hilog buffer size"
++	depends on HILOG
++	default 4096
++	help
++		Define the default ring buffer size of hilog
+diff --git a/drivers/staging/hilog/Makefile b/drivers/staging/hilog/Makefile
+new file mode 100644
+index 000000000..e53c86a5d
+--- /dev/null
++++ b/drivers/staging/hilog/Makefile
+@@ -0,0 +1,5 @@
++#
++# Makefile for the hi hilog drivers.
++#
++
++obj-$(CONFIG_HILOG)	+= hilog.o
+diff --git a/drivers/staging/hilog/hilog.c b/drivers/staging/hilog/hilog.c
+new file mode 100644
+index 000000000..ae983d8c1
+--- /dev/null
++++ b/drivers/staging/hilog/hilog.c
+@@ -0,0 +1,417 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (C) 2021 Huawei Technologies Co., Ltd. All rights reserved.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ */
++
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/uaccess.h>
++#include <linux/fs.h>
++#include <linux/slab.h>
++#include <linux/cdev.h>
++#include <linux/sched.h>
++#include <linux/time.h>
++#include <linux/timex.h>
++#include <linux/rtc.h>
++#include <linux/version.h>
++
++#ifndef HILOGDEV_MAJOR
++#define HILOGDEV_MAJOR 245
++#endif
++
++#ifndef HILOG_NR_DEVS
++#define HILOG_NR_DEVS 2
++#endif
++
++#ifndef MEMDEV_SIZE
++#define MEMDEV_SIZE 4096
++#endif
++
++static int hilog_major = HILOGDEV_MAJOR;
++
++module_param(hilog_major, int, 0444);
++
++struct cdev g_hilog_cdev;
++
++#define HILOG_BUFFER ((size_t)CONFIG_HILOG_BUFFER_SIZE)
++#define HILOG_DRIVER "/dev/hilog"
++
++struct hilog_entry {
++	unsigned int len;
++	unsigned int header_size;
++	unsigned int pid : 16;
++	unsigned int task_id : 16;
++	unsigned int sec;
++	unsigned int nsec;
++	unsigned int reserved;
++	char msg[0];
++};
++
++static ssize_t hilog_write(struct file *file,
++			   const char __user *user_buf,
++			   size_t count, loff_t *ppos);
++static ssize_t hilog_read(struct file *file,
++			  char __user *user_buf, size_t count, loff_t *ppos);
++
++static const struct file_operations hilog_fops = {
++	.read = hilog_read,
++	.write = hilog_write,
++};
++
++struct hilog_char_device {
++	int flag;
++	struct mutex mtx; /* lock to protect read/write buffer */
++	unsigned char *buffer;
++	wait_queue_head_t wq;
++	size_t wr_off;
++	size_t hdr_off;
++	size_t size;
++	size_t count;
++} hilog_dev;
++
++static inline unsigned char *hilog_buffer_head(void)
++{
++	return hilog_dev.buffer + hilog_dev.hdr_off;
++}
++
++static void hilog_buffer_inc(size_t sz)
++{
++	if (hilog_dev.size + sz <= HILOG_BUFFER) {
++		hilog_dev.size += sz;
++		hilog_dev.wr_off += sz;
++		hilog_dev.wr_off %= HILOG_BUFFER;
++		hilog_dev.count++;
++	}
++}
++
++static void hilog_buffer_dec(size_t sz)
++{
++	if (hilog_dev.size >= sz) {
++		hilog_dev.size -= sz;
++		hilog_dev.hdr_off += sz;
++		hilog_dev.hdr_off %= HILOG_BUFFER;
++		hilog_dev.count--;
++	}
++}
++
++static int hilog_read_ring_buff(unsigned char __user *buffer, size_t buf_len)
++{
++	size_t retval;
++	size_t buf_left = HILOG_BUFFER - hilog_dev.hdr_off;
++
++	if (buf_left > buf_len) {
++		retval = copy_to_user(buffer, hilog_buffer_head(), buf_len);
++	} else {
++		size_t mem_len = (buf_len > buf_left) ? buf_left : buf_len;
++
++		retval = copy_to_user(buffer, hilog_buffer_head(), mem_len);
++		if (retval < 0)
++			return retval;
++
++		retval = copy_to_user(buffer + buf_left, hilog_dev.buffer,
++				      buf_len - buf_left);
++	}
++	return retval;
++}
++
++static int hilog_read_ring_head_buffer(unsigned char *buffer, size_t buf_len)
++{
++	size_t buf_left = HILOG_BUFFER - hilog_dev.hdr_off;
++
++	if (buf_left > buf_len) {
++		memcpy(buffer, hilog_buffer_head(), buf_len);
++	} else {
++		size_t mem_len = (buf_len > buf_left) ? buf_left : buf_len;
++
++		memcpy(buffer, hilog_buffer_head(), mem_len);
++		memcpy(buffer + buf_left, hilog_dev.buffer, buf_len - buf_left);
++	}
++
++	return 0;
++}
++
++static ssize_t hilog_read(struct file *file,
++			  char __user *user_buf, size_t count, loff_t *ppos)
++{
++	size_t retval;
++	struct hilog_entry header;
++
++	(void)file;
++	if (wait_event_interruptible(hilog_dev.wq, (hilog_dev.size > 0)))
++		return -EINVAL;
++
++	(void)mutex_lock(&hilog_dev.mtx);
++
++	if (hilog_dev.size == 0) {
++		retval = 0;
++		goto out;
++	}
++
++	retval = hilog_read_ring_head_buffer((unsigned char *)&header,
++					     sizeof(header));
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	if (count < header.len + sizeof(header)) {
++		pr_err("buffer too small,buf_len=%d, header.len=%d,%d\n",
++		       (int)count, header.len, header.header_size);
++		retval = -ENOMEM;
++		goto out;
++	}
++
++	hilog_buffer_dec(sizeof(header));
++	retval = copy_to_user((unsigned char *)user_buf,
++			      (unsigned char *)&header,
++			      min(count, sizeof(header)));
++
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	retval = hilog_read_ring_buff((unsigned char *)
++				      (user_buf + sizeof(header)),
++				      header.len);
++	if (retval < 0) {
++		retval = -EINVAL;
++		goto out;
++	}
++
++	hilog_buffer_dec(header.len);
++	retval = header.len + sizeof(header);
++out:
++	if (retval == -ENOMEM) {
++		// clean ring buffer
++		hilog_dev.wr_off = 0;
++		hilog_dev.hdr_off = 0;
++		hilog_dev.size = 0;
++		hilog_dev.count = 0;
++	}
++	(void)mutex_unlock(&hilog_dev.mtx);
++
++	return retval;
++}
++
++static int hilog_write_ring_buffer(unsigned char __user *buffer, size_t buf_len)
++{
++	int retval;
++	size_t buf_left = HILOG_BUFFER - hilog_dev.wr_off;
++
++	if (buf_len > buf_left) {
++		retval = copy_from_user(hilog_dev.buffer + hilog_dev.wr_off,
++					buffer, buf_left);
++		if (retval)
++			return -1;
++		retval = copy_from_user(hilog_dev.buffer, buffer + buf_left,
++					min(HILOG_BUFFER, buf_len - buf_left));
++	} else {
++		retval = copy_from_user(hilog_dev.buffer + hilog_dev.wr_off,
++					buffer, min(buf_left, buf_len));
++	}
++
++	if (retval < 0)
++		return -1;
++
++	return 0;
++}
++
++static int hilog_write_ring_head_buffer(unsigned char *buffer, size_t buf_len)
++{
++	size_t buf_left = HILOG_BUFFER - hilog_dev.wr_off;
++
++	if (buf_len > buf_left) {
++		memcpy(hilog_dev.buffer + hilog_dev.wr_off,
++		       buffer, buf_left);
++		memcpy(hilog_dev.buffer, buffer + buf_left,
++		       min(HILOG_BUFFER, buf_len - buf_left));
++	} else {
++		memcpy(hilog_dev.buffer + hilog_dev.wr_off,
++		       buffer, min(buf_left, buf_len));
++	}
++
++	return 0;
++}
++
++static void hilog_head_init(struct hilog_entry *header, size_t len)
++{
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
++#define NANOSEC_PER_MIRCOSEC 1000
++	struct timeval now = { 0 };
++
++	do_gettimeofday(&now);
++
++	header->sec = now.tv_sec;
++	header->nsec = now.tv_usec * NANOSEC_PER_MIRCOSEC;
++#else
++	struct timespec64 now = { 0 };
++
++	ktime_get_real_ts64(&now);
++
++	header->sec = now.tv_sec;
++	header->nsec = now.tv_nsec;
++#endif
++
++	header->len = len;
++	header->pid = current->pid;
++	header->task_id = current->tgid;
++	header->header_size = sizeof(struct hilog_entry);
++}
++
++static void hilog_cover_old_log(size_t buf_len)
++{
++	int retval;
++	struct hilog_entry header;
++	size_t total_size = buf_len + sizeof(struct hilog_entry);
++	static int drop_log_lines;
++	static bool is_last_time_full;
++	bool is_this_time_full = false;
++
++	while (total_size + hilog_dev.size > HILOG_BUFFER) {
++		retval = hilog_read_ring_head_buffer((unsigned char *)&header,
++						     sizeof(header));
++		if (retval < 0)
++			break;
++
++		drop_log_lines++;
++		is_this_time_full = true;
++		is_last_time_full = true;
++		hilog_buffer_dec(sizeof(header) + header.len);
++	}
++	if (is_last_time_full && !is_this_time_full) {
++		/* so we can only print one log if hilog ring buffer is full in a short time */
++		if (drop_log_lines > 0)
++			pr_info("hilog ringbuffer full, drop %d line(s) log\n",
++				drop_log_lines);
++		is_last_time_full = false;
++		drop_log_lines = 0;
++	}
++}
++
++int hilog_write_internal(const char __user *buffer, size_t buf_len)
++{
++	struct hilog_entry header;
++	int retval;
++
++	(void)mutex_lock(&hilog_dev.mtx);
++	hilog_cover_old_log(buf_len);
++	hilog_head_init(&header, buf_len);
++
++	retval = hilog_write_ring_head_buffer((unsigned char *)&header,
++					      sizeof(header));
++	if (retval) {
++		retval = -ENODATA;
++		goto out;
++	}
++	hilog_buffer_inc(sizeof(header));
++
++	retval = hilog_write_ring_buffer((unsigned char *)(buffer), header.len);
++	if (retval) {
++		retval = -ENODATA;
++		goto out;
++	}
++
++	hilog_buffer_inc(header.len);
++
++	retval = header.len;
++
++out:
++	(void)mutex_unlock(&hilog_dev.mtx);
++	if (retval > 0)
++		wake_up_interruptible(&hilog_dev.wq);
++	else if (retval < 0)
++		pr_err("write fail retval=%d\n", retval);
++
++	return retval;
++}
++
++static ssize_t hilog_write(struct file *file,
++			   const char __user *user_buf,
++			   size_t count, loff_t *ppos)
++{
++	(void)file;
++	if (count + sizeof(struct hilog_entry) > HILOG_BUFFER) {
++		pr_err("input too large\n");
++		return -ENOMEM;
++	}
++
++	return hilog_write_internal(user_buf, count);
++}
++
++static void hilog_device_init(void)
++{
++	hilog_dev.buffer = kmalloc(HILOG_BUFFER, GFP_KERNEL);
++	if (!hilog_dev.buffer)
++		return;
++
++	init_waitqueue_head(&hilog_dev.wq);
++	mutex_init(&hilog_dev.mtx);
++	hilog_dev.wr_off = 0;
++	hilog_dev.hdr_off = 0;
++	hilog_dev.size = 0;
++	hilog_dev.count = 0;
++}
++
++static int __init hilogdev_init(void)
++{
++	int result;
++	dev_t devno = MKDEV(hilog_major, 0);
++
++	result = register_chrdev_region(devno, 2, "hilog");
++	if (result < 0) {
++		/* Static major (245) collides with lirc on the android14-6.1
++		 * GKI — fall back to a dynamic major.  Userspace opens the
++		 * node by path; whoever creates it must read the major from
++		 * /proc/devices (OHOS ueventd handles this). */
++		result = alloc_chrdev_region(&devno, 0, 2, "hilog");
++		if (result < 0) {
++			pr_emerg("\t register hilog error %d\n", result);
++			return result;
++		}
++		hilog_major = MAJOR(devno);
++		pr_info("\t hilog dynamic major %d\n", hilog_major);
++	}
++
++	cdev_init(&g_hilog_cdev, &hilog_fops);
++	g_hilog_cdev.owner = THIS_MODULE;
++	g_hilog_cdev.ops = &hilog_fops;
++
++	cdev_add(&g_hilog_cdev, MKDEV(hilog_major, 0), HILOG_NR_DEVS);
++
++	hilog_device_init();
++	return 0;
++}
++
++static void __exit hilog_exit_module(void)
++{
++	cdev_del(&g_hilog_cdev);
++	unregister_chrdev_region(MKDEV(hilog_major, 0), HILOG_NR_DEVS);
++}
++
++static int __init hilog_init_module(void)
++{
++	int state = hilogdev_init();
++
++	pr_info("\t hilog_init Start%d\n", state);
++	return 0;
++}
++
++module_init(hilog_init_module);
++module_exit(hilog_exit_module);
++
++MODULE_AUTHOR("OHOS");
++MODULE_DESCRIPTION("User mode hilog device interface");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("hilog");
+diff --git a/include/linux/ohos_access_token.h b/include/linux/ohos_access_token.h
+new file mode 100644
+index 000000000..4cdac2163
+--- /dev/null
++++ b/include/linux/ohos_access_token.h
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * OpenHarmony access token accessors — KMI-safe out-of-task_struct store.
++ *
++ * Upstream OHOS kernels keep `u64 token; u64 ftoken;` inside
++ * struct task_struct (see OHOS kernel_linux_6.6 include/linux/sched.h).
++ * On a GKI kernel that must keep loading stock prebuilt vendor modules
++ * (CONFIG_MODVERSIONS CRC matching), changing task_struct's layout is
++ * forbidden — so the ansuz port stores tokens in an external hash keyed
++ * by task_struct pointer, maintained via the sched_process_fork/free
++ * tracepoints (see drivers/accesstokenid/access_token_store.c).
++ *
++ * Consumers: drivers/accesstokenid/ (ioctl surface) and the builtin
++ * binder driver (sender token propagation). Both are vmlinux-builtin,
++ * so no symbols are exported and Module.symvers is unaffected.
++ */
++#ifndef _LINUX_OHOS_ACCESS_TOKEN_H
++#define _LINUX_OHOS_ACCESS_TOKEN_H
++
++#include <linux/types.h>
++
++struct task_struct;
++
++#ifdef CONFIG_ACCESS_TOKENID
++u64 ohos_access_token_get(struct task_struct *task);
++u64 ohos_access_ftoken_get(struct task_struct *task);
++int ohos_access_token_set(struct task_struct *task, u64 token);
++int ohos_access_ftoken_set(struct task_struct *task, u64 ftoken);
++int ohos_access_token_store_init(void);
++#else
++static inline u64 ohos_access_token_get(struct task_struct *task) { return 0; }
++static inline u64 ohos_access_ftoken_get(struct task_struct *task) { return 0; }
++static inline int ohos_access_token_set(struct task_struct *task, u64 token) { return 0; }
++static inline int ohos_access_ftoken_set(struct task_struct *task, u64 ftoken) { return 0; }
++static inline int ohos_access_token_store_init(void) { return 0; }
++#endif
++
++#endif /* _LINUX_OHOS_ACCESS_TOKEN_H */
+diff --git a/include/uapi/linux/android/binder.h b/include/uapi/linux/android/binder.h
+index f9c33731a..c47338565 100644
+--- a/include/uapi/linux/android/binder.h
++++ b/include/uapi/linux/android/binder.h
+@@ -305,6 +305,21 @@ struct binder_extended_error {
+ 	__s32	param;
+ };
+ 
++struct binder_feature_set {
++	__u64 feature_set;
++};
++
++struct access_token {
++	__u64 sender_tokenid;
++	__u64 first_tokenid;
++	__u64 reserved[2];
++};
++
++struct binder_sender_info {
++	struct access_token tokens;
++	__u64 sender_pid_nr;
++};
++
+ #define BINDER_WRITE_READ		_IOWR('b', 1, struct binder_write_read)
+ #define BINDER_SET_IDLE_TIMEOUT		_IOW('b', 3, __s64)
+ #define BINDER_SET_MAX_THREADS		_IOW('b', 5, __u32)
+@@ -320,6 +335,10 @@ struct binder_extended_error {
+ #define BINDER_ENABLE_ONEWAY_SPAM_DETECTION	_IOW('b', 16, __u32)
+ #define BINDER_GET_EXTENDED_ERROR	_IOWR('b', 17, struct binder_extended_error)
+ 
++#define BINDER_FEATURE_SET	_IOWR('b', 30, struct binder_feature_set)
++#define BINDER_GET_ACCESS_TOKEN	_IOWR('b', 31, struct access_token)
++#define BINDER_GET_SENDER_INFO	_IOWR('b', 32, struct binder_sender_info)
++
+ /*
+  * NOTE: Two special error codes you should check for when calling
+  * in to the driver are:

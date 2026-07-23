@@ -18,6 +18,43 @@
 # flaky with strict modes (silent exits on benign empty expansions), and
 # we prefer to keep going through best-effort steps.
 
+# Device this image was spliced for.  The splice/build scripts substitute
+# the placeholder (kernel/ansuz/build_init_boot_chainload.sh -> "ansuz");
+# an unsubstituted placeholder means an X23-era build, where every new
+# per-device branch below must stay inert.
+HYBRIS_DEVICE="@HYBRIS_DEVICE@"
+case "$HYBRIS_DEVICE" in ansuz) ;; *) HYBRIS_DEVICE=x23 ;; esac
+
+# ---------------------------------------------------------------------------
+# Stage -1 (ansuz) — recovery/charger passthrough.  On the Plinius the
+# chainload lives in init_boot's generic ramdisk, which is ALSO loaded
+# for recovery boots (v4 unified recovery: the ABM recovery ramdisk is a
+# vendor_boot fragment, cpio-concatenated over us).  A recovery boot is
+# "/ramdisk-recovery.img present AND force_normal_boot != 1" — same
+# detection as Halium's scripts/halium — and charger boots come in via
+# androidboot.mode=charger.  In both cases the preserved Halium init
+# (/init.halium, saved by the splice script) must run instead of us, so
+# the on-device rescue path keeps working with the chainload installed.
+# Detection needs /proc only; mount it briefly and restore virgin state
+# before the exec.
+# ---------------------------------------------------------------------------
+if [ "$HYBRIS_DEVICE" = "ansuz" ] && [ -x /init.halium ]; then
+    [ -d /proc ] || mkdir /proc
+    mount -t proc proc /proc 2>/dev/null
+    pass=""
+    normal_boot=""
+    grep -qw 'androidboot.force_normal_boot=1' /proc/cmdline 2>/dev/null && normal_boot=y
+    grep -q 'androidboot.force_normal_boot = "1"' /proc/bootconfig 2>/dev/null && normal_boot=y
+    [ -f /ramdisk-recovery.img ] && [ -z "$normal_boot" ] && pass=recovery
+    grep -qw 'androidboot.mode=charger' /proc/cmdline 2>/dev/null && pass=charger
+    grep -q 'androidboot.mode = "charger"' /proc/bootconfig 2>/dev/null && pass=charger
+    if [ -n "$pass" ]; then
+        umount /proc 2>/dev/null
+        exec /init.halium
+    fi
+    umount /proc 2>/dev/null
+fi
+
 # ---------------------------------------------------------------------------
 # Stage 0 — basic mounts.  The Halium initramfs only has /, /bin, /sbin,
 # /etc, /scripts, /usr — every other dir we need we mkdir here.
@@ -191,6 +228,15 @@ mount -t ext4 -o ro /dev/mapper/chip_prod_a /root/chip_prod 2>/dev/null \
 # you just don't get the libhybris HAL stack.  /root/android was
 # created above (Stage 3a) during the brief remount-rw window.
 # ---------------------------------------------------------------------------
+# Filesystem probe for the Halium blob mounts: X23 blobs are ext4; the
+# ansuz stock vendor/vendor_dlkm/system_dlkm are EROFS (Android 14 MTK
+# default).  Try ext4 first (preserves X23 behavior exactly), then erofs.
+mount_ro_probe() {
+    mount -t ext4  -o ro "$1" "$2" 2>/dev/null && return 0
+    mount -t erofs -o ro "$1" "$2" 2>/dev/null && return 0
+    return 1
+}
+
 if [ -b /dev/mapper/halium_system_a ] && [ -b /dev/mapper/halium_vendor_a ]; then
     # halium_system_a is a dynamic-partition image with a Halium-style
     # FHS at its root (acct/, apex/, bin/, system/, vendor/, etc.).
@@ -202,13 +248,26 @@ if [ -b /dev/mapper/halium_system_a ] && [ -b /dev/mapper/halium_vendor_a ]; the
     #   - androidd (in its Halium NS) pivots into /android so Halium
     #     init finds itself at /system/bin/init (the inner system/
     #     becomes /system after pivot).
-    mount -t ext4 -o ro /dev/mapper/halium_system_a /root/android 2>/dev/null \
+    mount_ro_probe /dev/mapper/halium_system_a /root/android \
         || echo "[init-chainload] mount halium_system_a failed (non-fatal)"
     # halium_vendor_a overmounts the partition's own /vendor dir, so the
     # Halium MTK HALs are visible at /android/vendor (OHOS PoV) and at
     # /vendor after androidd's pivot.
-    mount -t ext4 -o ro /dev/mapper/halium_vendor_a /root/android/vendor 2>/dev/null \
+    mount_ro_probe /dev/mapper/halium_vendor_a /root/android/vendor \
         || echo "[init-chainload] mount halium_vendor_a failed (non-fatal)"
+    # ansuz: the stock vendor keeps most driver modules (Mali GPU stack,
+    # WiFi, camera…) in dedicated dlkm dynamic partitions; Android's
+    # /vendor/lib/modules symlinks resolve into /vendor_dlkm.  Mount
+    # them so androidd's Halium NS (and OHOS-side module loaders) see
+    # the full module set.  Mount points exist in the android-rootfs.
+    if [ -b /dev/mapper/halium_vendor_dlkm_a ]; then
+        mount_ro_probe /dev/mapper/halium_vendor_dlkm_a /root/android/vendor_dlkm \
+            || echo "[init-chainload] mount halium_vendor_dlkm_a failed (non-fatal)"
+    fi
+    if [ -b /dev/mapper/halium_system_dlkm_a ]; then
+        mount_ro_probe /dev/mapper/halium_system_dlkm_a /root/android/system_dlkm \
+            || echo "[init-chainload] mount halium_system_dlkm_a failed (non-fatal)"
+    fi
     # libhybris's bionic loader pulls libc.so etc. from /apex/com.android.runtime/
     # (the Android APEX path).  Expose android/system/apex at /apex so
     # those lookups resolve — without this composer_host SIGSEGVs early in its
