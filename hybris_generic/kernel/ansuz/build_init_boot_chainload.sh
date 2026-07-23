@@ -43,6 +43,7 @@ CHAINLOAD_INIT="${CHAINLOAD_INIT:-$OHOS_ROOT/device/board/oniro/hybris_generic/l
 MKBOOT_DIR="$KERNEL_TREE/workdir/downloads/android_system_tools_mkbootimg"
 MKBOOTIMG="$MKBOOT_DIR/mkbootimg.py"
 UNPACK_BOOTIMG="$MKBOOT_DIR/unpack_bootimg.py"
+AVBTOOL="$KERNEL_TREE/workdir/downloads/avb/avbtool"
 OUT="$OHOS_ROOT/out/hybris_generic"
 INIT_BOOT_PART_SIZE=8388608
 
@@ -110,7 +111,15 @@ if (( SZ > INIT_BOOT_PART_SIZE )); then
     echo "ERROR: $INIT_BOOT_OUT is $SZ bytes > init_boot partition ($INIT_BOOT_PART_SIZE)" >&2
     exit 1
 fi
-echo "Built $INIT_BOOT_OUT ($SZ bytes, fits 8 MiB partition)"
+
+# AVB hash footer — the stock/baseline init_boot carries one, and this
+# device's LK rejects a footerless init_boot at boot (BROM/preloader
+# loop, never reaching our ramdisk) even though it's unlocked.  Add the
+# same unsigned hash footer make-bootimage.sh does (no key: vbmeta
+# device_state=unlocked accepts an unsigned image, orange state).
+"$AVBTOOL" add_hash_footer --image "$INIT_BOOT_OUT" \
+    --partition_name init_boot --partition_size "$INIT_BOOT_PART_SIZE"
+echo "Built $INIT_BOOT_OUT ($(stat -c %s "$INIT_BOOT_OUT") bytes incl. AVB footer)"
 
 # ---------------------------------------------------------------------------
 # vendor_boot-ohos.img — same fragments, OHOS cmdline appended
