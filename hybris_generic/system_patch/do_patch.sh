@@ -43,7 +43,10 @@ if [[ -s "$STATE_FILE" ]]; then
     exit 1
 fi
 
-# Pre-flight: every target must be a clean git repo before we touch anything.
+# Pre-flight: every target must be a git repo, and the files the patches
+# touch must be clean. Only those files matter — unrelated local noise
+# (e.g. package-lock.json files rewritten by build/prebuilts_download.sh's
+# npm installs) must not block patching.
 for dir in "${repo_dirs[@]}"; do
     repo_rel="$(realpath --relative-to="$PATCH_DIR" "$dir")"
     repo_path="$SOURCE_ROOT_DIR/$repo_rel"
@@ -52,8 +55,15 @@ for dir in "${repo_dirs[@]}"; do
         echo "ERROR: $repo_path is not a git repository" >&2
         exit 1
     fi
-    if [[ -n "$(git -C "$repo_path" status --porcelain)" ]]; then
-        echo "ERROR: $repo_rel has uncommitted changes — commit or stash them first" >&2
+    mapfile -t touched < <(
+        find "$dir" -maxdepth 1 -type f -name "*.patch" -print0 | sort -z |
+            xargs -0 -n1 git -C "$repo_path" apply --numstat -- | cut -f3 | sort -u
+    )
+    if [[ ${#touched[@]} -gt 0 ]] && \
+       [[ -n "$(git -C "$repo_path" status --porcelain -- "${touched[@]}")" ]]; then
+        echo "ERROR: $repo_rel has uncommitted changes in files the patches touch" >&2
+        echo "       — commit or stash them first:" >&2
+        git -C "$repo_path" status --porcelain -- "${touched[@]}" | sed 's/^/       /' >&2
         exit 1
     fi
 done
@@ -70,7 +80,11 @@ for dir in "${repo_dirs[@]}"; do
     echo "Applying ${#patches[@]} patch(es) in $repo_rel (base ${pre_sha:0:12})"
     for p in "${patches[@]}"; do
         echo "  git am $p"
-        if ! git -C "$repo_path" am "$p"; then
+        # --keep-cr: some OH repos track files with CRLF endings; format-patch
+        # emits the CRs in the payload but mailinfo strips them by default,
+        # making the hunks no longer match. Keeping CRs is a no-op for
+        # LF-only patches.
+        if ! git -C "$repo_path" am --keep-cr "$p"; then
             git -C "$repo_path" am --abort || true
             echo "ERROR: failed to apply $p in $repo_rel" >&2
             echo "       this repo was reset to ${pre_sha:0:12}; already-patched" >&2

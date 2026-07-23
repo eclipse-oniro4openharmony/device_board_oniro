@@ -16,7 +16,9 @@
 # .patch_state file it wrote (repo<TAB>pre_sha<TAB>post_sha per line).
 #
 # For each repo this verifies, BEFORE touching anything, that:
-#   * the working tree is clean (reset --hard would discard dirty work);
+#   * the files the patches touched are clean (unrelated local noise such
+#     as npm-rewritten package-lock.json files is tolerated — the rollback
+#     uses `git reset --keep`, which preserves it);
 #   * HEAD still equals the recorded post-patch SHA (i.e. nothing was
 #     committed or amended on top since do_patch.sh ran).
 # If any repo has diverged the script aborts without changing a thing.
@@ -44,8 +46,10 @@ while IFS=$'\t' read -r repo_rel pre_sha post_sha; do
         echo "ERROR: $repo_path is not a git repository" >&2
         errors=1; continue
     fi
-    if [[ -n "$(git -C "$repo_path" status --porcelain)" ]]; then
-        echo "ERROR: $repo_rel has uncommitted changes — reset --hard would discard them" >&2
+    if [[ -n "$(git -C "$repo_path" diff --name-only -z "$pre_sha" "$post_sha" |
+                xargs -0 -r git -C "$repo_path" status --porcelain --)" ]]; then
+        echo "ERROR: $repo_rel has uncommitted changes in files the patches touched" >&2
+        echo "       — the rollback would discard them" >&2
         errors=1; continue
     fi
     cur="$(git -C "$repo_path" rev-parse HEAD)"
@@ -67,7 +71,9 @@ while IFS=$'\t' read -r repo_rel pre_sha post_sha; do
     [[ -z "$repo_rel" ]] && continue
     repo_path="$SOURCE_ROOT_DIR/$repo_rel"
     echo "Reverting $repo_rel to ${pre_sha:0:12}"
-    git -C "$repo_path" reset --hard "$pre_sha"
+    # --keep (not --hard): rewinds HEAD and the patched files but refuses to
+    # touch — rather than silently discard — unrelated local modifications.
+    git -C "$repo_path" reset --keep "$pre_sha"
 done < "$STATE_FILE"
 
 rm -f "$STATE_FILE"
