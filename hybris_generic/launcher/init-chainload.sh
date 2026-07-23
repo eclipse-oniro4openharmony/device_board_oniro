@@ -73,6 +73,21 @@ mount -t devtmpfs -o nosuid,mode=0755    udev  /dev
 exec > /dev/kmsg 2>&1
 echo "[init-chainload] starting"
 
+# Fatal-error hook.  With no display and no shell console, a bare
+# `exec /bin/sh` is a black hole for remote debugging — if the Halium
+# ramdisk ships the initramfs panic helper (it does on ansuz), bring up
+# the USB RNDIS + telnet rescue instead (device enumerates 18d1:d001
+# "Failed to boot", telnet 192.168.2.15:23 from the USB host, DHCP
+# served to the host by the device).  Falls back to /bin/sh.
+rescue() {
+    echo "[init-chainload] FATAL: $1"
+    if [ -f /scripts/panic/telnet ]; then
+        echo "[init-chainload] starting USB telnet rescue"
+        sh /scripts/panic/telnet
+    fi
+    exec /bin/sh
+}
+
 # ---------------------------------------------------------------------------
 # Stage 1 — load Halium's vendor kernel modules so the block subsystem
 # comes up.  Modules live in vendor_boot's ramdisk at /lib/modules/*.ko;
@@ -132,7 +147,7 @@ while [ -z "$SUPER_DEV" ] && [ "$i" -lt 50 ]; do
     sleep 0.1
     i=$((i + 1))
 done
-[ -n "$SUPER_DEV" ] || { echo "[init-chainload] super not found"; exec /bin/sh; }
+[ -n "$SUPER_DEV" ] || rescue "super not found"
 echo "[init-chainload] super = $SUPER_DEV"
 
 # parse-android-dynparts (in Halium's ramdisk) reads the LP metadata and
@@ -154,9 +169,9 @@ while { [ ! -b /dev/mapper/system_a ] || [ ! -b /dev/mapper/vendor_a ] \
     sleep 0.1
     i=$((i + 1))
 done
-[ -b /dev/mapper/system_a ]   || { echo "[init-chainload] system_a never appeared";   exec /bin/sh; }
-[ -b /dev/mapper/vendor_a ]   || { echo "[init-chainload] vendor_a never appeared";   exec /bin/sh; }
-[ -b /dev/mapper/sys_prod_a ] || { echo "[init-chainload] sys_prod_a never appeared"; exec /bin/sh; }
+[ -b /dev/mapper/system_a ]   || rescue "system_a never appeared"
+[ -b /dev/mapper/vendor_a ]   || rescue "vendor_a never appeared"
+[ -b /dev/mapper/sys_prod_a ] || rescue "sys_prod_a never appeared"
 
 # ---------------------------------------------------------------------------
 # Stage 3 — mount OHOS system_a + vendor_a + sys_prod_a + chip_prod_a
@@ -171,8 +186,7 @@ done
 # const.security.developermode.state=true are set without a separate
 # `setparam` workaround in z_hdcd_autostart.cfg.
 # ---------------------------------------------------------------------------
-mount -t ext4 -o ro /dev/mapper/system_a /root || {
-    echo "[init-chainload] mount system_a failed"; exec /bin/sh; }
+mount -t ext4 -o ro /dev/mapper/system_a /root || rescue "mount system_a failed"
 
 # ---------------------------------------------------------------------------
 # Stage 3a — Bug 8.18 sandbox-perm fix.
@@ -210,11 +224,9 @@ else
     echo "[init-chainload] remount rw for /android mkdir + sandbox chmod failed (non-fatal)"
 fi
 [ -d /root/vendor ] || mkdir -p /root/vendor 2>/dev/null
-mount -t ext4 -o ro /dev/mapper/vendor_a /root/vendor || {
-    echo "[init-chainload] mount vendor_a failed"; exec /bin/sh; }
+mount -t ext4 -o ro /dev/mapper/vendor_a /root/vendor || rescue "mount vendor_a failed"
 [ -d /root/sys_prod ] || mkdir -p /root/sys_prod 2>/dev/null
-mount -t ext4 -o ro /dev/mapper/sys_prod_a /root/sys_prod || {
-    echo "[init-chainload] mount sys_prod_a failed"; exec /bin/sh; }
+mount -t ext4 -o ro /dev/mapper/sys_prod_a /root/sys_prod || rescue "mount sys_prod_a failed"
 [ -d /root/chip_prod ] || mkdir -p /root/chip_prod 2>/dev/null
 mount -t ext4 -o ro /dev/mapper/chip_prod_a /root/chip_prod 2>/dev/null \
     || echo "[init-chainload] mount chip_prod_a failed (non-fatal)"
@@ -308,10 +320,7 @@ else
     echo "[init-chainload] halium_{system,vendor}_a absent — graphics disabled"
 fi
 
-[ -x /root/system/bin/init ] || {
-    echo "[init-chainload] /root/system/bin/init missing — wrong partition?"
-    exec /bin/sh
-}
+[ -x /root/system/bin/init ] || rescue "/root/system/bin/init missing — wrong partition?"
 
 # ---------------------------------------------------------------------------
 # Stage 4 — pre-populate /root/dev/disk/by-partlabel/ so OHOS init's
@@ -395,5 +404,4 @@ echo "[init-chainload] handing off to OHOS init"
 exec env OHOS_NATIVE_BOOT=1 chroot /root /system/bin/init --second-stage
 
 # Fallthrough — should never reach.
-echo "[init-chainload] exec failed; dropping to shell"
-exec /bin/sh
+rescue "exec of OHOS init failed"
