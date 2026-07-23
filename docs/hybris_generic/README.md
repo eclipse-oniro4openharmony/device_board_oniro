@@ -86,6 +86,12 @@ by `pull-halium-blobs.sh`. One of them, `halium_boot_a.img`, supplies the
 Halium ramdisk reused by `build_boot_img_chainload.sh`.
 
 ```
+# Apply the hybris_generic patch series (once per fresh tree, host-side)
+bash device/board/oniro/hybris_generic/system_patch/do_patch.sh
+
+# Build the Oniro distribution HAPs the product depends on (host-side)
+bash vendor/oniro/oniro-haps/build-oniro-haps.sh
+
 # Build  (ThinLTO off + symbol_level=1 are the in-tree defaults; see CLAUDE.md)
 ./build.sh --product-name hybris_generic --ccache
 bash device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh

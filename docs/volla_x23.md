@@ -34,34 +34,61 @@ OHOS graphics/HAL stack can reach the MediaTek hardware through **libhybris**.
 
 ## Build
 
+First, once per fresh checkout, apply the `hybris_generic` patch series to
+the OHOS tree (run it host-side — `git am` needs your git identity). Among
+other libhybris/native-boot adaptations it registers the `hybris_generic`
+product with the build system, so without it the build stops immediately
+with an unknown-product error:
+
 ```bash
-# 1. Build the OHOS rootfs (system / vendor / sys_prod / chip_prod images).
+bash device/board/oniro/hybris_generic/system_patch/do_patch.sh
+# (undo_patch.sh in the same directory rolls the series back)
+```
+
+Then build:
+
+```bash
+# 1. Build the Oniro distribution HAPs (app store, FlorisBoard) from their
+#    pinned sources — host-side, needs network + the OpenHarmony SDK. The
+#    product build depends on these; skipping this step fails the image
+#    build with a missing oniro-appstore.hap ninja error. See
+#    vendor/oniro/oniro-haps/README.md.
+bash vendor/oniro/oniro-haps/build-oniro-haps.sh
+
+# 2. Build the OHOS rootfs (system / vendor / sys_prod / chip_prod images)
+#    — inside the build container.
 ./build.sh --product-name hybris_generic --ccache
 
-# 2. (once) Fetch the Halium Android system/vendor/boot blobs.
+# The container build runs as root, so out/ comes back root-owned. Give
+# yourself the two directories the host-side steps below write into:
+sudo chown "$USER" out out/hybris_generic
+
+# 3. Build the OHOS-patched kernel + matching vendor_boot.img (host-side).
+#    Required on a fresh tree: besides the kernel itself, this clones the
+#    volla-vidofnir kernel port and downloads the Halium build tools
+#    (lpmake, mkbootimg) that steps 5 and 6 depend on.
+bash device/board/oniro/hybris_generic/kernel/x23/build_kernel.sh
+
+# 4. (once) Fetch the Halium Android system/vendor/boot blobs.
 bash device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh
 
-# 3. Pack the LP-formatted `super` image (OHOS + Halium logical partitions).
+# 5. Pack the LP-formatted `super` image (OHOS + Halium logical partitions).
 bash device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh
 
-# 4. Build the chain-load boot image (Halium boot.img with /init replaced).
+# 6. Build the chain-load boot image (Halium boot.img with /init replaced).
 bash device/board/oniro/hybris_generic/kernel/x23/build_boot_img_chainload.sh
 ```
 
 Artifacts land in `out/hybris_generic/` — `super.img` and `boot-chainload.img`.
 
-**Kernel (optional).** The chain-load boot image can carry the OHOS-patched
-kernel (staging drivers: `access_tokenid`, `hilog`, `hievent`, binder
-token-id). Build it — and its matching `vendor_boot.img` modules — with:
-
-```bash
-bash device/board/oniro/hybris_generic/kernel/x23/build_kernel.sh
-```
-
-Output (`boot.img`, `vendor_boot.img`, `dtbo.img`, `modules.tar.gz`) lands in
-`kernel/linux/volla-vidofnir/out/`. `build_boot_img_chainload.sh` picks up this
-kernel automatically when present; the matching `vendor_boot.img` must be
-flashed too, or drivers fail with a vermagic mismatch.
+**Kernel notes.** The chain-load boot image carries the OHOS-patched kernel
+(staging drivers: `access_tokenid`, `hilog`, `hievent`, binder token-id).
+`build_kernel.sh` outputs (`boot.img`, `vendor_boot.img`, `dtbo.img`,
+`modules.tar.gz`) land in `kernel/linux/volla-vidofnir/out/`.
+`build_boot_img_chainload.sh` picks up this kernel automatically when
+present (falling back to the pristine Halium kernel otherwise); the
+matching `vendor_boot.img` must be flashed together with it, or drivers
+fail to load with a vermagic mismatch.
 
 ## Flash
 
