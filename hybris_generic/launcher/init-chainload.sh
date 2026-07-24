@@ -110,9 +110,24 @@ if [ -f modules.load ]; then
         # (before OHOS userspace) panics the kernel.  The .ko files stay
         # bundled in /lib/modules; OHOS loads them post-boot via
         # androidd once the system is up (see phase_n8 §N8.11).
+        #
         case "$1" in
             mali_*|mali-*) continue ;;
         esac
+        # ansuz: skip the MTK AEE hang detectors.  monitor_hang expects
+        # Android AEE daemons on RT_Monitor; aee_hangdet ("the cpu hang
+        # detector") counts anomaly rounds (the trailing counter in its
+        # [wdk-c] kick lines) and silently hard-resets via aee_reset()
+        # when the count hits ~30 — every OHOS boot died at ~535 s with
+        # zero kernel output until this was skipped.  Neither module can
+        # be rmmod'ed live (D-state kthread / kthread_stop WARN -> hard
+        # reset).  watchdog0 (mtk_wdt) stays auto-fed by the kernel
+        # watchdog core while /dev/watchdog is unopened.
+        if [ "$HYBRIS_DEVICE" = "ansuz" ]; then
+            case "$1" in
+                monitor_hang*|aee_hangdet*) continue ;;
+            esac
+        fi
         modprobe -a "$1" 2>/dev/null || true
     done < modules.load
 fi
