@@ -32,6 +32,7 @@
 #endif
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -44,6 +45,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
@@ -158,6 +160,38 @@ static int mknod_min(const char *path, mode_t mode, dev_t dev)
 {
     if (mknod(path, mode, dev) == 0) return 0;
     return errno == EEXIST ? 0 : -1;
+}
+
+/* Remove everything inside `path` (one level of subdirectories deep — all
+ * /dev/__properties__ ever holds is flat files plus the appcompat_override
+ * subdir), leaving `path` itself in place. */
+static void wipe_dir_contents(const char *path)
+{
+    DIR *d = opendir(path);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        char p[PATH_MAX];
+        snprintf(p, sizeof p, "%s/%s", path, e->d_name);
+        if (unlink(p) == 0) continue;
+        if (errno == EISDIR || errno == EPERM) {
+            DIR *sd = opendir(p);
+            if (sd) {
+                struct dirent *se;
+                while ((se = readdir(sd)) != NULL) {
+                    if (!strcmp(se->d_name, ".") || !strcmp(se->d_name, ".."))
+                        continue;
+                    char sp[PATH_MAX];
+                    snprintf(sp, sizeof sp, "%s/%s", p, se->d_name);
+                    unlink(sp);
+                }
+                closedir(sd);
+            }
+            rmdir(p);
+        }
+    }
+    closedir(d);
 }
 
 /* Track which apex modules we successfully bound, so apex_info_list_write()
@@ -278,6 +312,16 @@ static int child_main(void *arg)
 {
     (void)arg;
 
+    /* Die with androidd.  Without this, killing/restarting androidd (or a
+     * watchdog timeout) leaves the whole Halium container running as an
+     * orphan reparented to OHOS init, and the next androidd cycle then
+     * fights it over the shared /dev/__properties__ tmpfs, the binder
+     * devices, and the global loop/dm devices backing the APEX mounts —
+     * observed as the new container's apexd tearing down loops that the
+     * orphan's /apex ext4 mounts still referenced. */
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL) < 0)
+        logmsg("PR_SET_PDEATHSIG: %s (non-fatal)", strerror(errno));
+
     /* Make the parent mount tree private so the new bind mounts we're
      * about to add don't propagate back into OHOS's mount table. */
     if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL) < 0)
@@ -319,6 +363,24 @@ static int child_main(void *arg)
         die("bind /dev/kmsg: %s", strerror(errno));
     mkdir_p(ANDROID_ROOT "/dev/socket",    0755);
     mkdir_p(ANDROID_ROOT "/dev/binderfs",  0755);
+
+    /* devpts + /dev/shm — stock Android's FIRST-stage init mounts these,
+     * and we skip first stage entirely.  Without /dev/pts, every
+     * logwrap_fork_execvp() in second-stage init fails ENOENT opening the
+     * pty slave — most damagingly `perform_apex_config`'s exec of
+     * /apex/com.android.runtime/bin/linkerconfig, whose failure keeps
+     * IsDefaultMountNamespaceReady() unset, which in turn strands every
+     * post-apexd service in the bootstrap mount NS without the full APEX
+     * set (boringssl_self_test_apex64 then ENOENTs on the conscrypt apex
+     * and its reboot_on_failure takes down the whole container). */
+    mkdir_p(ANDROID_ROOT "/dev/pts", 0755);
+    if (mount("devpts", ANDROID_ROOT "/dev/pts", "devpts",
+              MS_NOSUID | MS_NOEXEC, "mode=0620,gid=5,ptmxmode=0666") < 0)
+        logmsg("mount devpts: %s (non-fatal)", strerror(errno));
+    mkdir_p(ANDROID_ROOT "/dev/shm", 0755);
+    if (mount("tmpfs", ANDROID_ROOT "/dev/shm", "tmpfs",
+              MS_NOSUID | MS_NODEV, "mode=1777") < 0)
+        logmsg("mount /dev/shm tmpfs: %s (non-fatal)", strerror(errno));
 
     /* Bind the three binder devices into Android's /dev.  Android's init
      * opens /dev/binder unconditionally; we bind our `android-binder`
@@ -373,6 +435,14 @@ static int child_main(void *arg)
      * subsequent rprivate flip. */
     if (mkdir(ANDROID_ROOT "/dev/__properties__", 0755) < 0 && errno != EEXIST)
         die("mkdir __properties__: %s", strerror(errno));
+    /* Property-area files must NOT survive a previous Halium run: bionic's
+     * map_prop_area_rw() creates each per-context file O_CREAT|O_EXCL and
+     * returns nullptr on EEXIST — Android 14's init then NULL-derefs inside
+     * __system_property_area_init() (SIGSEGV, si_addr 0x14) ~30 ms after
+     * "init second stage started!".  The store deliberately outlives the NS
+     * (shared tmpfs so OHOS-side libhybris consumers can read it), so wipe
+     * its contents — not the mount — before every launch. */
+    wipe_dir_contents("/dev/__properties__");
     if (mount("/dev/__properties__", ANDROID_ROOT "/dev/__properties__",
               NULL, MS_BIND, NULL) < 0)
         die("bind /dev/__properties__: %s", strerror(errno));
@@ -483,38 +553,91 @@ static int child_main(void *arg)
     }
 
     /* Seed Halium boot env.  Android init maps androidboot.* env vars to
-     * ro.boot.* properties at second-stage start. */
+     * ro.boot.* properties at second-stage start.
+     *
+     * Only do this on devices whose boot chain doesn't already deliver
+     * androidboot.* through /proc/bootconfig.  The X23 (5.10) passes them
+     * on the kernel cmdline, which the chainload doesn't preserve — hence
+     * the seeding.  On ansuz (GKI 6.1) the bootloader-appended bootconfig
+     * carries the real values (androidboot.hardware=mt6878, serialno,
+     * slot_suffix); ro.boot.* properties are first-setter-wins, so seeding
+     * the X23 values here would make init load the wrong vendor rc set. */
+    int bootconfig_androidboot = 0;
+    {
+        FILE *bc = fopen("/proc/bootconfig", "r");
+        if (bc) {
+            char bline[512];
+            while (fgets(bline, sizeof bline, bc)) {
+                if (strstr(bline, "androidboot.hardware")) {
+                    bootconfig_androidboot = 1;
+                    break;
+                }
+            }
+            fclose(bc);
+        }
+    }
     setenv("ANDROID_ROOT",   "/system", 1);
     setenv("ANDROID_DATA",   "/data",   1);
     setenv("ANDROID_VENDOR", "/vendor", 1);
-    setenv("androidboot.hardware",          "mt6789",     1);
-    setenv("androidboot.selinux",           "permissive", 1);
-    setenv("androidboot.veritymode",        "disabled",   1);
-    setenv("androidboot.verifiedbootstate", "orange",     1);
-    setenv("androidboot.slot_suffix",       "_a",         1);
+    if (!bootconfig_androidboot) {
+        setenv("androidboot.hardware",          "mt6789",     1);
+        setenv("androidboot.selinux",           "permissive", 1);
+        setenv("androidboot.veritymode",        "disabled",   1);
+        setenv("androidboot.verifiedbootstate", "orange",     1);
+        setenv("androidboot.slot_suffix",       "_a",         1);
+    } else {
+        logmsg("bootconfig provides androidboot.* — env seeding skipped");
+    }
 
-    /* pivot_root into /android.  musl doesn't expose a wrapper;
-     * use the raw syscall.  put-old must be a subdir of the new root,
-     * and must be on a writable filesystem (since the kernel creates a
-     * mount-point dentry there for the old root).  /android
-     * itself is RO (halium_system_a ext4) so we use /data/old_root —
-     * the per-NS tmpfs we just mounted at ANDROID_ROOT/data.  chdir(".")
-     * before the syscall is mandatory — the kernel resolves both args
-     * relative to the calling task's CWD. */
-    if (mkdir(ANDROID_ROOT "/data/old_root", 0755) < 0 && errno != EEXIST)
-        die("mkdir /data/old_root: %s", strerror(errno));
+    /* Switch the NS root to ANDROID_ROOT, switch_root-style: MS_MOVE the
+     * halium mount (with its whole subtree of binds) onto the namespace's
+     * REAL root and chroot into it.  We used to pivot_root + MNT_DETACH
+     * the old root here, but that leaves this namespace's kernel-side
+     * root pointer (mnt_ns->root) referencing the detached old tree:
+     * setns(2) back into this NS resets the caller's fs root to that dead
+     * tree, and every path lookup afterwards fails ENOENT.  Halium 12's
+     * init never re-entered its own NS, so the X23 got away with it;
+     * Android 14's SetupMountNamespaces() does unshare+setns on every
+     * boot (its updatable-APEX path) and aborted with
+     *   `Failed to bind mount /bootstrap-apex: No such file or directory`
+     * on exactly this.
+     *
+     * setns()'s root re-resolution starts at the namespace root MOUNT
+     * (the chainload ramdisk) and only descends mounts stacked exactly on
+     * its root dentry (LOOKUP_DOWN) — and androidd runs chrooted at
+     * /root inside that ramdisk (the chainload chroots OHOS init), so
+     * MS_MOVE onto our chroot's "/" would stack halium at the /root
+     * mountpoint where setns never looks.  Hence step 1: escape the
+     * chroot (chroot to a subdir while cwd stays outside it, then climb
+     * with ".." until "."==".."), so "/" means the ramdisk root. */
     if (chdir(ANDROID_ROOT) < 0)
         die("chdir %s: %s", ANDROID_ROOT, strerror(errno));
-    if (syscall(SYS_pivot_root, ".", "data/old_root") < 0)
-        die("pivot_root: %s", strerror(errno));
+    if (chroot(ANDROID_ROOT "/data") < 0)
+        die("chroot escape pivot: %s", strerror(errno));
+    for (int i = 0; i < 64; ++i) {
+        struct stat cur, up;
+        if (stat(".", &cur) < 0 || stat("..", &up) < 0)
+            die("escape stat: %s", strerror(errno));
+        if (cur.st_ino == up.st_ino && cur.st_dev == up.st_dev)
+            break;
+        if (chdir("..") < 0)
+            die("escape chdir ..: %s", strerror(errno));
+    }
+    if (chroot(".") < 0)
+        die("chroot ns root: %s", strerror(errno));
+    /* Step 2: stack the halium mount on the ramdisk root mountpoint —
+     * the same arrangement stock Android's switch_root leaves behind —
+     * and enter it.  In the real-root view the OHOS world (and thus the
+     * halium mount) lives under /root.  The old roots stay mounted
+     * underneath, shadowed and unreachable by path. */
+    if (chdir("/root" ANDROID_ROOT) < 0 && chdir(ANDROID_ROOT) < 0)
+        die("chdir to halium root post-escape: %s", strerror(errno));
+    if (mount(".", "/", NULL, MS_MOVE, NULL) < 0)
+        die("MS_MOVE halium root -> /: %s", strerror(errno));
+    if (chroot(".") < 0)
+        die("chroot: %s", strerror(errno));
     if (chdir("/") < 0)
         die("chdir /: %s", strerror(errno));
-    /* Detach the old root so OHOS-side mounts aren't visible from inside
-     * Halium.  MNT_DETACH because some of OHOS's mounts (e.g. /system)
-     * are in active use and EBUSY would fire on plain umount. */
-    if (umount2("/data/old_root", MNT_DETACH) < 0)
-        logmsg("umount2 /data/old_root: %s (non-fatal)", strerror(errno));
-    rmdir("/data/old_root");
 
     /* Redirect stdout/stderr to /dev/kmsg so Halium init's early
      * messages (before init.rc opens its own log) reach our dmesg.
@@ -785,11 +908,24 @@ static int probe_composer(pid_t child_pid)
         pid_t grand = fork();
         if (grand < 0) _exit(5);
         if (grand == 0) {
-            if (chroot("/root") < 0) _exit(8);
-            if (chdir("/")     < 0) _exit(9);
+            /* With the MS_MOVE root swap (see child_main) the post-setns
+             * root IS the halium root and no chroot is needed; the legacy
+             * pivot_root layout left halium reachable only via /root.
+             * Probe the direct path first, fall back to the old dance. */
+            struct stat st;
+            if (stat("/system/bin/lshal", &st) != 0) {
+                if (chroot("/root") < 0) _exit(8);
+                if (chdir("/")     < 0) _exit(9);
+            }
+            /* HIDL composer (X23 / Halium 12) via lshal, or AIDL composer3
+             * (ansuz / Halium 14) via servicemanager.  `service check`
+             * prints "Service <name>: found" when registered. */
             execl("/system/bin/sh", "sh", "-c",
                   "/system/bin/lshal --neat 2>/dev/null"
-                  " | grep -Eq '@2[.][0-9]+::IComposer/default'",
+                  " | grep -Eq '@2[.][0-9]+::IComposer/default'"
+                  " || /system/bin/service check"
+                  " android.hardware.graphics.composer3.IComposer/default"
+                  " 2>/dev/null | grep -q ': found'",
                   (char *)NULL);
             _exit(127);
         }
