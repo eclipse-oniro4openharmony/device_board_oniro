@@ -868,13 +868,15 @@ int main(int argc, char **argv)
         die("%s missing — is binderfs mounted? "
             "(check init.x23.cfg pre-init)", BINDERFS_CONTROL);
 
-    /* Halium content must be present.  Probe a real binary inside the
-     * inner system/ subdir (/android/system/bin/hwservicemanager) — a
-     * regular file, not one of the halium-internal /bin -> /system/bin
-     * symlinks that would resolve to OHOS's own tree from outside the
-     * pivot.  Without halium, exec'ing init would just fail; failing
-     * here gives a cleaner error. */
-    if (access(ANDROID_ROOT "/system/bin/hwservicemanager", X_OK) < 0)
+    /* Halium content must be present.  Probe system/bin/hwservicemanager
+     * inside the mount with lstat: on Halium 14 the entry is itself an
+     * absolute symlink (→ /system/system_ext/bin/hwservicemanager) that
+     * only resolves after the pivot, so a symlink-following check
+     * (access/stat) from the OHOS namespace would wrongly report it
+     * missing.  Its mere presence proves halium_system_a is mounted,
+     * which is all this gate is for. */
+    struct stat hwsm;
+    if (lstat(ANDROID_ROOT "/system/bin/hwservicemanager", &hwsm) < 0)
         die("%s/system/bin/hwservicemanager missing — did the chainload "
             "mount halium_system_a?", ANDROID_ROOT);
 
