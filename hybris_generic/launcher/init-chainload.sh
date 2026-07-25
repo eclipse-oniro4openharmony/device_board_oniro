@@ -296,10 +296,16 @@ if [ -b /dev/mapper/halium_system_a ] && [ -b /dev/mapper/halium_vendor_a ]; the
             || echo "[init-chainload] mount halium_system_dlkm_a failed (non-fatal)"
     fi
     # libhybris's bionic loader pulls libc.so etc. from /apex/com.android.runtime/
-    # (the Android APEX path).  Expose android/system/apex at /apex so
-    # those lookups resolve — without this composer_host SIGSEGVs early in its
-    # first Android-namespace dlopen (libc.so not found).
-    if [ -d /root/android/system/apex ]; then
+    # (the Android APEX path).  Without it composer_host SIGSEGVs early in its
+    # first Android-namespace dlopen (libc.so not found / NULL compat symbols).
+    #   - Halium 12 (X23): system/apex holds FLATTENED apex dirs — bind it.
+    #   - Halium 14 (ansuz): system/apex holds PACKED .apex files (useless as
+    #     paths), so build_super_img.sh ships a halium_apex_a partition with
+    #     the extracted runtime + vndk.v34 payload trees — mount that instead.
+    if [ -b /dev/mapper/halium_apex_a ]; then
+        mount_ro_probe /dev/mapper/halium_apex_a /root/apex \
+            || echo "[init-chainload] mount halium_apex_a failed"
+    elif [ -d /root/android/system/apex ]; then
         mount --bind /root/android/system/apex /root/apex 2>/dev/null \
             || echo "[init-chainload] bind /android/system/apex→/apex failed"
     fi

@@ -68,6 +68,41 @@ if [[ -f "$BLOBS/halium_system_a.img" && -f "$BLOBS/halium_vendor_a.img" ]]; the
     add_part halium_vendor_a "$BLOBS/halium_vendor_a.img"
     [[ -f "$BLOBS/halium_vendor_dlkm_a.img" ]] && add_part halium_vendor_dlkm_a "$BLOBS/halium_vendor_dlkm_a.img"
     [[ -f "$BLOBS/halium_system_dlkm_a.img" ]] && add_part halium_system_dlkm_a "$BLOBS/halium_system_dlkm_a.img"
+
+    # halium_apex_a — flattened APEX payloads for OHOS-side libhybris.
+    # The Halium-14 GSI ships PACKED /system/apex/*.apex (unlike Halium 12's
+    # flattened dirs), so the X23 trick of bind-mounting system/apex at
+    # /apex gives libhybris nothing to resolve /apex/com.android.runtime/…
+    # against and composer_host dies on a NULL hwc2_compat_* symbol.
+    # Extract the two payloads libhybris needs (bionic runtime + VNDK 34
+    # for the vendor mapper/gralloc deps) into an ext4 image the chainload
+    # mounts at /apex.  Rootless: debugfs dump/rdump + mke2fs -d.
+    APEX_IMG="$OHOS_ROOT/out/hybris_generic/halium_apex.img"
+    if [[ ! -f "$APEX_IMG" || "$BLOBS/halium_system_a.img" -nt "$APEX_IMG" ]]; then
+        echo "building halium_apex.img (flattened runtime + vndk.v34 payloads)"
+        APEX_WORK="$(mktemp -d)"
+        trap 'rm -rf "$APEX_WORK"' EXIT
+        declare -A APEX_SRC=(
+            [com.android.runtime]="/system/apex/com.android.runtime.apex"
+            [com.android.vndk.v34]="/system/system_ext/apex/com.android.vndk.v34.apex"
+        )
+        for name in "${!APEX_SRC[@]}"; do
+            debugfs -R "dump ${APEX_SRC[$name]} $APEX_WORK/$name.apex" \
+                "$BLOBS/halium_system_a.img" 2>/dev/null
+            [[ -s "$APEX_WORK/$name.apex" ]] || { echo "ERROR: ${APEX_SRC[$name]} not found in halium_system_a.img" >&2; exit 1; }
+            unzip -o -q "$APEX_WORK/$name.apex" apex_payload.img -d "$APEX_WORK/$name-x"
+            mkdir -p "$APEX_WORK/staging/$name"
+            # chown warnings are expected rootless noise; suppress them but
+            # keep other stderr.
+            debugfs -R "rdump / $APEX_WORK/staging/$name" \
+                "$APEX_WORK/$name-x/apex_payload.img" 2> >(grep -v 'changing ownership' >&2)
+            rmdir "$APEX_WORK/staging/$name/lost+found" 2>/dev/null || true
+        done
+        # 59M of payloads today; 96M leaves room for adding i18n/tzdata later.
+        mke2fs -q -t ext4 -d "$APEX_WORK/staging" -L halium_apex "$APEX_IMG.tmp" 96m
+        mv "$APEX_IMG.tmp" "$APEX_IMG"
+    fi
+    add_part halium_apex_a "$APEX_IMG"
 else
     echo "WARN: halium-blobs/ansuz not populated — OHOS-only super (no libhybris graphics)"
 fi
