@@ -25,20 +25,41 @@
 // connsys WiFi function-on fails its firmware download (RST_FW_DL_FAIL).
 //
 // Mode 2 (wifi-on) writes "1" to /dev/wmtWifi to power on the connsys
-// WiFi function, which creates wlan0.  With mode 1 ordered correctly
-// this succeeds on the first try; the retry loop is cheap insurance
-// against a transient connsys function-on failure (on failure the
-// connsys does a whole-chip-reset and the next attempt succeeds).  It
-// runs as the `wmtwifi-on` oneshot service (background, so it never
-// blocks boot) -- see init.x23.cfg.
+// WiFi function.  With mode 1 ordered correctly this succeeds on the
+// first try; the retry loop is cheap insurance against a transient
+// connsys function-on failure (on failure the connsys does a
+// whole-chip-reset and the next attempt succeeds).  It runs as the
+// `wmtwifi-on` oneshot service (background, so it never blocks boot) --
+// see init.<device>.cfg.
 //
-// See phase_n9_firmware_peripherals.md N9.2.
+// Mode 2 serves both connsys generations, which differ in *when* wlan0
+// appears:
+//
+//   * legacy WMT (x23 / mt6789, has /dev/wmtdetect) -- the wlan driver
+//     registers no netdev until the function is powered on, so the "1"
+//     write is what creates wlan0.
+//   * connac2 / conninfra (ansuz / mt6878, no /dev/wmtdetect) -- the
+//     netdev is registered separately by a 'P' (probe) write, after
+//     which wlan0 is *visible but dead*: its ndo_open fails with
+//     -ENODEV until the "1" write arms the function.  Android's
+//     wlan_assistant issues the 'P'; we issue it ourselves if nothing
+//     else has by the time we run.
+//
+// Because wlan0 can therefore already exist while WiFi is still off,
+// mode 2 must not use its presence as the done/not-done signal -- doing
+// so was why the Plinius came up with wlan0 present but wpa_supplicant
+// failing "Could not set interface wlan0 flags (UP): No such device".
+// It gates on whether the interface can actually be brought UP instead.
+//
+// See phase_n9_firmware_peripherals.md N9.2 and phase_p8_wifi_audio.md.
 
 #include <errno.h>
 #include <fcntl.h>
+#include <net/if.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -55,7 +76,14 @@
 // first attempt succeeds; this is insurance against a transient connsys
 // function-on failure, after which the connsys whole-chip-resets
 // (~1-30 s) and the next attempt succeeds.
+//
+// The first few retries are fast because on connac2 the other reason to
+// retry is that the wlan driver has not been probed yet -- we want to
+// win the race against the OHOS WiFi framework, which auto-starts STA
+// about 10 s into boot and gives up after four tries.
 #define WIFI_ON_MAX_RETRY 20
+#define WIFI_ON_FAST_TRIES 8
+#define WIFI_ON_FAST_SEC 2
 #define WIFI_ON_RETRY_SEC 15
 
 static int call(int fd, unsigned long cmd, unsigned long arg, const char *name)
@@ -103,37 +131,112 @@ static int wlan0_present(void)
 	return stat("/sys/class/net/wlan0", &st) == 0;
 }
 
-// Mode 2 -- power on connsys WiFi, retrying until wlan0 appears.
+// Whether wlan0 is not merely registered but *armed*.  On connac2 the
+// netdev exists from the 'P' probe onward and only the function-on write
+// makes its ndo_open work, so presence alone proves nothing -- gating on
+// it is what let the Plinius boot with a dead wlan0.  SIOCSIFFLAGS is
+// the very call wpa_supplicant fails with -ENODEV in that state, which
+// makes it the exact condition to test.  Any flag we change is undone
+// before returning, so this stays a read-only probe.
+static int wlan0_ready(void)
+{
+	struct ifreq ifr;
+	int s, ok = 0;
+
+	if (!wlan0_present())
+		return 0;
+
+	s = socket(AF_INET, SOCK_DGRAM, 0);
+	if (s < 0)
+		return 0;
+
+	memset(&ifr, 0, sizeof(ifr));
+	strncpy(ifr.ifr_name, "wlan0", IFNAMSIZ - 1);
+	if (ioctl(s, SIOCGIFFLAGS, &ifr) == 0) {
+		short was = ifr.ifr_flags;
+
+		if (was & IFF_UP) {
+			ok = 1;
+		} else {
+			ifr.ifr_flags = was | IFF_UP;
+			if (ioctl(s, SIOCSIFFLAGS, &ifr) == 0) {
+				ok = 1;
+				ifr.ifr_flags = was;
+				ioctl(s, SIOCSIFFLAGS, &ifr);
+			}
+		}
+	}
+	close(s);
+	return ok;
+}
+
+// Legacy WMT (x23 / mt6789) exposes the chip-detect node that mode 1
+// drives; connac2 (ansuz / mt6878) has conninfra instead and no such
+// node.  Used only to decide whether the 'P' probe write applies.
+static int is_legacy_wmt(void)
+{
+	return access("/dev/wmtdetect", F_OK) == 0;
+}
+
+static ssize_t wmtwifi_write(const char *cmd)
+{
+	int fd = open("/dev/wmtWifi", O_WRONLY);
+	if (fd < 0)
+		return -1;
+
+	ssize_t w = write(fd, cmd, 1);
+	close(fd);
+	return w;
+}
+
+// Mode 2 -- power on the connsys WiFi function.
+//
+// Always performs the "1" write, even when wlan0 is already visible: on
+// connac2 the netdev is registered by the 'P' probe long before the
+// function is armed, so wlan0's presence proves nothing.  See the file
+// header.
 static int do_wifi_on(void)
 {
-	if (wlan0_present()) {
-		printf("wmtdetect-init: wlan0 already up\n");
+	if (wlan0_ready()) {
+		printf("wmtdetect-init: wlan0 already armed\n");
 		return 0;
 	}
 
 	for (int i = 1; i <= WIFI_ON_MAX_RETRY; i++) {
-		int fd = open("/dev/wmtWifi", O_WRONLY);
-		if (fd < 0) {
+		int delay = i <= WIFI_ON_FAST_TRIES ? WIFI_ON_FAST_SEC
+						    : WIFI_ON_RETRY_SEC;
+
+		// connac2 only: register the wlan driver if nothing else has
+		// (normally Android's wlan_assistant, running in the container,
+		// gets there first).  Harmless once wlan0 exists, so it is
+		// gated on absence rather than issued unconditionally.
+		if (!wlan0_present() && !is_legacy_wmt()) {
+			ssize_t p = wmtwifi_write("P");
+			printf("wmtdetect-init: wlan probe write=%zd (try %d)\n",
+			       p, i);
+			sleep(1);
+		}
+
+		ssize_t w = wmtwifi_write("1");
+		if (w < 0) {
 			// wmt_chrdev_wifi not ready yet -- wait and retry.
-			printf("wmtdetect-init: open /dev/wmtWifi failed "
-			       "(try %d): %s\n", i, strerror(errno));
-			sleep(WIFI_ON_RETRY_SEC);
+			printf("wmtdetect-init: /dev/wmtWifi func-on write "
+			       "failed (try %d): %s\n", i, strerror(errno));
+			sleep(delay);
 			continue;
 		}
-		ssize_t w = write(fd, "1", 1);
-		close(fd);
 
 		// The connsys func-on / FW download runs synchronously inside
 		// the write(); a short settle lets wlan0 register on success.
 		sleep(3);
-		if (wlan0_present()) {
+		if (wlan0_ready()) {
 			printf("wmtdetect-init: wifi-on OK on attempt %d\n", i);
 			return 0;
 		}
 		printf("wmtdetect-init: wifi-on attempt %d failed "
 		       "(write=%zd) -- connsys resets, retrying in %d s\n",
-		       i, w, WIFI_ON_RETRY_SEC);
-		sleep(WIFI_ON_RETRY_SEC);
+		       i, w, delay);
+		sleep(delay);
 	}
 
 	printf("wmtdetect-init: wifi-on gave up after %d attempts\n",
