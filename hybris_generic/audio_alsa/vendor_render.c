@@ -6,8 +6,11 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * MTK MT6789 + MT6366 render-side vendor hooks for the OHOS alsa_adapter.
- * Written as part of Phase 13B (native ALSA audio).
+ * MTK render-side vendor hooks for the OHOS alsa_adapter. Written as part
+ * of Phase 13B (native ALSA audio) against MT6789+MT6366 (Volla X23 /
+ * Tablet); MT6878+MT6369 (Volla Phone Plinius) support added with the
+ * ansuz port — device differences are gated at runtime on kcontrol
+ * presence, see common.h.
  *
  * Volume control uses `Lineout Volume` (loudspeaker) as the master integer
  * control. `Ext_Speaker_Amp Switch` is toggled at Start/Stop.
@@ -24,31 +27,49 @@ typedef struct _RENDER_DATA_ {
     long tempVolume;
 } RenderData;
 
-/* Probe whether a named mixer kcontrol exists on this card. Used to gate the
- * X23-only AW883xx/I2S3 speaker path so that the tablet (which lacks the
- * AW883xx but does expose the MT6789 I2S3 mixers for other reasons) isn't
- * affected by DAPM writes that have no audible purpose there. */
+/* Probe whether a named mixer kcontrol exists on this card — used to gate
+ * the X23-only AW883xx/I2S3 speaker path and the ansuz-only DL0/LOL path.
+ * (Wrapper kept so the call sites below read the same as before the helper
+ * moved to common.h for sharing with vendor_capture.c.) */
 static bool KcontrolExists(const struct AlsaSoundCard *cardIns, const char *name)
 {
-    snd_ctl_t *ctl = NULL;
-    snd_ctl_elem_id_t *id = NULL;
-    snd_ctl_elem_info_t *info = NULL;
-    bool exists = false;
+    return SndKcontrolExists(cardIns, name);
+}
 
-    if (cardIns == NULL || name == NULL) {
-        return false;
+/* Plinius (ansuz, mt6878+mt6369) playback route. Playback_1 is memif DL0 on
+ * this AFE generation, and the loudspeaker hangs off the codec lineout
+ * through two aw87xxx boost amps whose power state the machine driver's
+ * Ext_Speaker_Amp DAPM widget manages — so beyond these routes the shared
+ * Ext_Speaker_Amp off->on toggle is all the speaker needs. See common.h. */
+static void RenderRouteMt6878(struct AlsaSoundCard *cardIns)
+{
+    struct AlsaMixerCtlElement elem;
+
+    if (KcontrolExists(cardIns, SND_ELEM_ADDA_DL_CH1_DL0_CH1)) {
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_ADDA_DL_CH1_DL0_CH1;
+        elem.value = "on";
+        (void)SndElementWrite(cardIns, &elem);
+
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_ADDA_DL_CH2_DL0_CH2;
+        elem.value = "on";
+        (void)SndElementWrite(cardIns, &elem);
     }
-    if (snd_ctl_open(&ctl, cardIns->ctrlName, 0) < 0) {
-        return false;
+
+    /* LOL feeds the aw87xxx amps, so key the lineout mux on the amp being
+     * present rather than on "LOL Mux" itself (mt6366-family codecs also
+     * expose a LOL mux, but there it must stay Open — nothing audible is
+     * behind it and the X23/tablet behavior must not change). */
+    if (KcontrolExists(cardIns, SND_ELEM_AW87XXX_PROF_0)) {
+        SndElementItemInit(&elem);
+        elem.numid = 0;
+        elem.name = SND_ELEM_LOL_MUX;
+        elem.value = SND_LOL_MUX_PLAYBACK;
+        (void)SndElementWrite(cardIns, &elem);
     }
-    snd_ctl_elem_id_alloca(&id);
-    snd_ctl_elem_info_alloca(&info);
-    snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
-    snd_ctl_elem_id_set_name(id, name);
-    snd_ctl_elem_info_set_id(info, id);
-    exists = (snd_ctl_elem_info(ctl, info) == 0);
-    snd_ctl_close(ctl);
-    return exists;
 }
 
 static int32_t RenderInitImpl(struct AlsaRender *renderIns)
@@ -99,6 +120,9 @@ static int32_t RenderInitImpl(struct AlsaRender *renderIns)
     elem.name = SND_ELEM_ADDA_DL_CH2_DL1_CH2;
     elem.value = "on";
     (void)SndElementWrite(cardIns, &elem);
+
+    /* Plinius: DL0 route + lineout mux (no-op on mt6789 devices). */
+    RenderRouteMt6878(cardIns);
 
     /* X23 speaker route: DL1 -> I2S3 -> AW883xx smart PA. Only enable this
      * when `aw_dev_0_switch` is present (X23 has it; tablet doesn't) so that
@@ -289,6 +313,10 @@ static int32_t RenderStartImpl(struct AlsaRender *renderIns, const struct AudioH
     elem.name = SND_ELEM_HPR_MUX;
     elem.value = "Audio Playback";
     (void)SndElementWrite(cardIns, &elem);
+
+    /* Plinius: re-assert the DL0 route + lineout mux on every Start
+     * (no-op on mt6789 devices). */
+    RenderRouteMt6878(cardIns);
 
     /* Re-assert the Off -> On toggle on every Start so DAPM re-runs its
      * power-up sequence even if the kcontrol was already "on" from Init. */

@@ -125,6 +125,12 @@ static int setup_dapm(void)
     fprintf(stdout, "Programming DAPM route:\n");
     write_integer_name(ctl, "ADDA_DL_CH1 DL1_CH1", 1);
     write_integer_name(ctl, "ADDA_DL_CH2 DL1_CH2", 1);
+    /* Plinius (mt6878): Playback_1 is memif DL0 and the speaker hangs off
+     * the codec lineout (LOL -> aw87xxx boost amps). Missing-control
+     * failures are non-fatal on mt6789 devices. */
+    write_integer_name(ctl, "ADDA_DL_CH1 DL0_CH1", 1);
+    write_integer_name(ctl, "ADDA_DL_CH2 DL0_CH2", 1);
+    write_integer_name(ctl, "LOL Mux", 2);         /* Playback */
     write_integer_name(ctl, "HPL Mux", 2); /* Audio Playback */
     write_integer_name(ctl, "HPR Mux", 2); /* Audio Playback */
     /* X23 speaker path: DL1 -> I2S3 -> AW883xx smart PA. Tablet's speaker
@@ -209,6 +215,202 @@ static int set_swparams(snd_pcm_t *handle,
     return 0;
 }
 
+/* Print the current value(s) of a named mixer control. */
+static int get_control(const char *name)
+{
+    snd_ctl_t *ctl = NULL;
+    snd_ctl_elem_id_t *id;
+    snd_ctl_elem_info_t *info;
+    snd_ctl_elem_value_t *val;
+    int err, i, count;
+
+    if ((err = snd_ctl_open(&ctl, CARD, 0)) < 0) {
+        fprintf(stderr, "snd_ctl_open(%s): %s\n", CARD, snd_strerror(err));
+        return err;
+    }
+    snd_ctl_elem_id_alloca(&id);
+    snd_ctl_elem_info_alloca(&info);
+    snd_ctl_elem_value_alloca(&val);
+
+    snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
+    snd_ctl_elem_id_set_name(id, name);
+    snd_ctl_elem_info_set_id(info, id);
+    if ((err = snd_ctl_elem_info(ctl, info)) < 0) {
+        fprintf(stderr, "elem_info \"%s\": %s\n", name, snd_strerror(err));
+        snd_ctl_close(ctl);
+        return err;
+    }
+    snd_ctl_elem_info_get_id(info, id);
+    snd_ctl_elem_value_set_id(val, id);
+    if ((err = snd_ctl_elem_read(ctl, val)) < 0) {
+        fprintf(stderr, "elem_read \"%s\": %s\n", name, snd_strerror(err));
+        snd_ctl_close(ctl);
+        return err;
+    }
+    count = snd_ctl_elem_info_get_count(info);
+    fprintf(stdout, "\"%s\":", name);
+    for (i = 0; i < count; i++) {
+        switch (snd_ctl_elem_info_get_type(info)) {
+        case SND_CTL_ELEM_TYPE_BOOLEAN:
+            fprintf(stdout, " %d", snd_ctl_elem_value_get_boolean(val, i));
+            break;
+        case SND_CTL_ELEM_TYPE_INTEGER:
+            fprintf(stdout, " %ld", snd_ctl_elem_value_get_integer(val, i));
+            break;
+        case SND_CTL_ELEM_TYPE_ENUMERATED: {
+            unsigned int item = snd_ctl_elem_value_get_enumerated(val, i);
+            snd_ctl_elem_info_set_item(info, item);
+            if (snd_ctl_elem_info(ctl, info) == 0) {
+                fprintf(stdout, " %u (%s)", item,
+                        snd_ctl_elem_info_get_item_name(info));
+            } else {
+                fprintf(stdout, " %u", item);
+            }
+            break;
+        }
+        default:
+            fprintf(stdout, " ?");
+            break;
+        }
+    }
+    fprintf(stdout, "\n");
+    snd_ctl_close(ctl);
+    return 0;
+}
+
+static int set_control(const char *name, long value)
+{
+    snd_ctl_t *ctl = NULL;
+    int err;
+    if ((err = snd_ctl_open(&ctl, CARD, 0)) < 0) {
+        fprintf(stderr, "snd_ctl_open(%s): %s\n", CARD, snd_strerror(err));
+        return err;
+    }
+    err = write_integer_name(ctl, name, value);
+    snd_ctl_close(ctl);
+    return err;
+}
+
+/* Play a sine tone on an arbitrary playback device, with NO DAPM setup —
+ * mixer state is expected to have been programmed beforehand via --set. */
+static int play_tone(int device, int seconds)
+{
+    snd_pcm_t *pcm = NULL;
+    snd_pcm_hw_params_t *hw;
+    snd_pcm_sframes_t period_size = 0, buffer_size = 0;
+    char dev[32];
+    int err, i;
+
+    snprintf(dev, sizeof(dev), "hw:0,%d", device);
+    fprintf(stdout, "Opening PCM %s (blocking)...\n", dev);
+    if ((err = snd_pcm_open(&pcm, dev, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
+        fprintf(stderr, "snd_pcm_open(%s): %s\n", dev, snd_strerror(err));
+        return 1;
+    }
+    snd_pcm_hw_params_alloca(&hw);
+    if (set_hwparams(pcm, hw) < 0) { snd_pcm_close(pcm); return 1; }
+    snd_pcm_hw_params_get_period_size(hw, (snd_pcm_uframes_t *)&period_size, NULL);
+    snd_pcm_hw_params_get_buffer_size(hw, (snd_pcm_uframes_t *)&buffer_size);
+    fprintf(stdout, "period_size=%ld frames  buffer_size=%ld frames\n",
+            (long)period_size, (long)buffer_size);
+    if (set_swparams(pcm, period_size) < 0) { snd_pcm_close(pcm); return 1; }
+
+    size_t frames = (size_t)period_size;
+    int16_t *buf = (int16_t *)malloc(frames * CHANNELS * sizeof(int16_t));
+    if (!buf) { snd_pcm_close(pcm); return 1; }
+
+    double phase = 0.0;
+    const double step = 2.0 * M_PI * TONE_HZ / (double)RATE;
+    const int16_t amp = 16000;
+    int total_periods = (seconds * RATE) / (int)period_size;
+    fprintf(stdout, "Writing %d periods (~%d s) of %d Hz sine...\n",
+            total_periods, seconds, TONE_HZ);
+    for (i = 0; i < total_periods; i++) {
+        size_t f;
+        for (f = 0; f < frames; f++) {
+            int16_t s = (int16_t)(amp * sin(phase));
+            buf[f * CHANNELS + 0] = s;
+            buf[f * CHANNELS + 1] = s;
+            phase += step;
+            if (phase > 2.0 * M_PI) phase -= 2.0 * M_PI;
+        }
+        snd_pcm_sframes_t n = snd_pcm_writei(pcm, buf, frames);
+        if (n < 0) {
+            fprintf(stderr, "writei: %s (period %d)\n", snd_strerror((int)n), i);
+            n = snd_pcm_recover(pcm, (int)n, 0);
+            if (n < 0) break;
+        }
+    }
+    snd_pcm_drain(pcm);
+    snd_pcm_close(pcm);
+    free(buf);
+    fprintf(stdout, "done.\n");
+    return 0;
+}
+
+/* Record S16_LE stereo from an arbitrary capture device into a raw file.
+ * Rate is negotiated near 48000 and printed, so the analysis side knows it. */
+static int record_pcm(int device, int seconds, const char *path)
+{
+    snd_pcm_t *pcm = NULL;
+    snd_pcm_hw_params_t *hw;
+    unsigned int rrate = 48000;
+    snd_pcm_uframes_t period_size = 0;
+    char dev[32];
+    int err, dir = 0;
+
+    snprintf(dev, sizeof(dev), "hw:0,%d", device);
+    fprintf(stdout, "Opening capture PCM %s...\n", dev);
+    if ((err = snd_pcm_open(&pcm, dev, SND_PCM_STREAM_CAPTURE, 0)) < 0) {
+        fprintf(stderr, "snd_pcm_open(%s): %s\n", dev, snd_strerror(err));
+        return 1;
+    }
+    snd_pcm_hw_params_alloca(&hw);
+    snd_pcm_hw_params_any(pcm, hw);
+    if ((err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0 ||
+        (err = snd_pcm_hw_params_set_format(pcm, hw, SND_PCM_FORMAT_S16_LE)) < 0 ||
+        (err = snd_pcm_hw_params_set_channels(pcm, hw, CHANNELS)) < 0 ||
+        (err = snd_pcm_hw_params_set_rate_near(pcm, hw, &rrate, &dir)) < 0) {
+        fprintf(stderr, "capture hw_params setup: %s\n", snd_strerror(err));
+        snd_pcm_close(pcm);
+        return 1;
+    }
+    unsigned int period_time = PERIOD_US;
+    dir = 0;
+    (void)snd_pcm_hw_params_set_period_time_near(pcm, hw, &period_time, &dir);
+    if ((err = snd_pcm_hw_params(pcm, hw)) < 0) {
+        fprintf(stderr, "capture hw_params: %s\n", snd_strerror(err));
+        snd_pcm_close(pcm);
+        return 1;
+    }
+    snd_pcm_hw_params_get_period_size(hw, &period_size, NULL);
+    fprintf(stdout, "capture: rate=%u ch=%u period=%lu frames\n",
+            rrate, CHANNELS, (unsigned long)period_size);
+
+    FILE *fp = fopen(path, "wb");
+    if (!fp) { perror("fopen"); snd_pcm_close(pcm); return 1; }
+    int16_t *buf = (int16_t *)malloc(period_size * CHANNELS * sizeof(int16_t));
+    if (!buf) { fclose(fp); snd_pcm_close(pcm); return 1; }
+
+    long remaining = (long)seconds * rrate;
+    while (remaining > 0) {
+        snd_pcm_sframes_t n = snd_pcm_readi(pcm, buf, period_size);
+        if (n < 0) {
+            fprintf(stderr, "readi: %s\n", snd_strerror((int)n));
+            n = snd_pcm_recover(pcm, (int)n, 0);
+            if (n < 0) break;
+            continue;
+        }
+        fwrite(buf, sizeof(int16_t) * CHANNELS, (size_t)n, fp);
+        remaining -= n;
+    }
+    free(buf);
+    fclose(fp);
+    snd_pcm_close(pcm);
+    fprintf(stdout, "recorded to %s\n", path);
+    return 0;
+}
+
 static int dump_controls(void)
 {
     snd_ctl_t *ctl = NULL;
@@ -284,6 +486,20 @@ int main(int argc, char **argv)
 
     if (argc > 1 && strcmp(argv[1], "--dump") == 0) {
         return dump_controls() == 0 ? 0 : 1;
+    }
+    if (argc > 2 && strcmp(argv[1], "--get") == 0) {
+        return get_control(argv[2]) == 0 ? 0 : 1;
+    }
+    if (argc > 3 && strcmp(argv[1], "--set") == 0) {
+        return set_control(argv[2], atol(argv[3])) == 0 ? 0 : 1;
+    }
+    if (argc > 1 && strcmp(argv[1], "--play") == 0) {
+        int dev = (argc > 2) ? atoi(argv[2]) : 0;
+        int sec = (argc > 3) ? atoi(argv[3]) : TONE_SEC;
+        return play_tone(dev, sec);
+    }
+    if (argc > 4 && strcmp(argv[1], "--rec") == 0) {
+        return record_pcm(atoi(argv[2]), atoi(argv[3]), argv[4]);
     }
 
     fprintf(stdout, "test_audio (phase13B libasound bisection)\n");

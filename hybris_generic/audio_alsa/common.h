@@ -105,4 +105,93 @@
 #define SND_AW_SWITCH_ENABLE            "1"
 #define SND_AW_SWITCH_DISABLE           "0"
 
+/* ================= MT6878 + MT6369 (Volla Phone Plinius, ansuz) =========
+ *
+ * Same card shape (FE PCMs named Playback_N / Capture_N) but the memif
+ * numbering moved a generation: Playback_1 (hw:0,0) is memif DL0 (not DL1)
+ * and Capture_1 (hw:0,13) is memif VUL9. The AFE route kcontrols are named
+ * after the memif, so the FE->ADDA routes are the DL0/UL9 variants below.
+ *
+ * Codec differences (mt6369 PMIC codec, aw87xxx boost amps):
+ *   - The loudspeaker is fed from the codec lineout: DL0 -> ADDA DAC ->
+ *     LOL ("LOL Mux" = Playback) -> two AWINIC aw87xxx analog boost PAs.
+ *   - The aw87xxx amps need no manual kcontrol writes for start/stop: the
+ *     machine driver's Ext_Speaker_Amp DAPM widget
+ *     (mt6878_mt6369_spk_amp_event) loads the "Music" profile into both
+ *     amps at stream start and powers them off at stop, keyed off the same
+ *     "Ext_Speaker_Amp Switch" control the X23/tablet path already toggles.
+ *     (Their ACF firmware loads at boot via firmware_class.path ->
+ *     /android/vendor/firmware, same mechanism as the X23's aw883xx.)
+ *   - "Lineout Volume" / "Headset Volume" / "PGA1/2 Volume" / "HPL/HPR Mux"
+ *     keep their mt6366 names and ranges, so the generic volume plumbing
+ *     carries over untouched.
+ *   - The analog-mic input muxes changed generation: no "Mic Type Mux",
+ *     and "PGA L Mux" became "PGA_L_Mux" (underscores), plus new
+ *     ADC_L/R_Mux, MISO*_MUX and UL_SRC_MUX stages.
+ *
+ * All Plinius-only writes are gated at runtime on the kcontrols existing
+ * (one image serves x23 + ansuz; see SndKcontrolExists below).
+ * Verified live on ansuz 2026-07-27: 440 Hz test tone out of the speaker
+ * picked up at ~40 dB over the noise floor by the onboard mic. */
+
+/* Fingerprint control for the ansuz codec generation (also the amp whose
+ * input LOL feeds). */
+#define SND_ELEM_AW87XXX_PROF_0         "aw87xxx_profile_switch_0"
+
+/* FE -> ADDA playback route (Playback_1 == memif DL0 on mt6878). */
+#define SND_ELEM_ADDA_DL_CH1_DL0_CH1    "ADDA_DL_CH1 DL0_CH1"
+#define SND_ELEM_ADDA_DL_CH2_DL0_CH2    "ADDA_DL_CH2 DL0_CH2"
+
+/* Codec lineout mux — routes the DAC into the LOL buffer that drives the
+ * aw87xxx amps. Items: 0=Open 1=Playback_L_DAC 2=Playback 3=Test Mode. */
+#define SND_ELEM_LOL_MUX                "LOL Mux"
+#define SND_LOL_MUX_PLAYBACK            "Playback"
+
+/* ADDA capture route (Capture_1 == memif VUL9 on mt6878). */
+#define SND_ELEM_UL9_CH1_ADDA_UL_CH1    "UL9_CH1 ADDA_UL_CH1"
+#define SND_ELEM_UL9_CH2_ADDA_UL_CH2    "UL9_CH2 ADDA_UL_CH2"
+
+/* Analog mic front-end. AMIC on AIN0 through the L/R preamplifiers, with
+ * the MISO (MTKAIF) lanes mapped to UL1 CH1/CH2. */
+#define SND_ELEM_UL_SRC_MUX             "UL_SRC_MUX"
+#define SND_UL_SRC_AMIC                 "AMIC"
+#define SND_ELEM_PGA_L_MUX_6878         "PGA_L_Mux"
+#define SND_ELEM_PGA_R_MUX_6878         "PGA_R_Mux"
+#define SND_ELEM_ADC_L_MUX              "ADC_L_Mux"
+#define SND_ADC_L_PREAMP                "Left Preamplifier"
+#define SND_ELEM_ADC_R_MUX              "ADC_R_Mux"
+#define SND_ADC_R_PREAMP                "Right Preamplifier"
+#define SND_ELEM_MISO0_MUX              "MISO0_MUX"
+#define SND_MISO0_UL1_CH1               "UL1_CH1"
+#define SND_ELEM_MISO1_MUX              "MISO1_MUX"
+#define SND_MISO1_UL1_CH2               "UL1_CH2"
+
+/* Probe whether a named mixer kcontrol exists on this card. One image
+ * serves several devices whose codec drivers expose different controls
+ * (x23: aw883xx smart PA; ansuz: aw87xxx + mt6369 muxes), so device-only
+ * write sequences are gated on their kcontrols being present rather than
+ * on any build-time switch. */
+static inline bool SndKcontrolExists(const struct AlsaSoundCard *cardIns, const char *name)
+{
+    snd_ctl_t *ctl = NULL;
+    snd_ctl_elem_id_t *id = NULL;
+    snd_ctl_elem_info_t *info = NULL;
+    bool exists = false;
+
+    if (cardIns == NULL || name == NULL) {
+        return false;
+    }
+    if (snd_ctl_open(&ctl, cardIns->ctrlName, 0) < 0) {
+        return false;
+    }
+    snd_ctl_elem_id_alloca(&id);
+    snd_ctl_elem_info_alloca(&info);
+    snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
+    snd_ctl_elem_id_set_name(id, name);
+    snd_ctl_elem_info_set_id(info, id);
+    exists = (snd_ctl_elem_info(ctl, info) == 0);
+    snd_ctl_close(ctl);
+    return exists;
+}
+
 #endif /* ALSA_SND_COMMON_H */
