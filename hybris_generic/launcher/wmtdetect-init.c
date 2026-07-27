@@ -56,6 +56,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <net/if.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -77,14 +78,96 @@
 // function-on failure, after which the connsys whole-chip-resets
 // (~1-30 s) and the next attempt succeeds.
 //
-// The first few retries are fast because on connac2 the other reason to
-// retry is that the wlan driver has not been probed yet -- we want to
-// win the race against the OHOS WiFi framework, which auto-starts STA
-// about 10 s into boot and gives up after four tries.
-#define WIFI_ON_MAX_RETRY 20
-#define WIFI_ON_FAST_TRIES 8
-#define WIFI_ON_FAST_SEC 2
-#define WIFI_ON_RETRY_SEC 15
+// On connac2 the loop is doing something else as well: waiting for the
+// connsys to become willing.  Measured on the Plinius (the per-attempt
+// trace in WIFI_ON_LOG is what produced these numbers):
+//
+//   t+4.7 s   service starts; /dev/wmtWifi does not exist yet
+//   t+8.7 s   node appears (ueventd), writes now fail EIO
+//   t+13 s    the "1" write finally takes, blocking ~3.5 s inside the
+//             kernel while the connsys powers up and downloads firmware
+//   t+17 s    the OHOS WiFi framework auto-starts STA
+//
+// So arming and the framework's one-shot window land within a second of
+// each other, and which goes first has flipped between boots.  Every
+// wasted millisecond in this loop is therefore a real risk of booting
+// with WiFi off, which is why the retries poll instead of sleeping in
+// whole seconds and why nothing waits on a write that already failed.
+// Cadence is measured, not guessed, and faster is NOT better: a func-on
+// write that fails makes the connsys whole-chip-reset, so hammering it
+// pushes readiness further out.  Across four boots each:
+//
+//   ~1.5 s between attempts -> armed at 16.8 s (attempt 6)
+//   ~0.25 s                 -> armed at 18.6-19.0 s (attempt 32), and
+//                              two of the four boots came up with no IP
+//
+// 1.5 s is the best of what has been measured.  If you retune this,
+// retune it against /data/log/wmtdetect-init.log over several boots --
+// a single boot proves nothing here.
+#define WIFI_ON_MAX_RETRY 30
+#define WIFI_ON_FAST_TRIES 20
+#define WIFI_ON_FAST_MS 1500
+#define WIFI_ON_RETRY_MS 15000
+// How long to give the driver to register/arm after a write.  The
+// function-on runs synchronously inside write(), so a success shows up
+// almost immediately; this is a ceiling, not a delay.
+#define WIFI_ON_SETTLE_MS 1500
+#define WIFI_PROBE_SETTLE_MS 1000
+#define WIFI_POLL_MS 100
+
+// Progress goes to stdout (useful when run by hand), to /dev/kmsg so the
+// timeline interleaves with the driver's own messages, and to
+// WIFI_ON_LOG.  init discards a service's stdout and this runs before
+// hilog is much use, so those two are the only channels that survive a
+// boot -- and kmsg alone is not enough: the wlan driver is verbose
+// enough to wrap the kernel ring buffer inside a minute, which ate the
+// first diagnosis of the boot race.  The file is truncated per run, so
+// it always holds exactly the last bring-up and never grows.
+#define WIFI_ON_LOG "/data/log/wmtdetect-init.log"
+
+static FILE *g_log;
+
+// Seconds since boot, to line the file trace up with dmesg timestamps.
+static double uptime_now(void)
+{
+	double up = 0.0;
+	FILE *f = fopen("/proc/uptime", "re");
+
+	if (f) {
+		if (fscanf(f, "%lf", &up) != 1)
+			up = 0.0;
+		fclose(f);
+	}
+	return up;
+}
+
+__attribute__((format(printf, 1, 2)))
+static void trace(const char *fmt, ...)
+{
+	char buf[256];
+	va_list ap;
+	int n;
+
+	va_start(ap, fmt);
+	n = vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	if (n < 0)
+		return;
+
+	printf("wmtdetect-init: %s\n", buf);
+	fflush(stdout);
+
+	int fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+	if (fd >= 0) {
+		dprintf(fd, "wmtdetect-init: %s\n", buf);
+		close(fd);
+	}
+
+	if (g_log) {
+		fprintf(g_log, "[%10.3f] %s\n", uptime_now(), buf);
+		fflush(g_log);
+	}
+}
 
 static int call(int fd, unsigned long cmd, unsigned long arg, const char *name)
 {
@@ -138,6 +221,16 @@ static int wlan0_present(void)
 // the very call wpa_supplicant fails with -ENODEV in that state, which
 // makes it the exact condition to test.  Any flag we change is undone
 // before returning, so this stays a read-only probe.
+//
+// An interface that is *already* IFF_UP is taken as armed without
+// probing, because setting IFF_UP on an up interface is a no-op that the
+// kernel answers without ever reaching ndo_open -- it would report
+// success on a dead radio.  Up therefore has to be read as proof that
+// ndo_open once succeeded, which it is: nothing in the system powers the
+// connsys down behind an up interface's back (OHOS turning WiFi off does
+// not touch /dev/wmtWifi).  Doing it by hand is the one way to
+// manufacture an up-but-dead wlan0, and mode 2 stays correct there too
+// because it always writes before it believes this.
 static int wlan0_ready(void)
 {
 	struct ifreq ifr;
@@ -189,6 +282,24 @@ static ssize_t wmtwifi_write(const char *cmd)
 	return w;
 }
 
+static void msleep(int ms)
+{
+	usleep((useconds_t)ms * 1000);
+}
+
+// Wait up to `ms` for `cond` to hold, checking every WIFI_POLL_MS.
+// Returns as soon as it does, so a success costs one poll interval
+// rather than the whole budget.
+static int poll_for(int (*cond)(void), int ms)
+{
+	for (int t = 0; t < ms; t += WIFI_POLL_MS) {
+		if (cond())
+			return 1;
+		msleep(WIFI_POLL_MS);
+	}
+	return cond();
+}
+
 // Mode 2 -- power on the connsys WiFi function.
 //
 // Always performs the "1" write, even when wlan0 is already visible: on
@@ -197,14 +308,19 @@ static ssize_t wmtwifi_write(const char *cmd)
 // header.
 static int do_wifi_on(void)
 {
-	if (wlan0_ready()) {
-		printf("wmtdetect-init: wlan0 already armed\n");
-		return 0;
-	}
+	// No early exit on wlan0_ready(): always write at least once.  The
+	// "1" write is harmless when the function is already on (verified
+	// on device against a live association), and going through it means
+	// the readiness check is only ever consulted *after* the thing that
+	// arms the radio has run.
+	g_log = fopen(WIFI_ON_LOG, "we");
+	trace("wifi-on start: wmtWifi=%d wlan0=%d legacy_wmt=%d",
+	      access("/dev/wmtWifi", F_OK) == 0, wlan0_present(),
+	      is_legacy_wmt());
 
 	for (int i = 1; i <= WIFI_ON_MAX_RETRY; i++) {
-		int delay = i <= WIFI_ON_FAST_TRIES ? WIFI_ON_FAST_SEC
-						    : WIFI_ON_RETRY_SEC;
+		int delay = i <= WIFI_ON_FAST_TRIES ? WIFI_ON_FAST_MS
+						    : WIFI_ON_RETRY_MS;
 
 		// connac2 only: register the wlan driver if nothing else has
 		// (normally Android's wlan_assistant, running in the container,
@@ -212,35 +328,38 @@ static int do_wifi_on(void)
 		// gated on absence rather than issued unconditionally.
 		if (!wlan0_present() && !is_legacy_wmt()) {
 			ssize_t p = wmtwifi_write("P");
-			printf("wmtdetect-init: wlan probe write=%zd (try %d)\n",
-			       p, i);
-			sleep(1);
+
+			// Only wait for a result the write might actually
+			// produce.  Waiting after a failed probe burned a
+			// second per iteration -- the difference between
+			// noticing the connsys is ready and missing the
+			// framework's window by it.
+			int seen = p < 0 ? 0
+					 : poll_for(wlan0_present,
+						    WIFI_PROBE_SETTLE_MS);
+			trace("try %d: probe write=%zd (%s) -> wlan0=%d", i, p,
+			      p < 0 ? strerror(errno) : "ok", seen);
 		}
 
 		ssize_t w = wmtwifi_write("1");
 		if (w < 0) {
-			// wmt_chrdev_wifi not ready yet -- wait and retry.
-			printf("wmtdetect-init: /dev/wmtWifi func-on write "
-			       "failed (try %d): %s\n", i, strerror(errno));
-			sleep(delay);
+			// Driver or container not ready yet.  Cheap failure --
+			// go straight back round without paying the settle.
+			trace("try %d: func-on write failed: %s", i,
+			      strerror(errno));
+			msleep(delay);
 			continue;
 		}
 
-		// The connsys func-on / FW download runs synchronously inside
-		// the write(); a short settle lets wlan0 register on success.
-		sleep(3);
-		if (wlan0_ready()) {
-			printf("wmtdetect-init: wifi-on OK on attempt %d\n", i);
+		if (poll_for(wlan0_ready, WIFI_ON_SETTLE_MS)) {
+			trace("wifi-on OK on attempt %d", i);
 			return 0;
 		}
-		printf("wmtdetect-init: wifi-on attempt %d failed "
-		       "(write=%zd) -- connsys resets, retrying in %d s\n",
-		       i, w, delay);
-		sleep(delay);
+		trace("try %d: wrote %zd but wlan0 still not armed", i, w);
+		msleep(delay);
 	}
 
-	printf("wmtdetect-init: wifi-on gave up after %d attempts\n",
-	       WIFI_ON_MAX_RETRY);
+	trace("wifi-on gave up after %d attempts", WIFI_ON_MAX_RETRY);
 	return 1;
 }
 
