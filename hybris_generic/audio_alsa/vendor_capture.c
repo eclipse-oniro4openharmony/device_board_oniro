@@ -27,16 +27,26 @@ typedef struct _CAPTURE_DATA_ {
     long tempVolume;
 } CaptureData;
 
+static void CaptureProgramRoutes(struct AlsaSoundCard *cardIns);
+
 static int32_t CaptureInitImpl(struct AlsaCapture *captureIns)
 {
     int32_t ret;
     struct AlsaMixerCtlElement elem;
     struct AlsaSoundCard *cardIns = (struct AlsaSoundCard *)captureIns;
 
+    CHECK_NULL_PTR_RETURN_DEFAULT(captureIns);
+
+    /* The mic routes must be in place before snd_pcm_hw_params runs on
+     * Capture_1: with no backend DAI enabled the mt6878 AFE rejects
+     * hw_params with EINVAL. Init runs at CAPTURE_OPEN, ahead of
+     * HW_PARAMS in the CreateCapture ioctl sequence; Start re-asserts
+     * the routes in case something rewrote the muxes in between. */
+    CaptureProgramRoutes(cardIns);
+
     if (captureIns->priData != NULL) {
         return HDF_SUCCESS;
     }
-    CHECK_NULL_PTR_RETURN_DEFAULT(captureIns);
 
     CaptureData *priData = (CaptureData *)OsalMemCalloc(sizeof(CaptureData));
     if (priData == NULL) {
@@ -235,20 +245,25 @@ static void CaptureRouteMt6369(struct AlsaSoundCard *cardIns)
     (void)SndElementWrite(cardIns, &elem);
 }
 
-static int32_t CaptureStartImpl(struct AlsaCapture *captureIns, const struct AudioHwCaptureParam *handleData)
+/* The two codec generations share no mic-mux control names, so probe
+ * one fingerprint control from each and program whichever is present. */
+static void CaptureProgramRoutes(struct AlsaSoundCard *cardIns)
 {
-    (void)handleData;
-    struct AlsaSoundCard *cardIns = (struct AlsaSoundCard *)captureIns;
-    CHECK_NULL_PTR_RETURN_DEFAULT(captureIns);
-
-    /* The two codec generations share no mic-mux control names, so probe
-     * one fingerprint control from each and program whichever is present. */
     if (SndKcontrolExists(cardIns, SND_ELEM_MIC_TYPE_MUX)) {
         CaptureRouteMt6366(cardIns);
     }
     if (SndKcontrolExists(cardIns, SND_ELEM_UL_SRC_MUX)) {
         CaptureRouteMt6369(cardIns);
     }
+}
+
+static int32_t CaptureStartImpl(struct AlsaCapture *captureIns, const struct AudioHwCaptureParam *handleData)
+{
+    (void)handleData;
+    struct AlsaSoundCard *cardIns = (struct AlsaSoundCard *)captureIns;
+    CHECK_NULL_PTR_RETURN_DEFAULT(captureIns);
+
+    CaptureProgramRoutes(cardIns);
 
     return HDF_SUCCESS;
 }
