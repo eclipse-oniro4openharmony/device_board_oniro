@@ -25,6 +25,7 @@ group("hybris_generic_group") {
     "cfg:hybris_hdf_env_group",
     "cfg:hybris_composer_gate_group",
     "audio_alsa/test_audio:test_audio_group",
+    "audio_hal/test_audio_hal:test_audio_hal_group",
     "launcher:androidd_group",
   ]
 }

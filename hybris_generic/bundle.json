@@ -15,7 +15,8 @@
           "hilog"
         ],
         "third_party": [
-          "alsa-lib"
+          "alsa-lib",
+          "libhybris"
         ]
       },
       "build": {

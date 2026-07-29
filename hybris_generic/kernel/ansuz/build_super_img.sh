@@ -85,6 +85,10 @@ if [[ -f "$BLOBS/halium_system_a.img" && -f "$BLOBS/halium_vendor_a.img" ]]; the
         declare -A APEX_SRC=(
             [com.android.runtime]="/system/apex/com.android.runtime.apex"
             [com.android.vndk.v34]="/system/system_ext/apex/com.android.vndk.v34.apex"
+            # i18n carries libandroidicu.so, a NEEDED of the MTK audio HAL
+            # (audio.primary.mt6878.so).  Without it hw_get_module fails to
+            # link the module and audio falls back to the direct-ALSA path.
+            [com.android.i18n]="/system/apex/com.android.i18n.apex"
         )
         for name in "${!APEX_SRC[@]}"; do
             debugfs -R "dump ${APEX_SRC[$name]} $APEX_WORK/$name.apex" \
@@ -98,8 +102,8 @@ if [[ -f "$BLOBS/halium_system_a.img" && -f "$BLOBS/halium_vendor_a.img" ]]; the
                 "$APEX_WORK/$name-x/apex_payload.img" 2> >(grep -v 'changing ownership' >&2)
             rmdir "$APEX_WORK/staging/$name/lost+found" 2>/dev/null || true
         done
-        # 59M of payloads today; 96M leaves room for adding i18n/tzdata later.
-        mke2fs -q -t ext4 -d "$APEX_WORK/staging" -L halium_apex "$APEX_IMG.tmp" 96m
+        # ~99M of payloads today (i18n is 40M of it); 192M leaves headroom.
+        mke2fs -q -t ext4 -d "$APEX_WORK/staging" -L halium_apex "$APEX_IMG.tmp" 192m
         mv "$APEX_IMG.tmp" "$APEX_IMG"
     fi
     add_part halium_apex_a "$APEX_IMG"
