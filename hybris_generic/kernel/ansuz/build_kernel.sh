@@ -75,8 +75,13 @@ git -C "$KERNEL_SRC" clean -fdq
 git -C "$KERNEL_TREE" checkout -- deviceinfo
 
 if [ "$MODE" != "--baseline" ]; then
-    echo "Applying ohos-adaptation.patch..."
-    git -C "$KERNEL_SRC" apply --whitespace=nowarn "$HERE/patches/kernel-source/ohos-adaptation.patch"
+    # ohos-adaptation.patch owns drivers/ + include/; hmdfs.patch owns
+    # fs/hmdfs/ and two anchor hunks in fs/Kconfig + fs/Makefile.  The two
+    # never touch the same file, so order does not matter.
+    for p in ohos-adaptation hmdfs; do
+        echo "Applying $p.patch..."
+        git -C "$KERNEL_SRC" apply --whitespace=nowarn "$HERE/patches/kernel-source/$p.patch"
+    done
     cp "$HERE/config/openharmony.config" "$KERNEL_SRC/arch/arm64/configs/openharmony.config"
     sed -i 's/^deviceinfo_kernel_defconfig=.*/deviceinfo_kernel_defconfig="gki_defconfig halium.config openharmony.config"/' \
         "$KERNEL_TREE/deviceinfo"
