@@ -55,6 +55,7 @@
 #include <unistd.h>
 
 #include <linux/android/binderfs.h>
+#include <linux/loop.h>
 
 /*
  * The Halium android-rootfs.img is shaped like a *full* Android root
@@ -118,13 +119,21 @@ static void logmsg(const char *fmt, ...)
         if (ln > 0) (void)!write(fd, line, ln);
         close(fd);
     }
-    int ffd = open("/module_update/androidd.log",
+    /* Keep the file open rather than reopening per line: after the child
+     * MS_MOVEs the Halium root over "/" there is no /module_update path any
+     * more, so a path-based open would silently drop every message the
+     * container-side setup emits — which is exactly the part that is hard to
+     * debug.  The fd is opened once (in the parent, before clone) and stays
+     * valid across the pivot; O_CLOEXEC retires it when we exec init. */
+    static int ffd = -1;
+    if (ffd < 0) {
+        ffd = open("/module_update/androidd.log",
                    O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+    }
     if (ffd >= 0) {
         char line[600];
         int ln = snprintf(line, sizeof line, "%s\n", buf);
         if (ln > 0) (void)!write(ffd, line, ln);
-        close(ffd);
     }
     /* Mirror to stderr too — captured by init in some configurations. */
     dprintf(2, "[androidd] %s\n", buf);
@@ -192,6 +201,388 @@ static void wipe_dir_contents(const char *path)
         }
     }
     closedir(d);
+}
+
+/* -------------------------------------------------------------------------
+ * MTK modem NV partitions  (Plinius / ansuz — Phase R0)
+ * -------------------------------------------------------------------------
+ * The MediaTek baseband will not boot without its non-volatile store.
+ * `ccci_mdinit` — which on MT6878 also plays the old `ccci_fsd`
+ * modem-file-system-server role — serves the modem's drive letters out of
+ * /mnt/vendor/protect_f, /mnt/vendor/protect_s and /mnt/vendor/nvdata.
+ * Stock Android populates those from `fstab.mt6878` via init's mount_all,
+ * which never runs under androidd (we exec init --second-stage).  With the
+ * mounts missing, the modem asserts on its very first protected-NV read
+ * (see /mnt/vendor/nvdata/md/nv_boot_trace):
+ *
+ *     [E][path:X:\MT00_001][ret:4097] CMPTR fail[fs_ret:-9]
+ *     [E]NV_ASSERT:[ID:0xF000][result:0x228B]
+ *
+ * and parks in exception state (`vendor.mtk.md1.status=exception`, kernel
+ * `md_state = 5` forever), so `mtkfusionrild` never registers a single
+ * android.hardware.radio.* service.
+ *
+ * We mount *copies*, not the factory partitions: each is dd'd once into an
+ * image under /data/vendor/halium-nv/ and loop-mounted from there.  The
+ * modem rewrites parts of its NV on every boot (RF calibration, OTA
+ * bookkeeping), and this handset's IMEI + calibration have no second
+ * source — keeping those writes in copies means the factory partitions
+ * stay byte-identical forever.  Ubuntu Touch protects the same partitions
+ * the same way on this device.
+ *
+ * To re-seed from factory: `rm -r /data/vendor/halium-nv` and reboot.
+ * ---------------------------------------------------------------------- */
+
+#define NV_IMAGE_DIR "/data/vendor/halium-nv"
+
+struct nv_part {
+    const char *part;   /* by-name partition to seed the image from      */
+    const char *img;    /* image basename under NV_IMAGE_DIR             */
+    const char *mnt;    /* mount point inside the Halium namespace       */
+};
+
+/* Mirrors the five ext4 entries of /android/vendor/etc/fstab.mt6878.
+ * `frp -> /persistent` is deliberately left out: nothing in the modem path
+ * reads it and it is raw, not a filesystem. */
+static const struct nv_part g_nv_parts[] = {
+    { "protect1", "protect1.img", "/mnt/vendor/protect_f" },
+    { "protect2", "protect2.img", "/mnt/vendor/protect_s" },
+    { "nvdata",   "nvdata.img",   "/mnt/vendor/nvdata"    },
+    { "nvcfg",    "nvcfg.img",    "/mnt/vendor/nvcfg"     },
+    { "persist",  "persist.img",  "/mnt/vendor/persist"   },
+};
+#define NV_PART_COUNT ((int)(sizeof g_nv_parts / sizeof g_nv_parts[0]))
+
+/* Loop device backing each entry — filled in by nv_prepare() in the parent
+ * (OHOS namespace, where /data and /dev/loop-control live) and consumed by
+ * nv_attach() in the child after the pivot, which has to mknod its own node
+ * in the container's private /dev.
+ *
+ * The dev_t is carried rather than the loop index because this kernel runs
+ * with loop.max_part=7: /dev/loopN's minor is N << 3, not N.  Deriving it as
+ * makedev(7, N) yields a node that does not exist and every mount but loop0
+ * fails with ENXIO. */
+static dev_t g_nv_dev[NV_PART_COUNT];
+static int g_nv_loop[NV_PART_COUNT];
+static int g_nv_ready = 0;
+
+/* `ohos.boot.hardware=<name>` off /proc/cmdline — the same value OHOS init
+ * uses to select init.<dev>.cfg / fstab.<dev>.  Read from the cmdline
+ * rather than the parameter store so this works with no param dependency
+ * (androidd links libc only). */
+static int cmdline_hardware(char *out, size_t n)
+{
+    int fd = open("/proc/cmdline", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    char buf[4096];
+    ssize_t r = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (r <= 0) return -1;
+    buf[r] = '\0';
+    static const char key[] = "ohos.boot.hardware=";
+    char *p = strstr(buf, key);
+    if (!p) return -1;
+    p += sizeof key - 1;
+    size_t i = 0;
+    while (p[i] && !isspace((unsigned char)p[i]) && i + 1 < n) {
+        out[i] = p[i];
+        i++;
+    }
+    out[i] = '\0';
+    return 0;
+}
+
+/* Resolve a partition's block device.  OHOS's ueventd does not create the
+ * flat /dev/block/by-name/ tree Android has — the symlinks live two levels
+ * down under /dev/block/platform/ (on ansuz:
+ * platform/soc/112b0000.ufshci/by-name).  Try the flat path first, then
+ * walk the platform tree. */
+static int nv_block_path(const char *part, char *out, size_t n)
+{
+    struct stat st;
+
+    snprintf(out, n, "/dev/block/by-name/%s", part);
+    if (stat(out, &st) == 0) return 0;
+
+    DIR *d1 = opendir("/dev/block/platform");
+    if (!d1) return -1;
+    struct dirent *e1;
+    while ((e1 = readdir(d1)) != NULL) {
+        if (e1->d_name[0] == '.') continue;
+        char bus[PATH_MAX];
+        snprintf(bus, sizeof bus, "/dev/block/platform/%s", e1->d_name);
+        DIR *d2 = opendir(bus);
+        if (!d2) continue;
+        struct dirent *e2;
+        while ((e2 = readdir(d2)) != NULL) {
+            if (e2->d_name[0] == '.') continue;
+            snprintf(out, n, "%s/%s/by-name/%s", bus, e2->d_name, part);
+            if (stat(out, &st) == 0) {
+                closedir(d2);
+                closedir(d1);
+                return 0;
+            }
+        }
+        closedir(d2);
+    }
+    closedir(d1);
+    return -1;
+}
+
+static int nv_copy_image(const char *src, const char *dst)
+{
+    enum { CHUNK = 256 * 1024 };
+    char *buf = malloc(CHUNK);
+    if (!buf) return -1;
+
+    int rc = -1;
+    int in = open(src, O_RDONLY | O_CLOEXEC);
+    if (in < 0) goto out_free;
+    int of = open(dst, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (of < 0) goto out_in;
+
+    for (;;) {
+        ssize_t r = read(in, buf, CHUNK);
+        if (r == 0) break;
+        if (r < 0) goto out_of;
+        for (ssize_t off = 0; off < r; ) {
+            ssize_t w = write(of, buf + off, (size_t)(r - off));
+            if (w <= 0) goto out_of;
+            off += w;
+        }
+    }
+    rc = fsync(of);
+
+out_of:
+    close(of);
+out_in:
+    close(in);
+out_free:
+    free(buf);
+    return rc;
+}
+
+/* ext4 superblock magic (0xEF53 LE) lives at byte 0x438. */
+static int nv_has_ext4(const char *path)
+{
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    unsigned char m[2] = { 0, 0 };
+    int ok = (pread(fd, m, sizeof m, 0x438) == (ssize_t)sizeof m &&
+              m[0] == 0x53 && m[1] == 0xef);
+    close(fd);
+    return ok;
+}
+
+/* All five fstab entries are `formattable`; stock init mkfs's them when the
+ * mount fails.  On this handset `nvdata` ships all-zero, so that path is
+ * live from the first boot. */
+static int nv_mkfs(const char *img, const char *label)
+{
+    pid_t p = fork();
+    if (p < 0) return -1;
+    if (p == 0) {
+        int null = open("/dev/null", O_RDWR | O_CLOEXEC);
+        if (null >= 0) { dup2(null, 0); dup2(null, 1); dup2(null, 2); }
+        execl("/system/bin/mke2fs", "mke2fs", "-t", "ext4", "-m", "0",
+              "-L", label, img, (char *)NULL);
+        _exit(127);
+    }
+    int st = 0;
+    if (waitpid(p, &st, 0) < 0) return -1;
+    return (WIFEXITED(st) && WEXITSTATUS(st) == 0) ? 0 : -1;
+}
+
+/* "<major>:<minor>" out of /sys/block/loopN/dev — the only trustworthy
+ * source for a loop device's numbers (see g_nv_dev on max_part). */
+static int nv_loop_devno(int index, dev_t *out)
+{
+    char attr[PATH_MAX], val[64];
+    snprintf(attr, sizeof attr, "/sys/block/loop%d/dev", index);
+    int fd = open(attr, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    ssize_t r = read(fd, val, sizeof val - 1);
+    close(fd);
+    if (r <= 0) return -1;
+    val[r] = '\0';
+    unsigned maj = 0, min = 0;
+    if (sscanf(val, "%u:%u", &maj, &min) != 2) return -1;
+    *out = makedev(maj, min);
+    return 0;
+}
+
+/* Attach `img` to a loop device; returns its index and fills *devno.  An
+ * existing attachment is reused: loop devices are global, so on an androidd
+ * restart the previous container's are still bound even though its mount
+ * namespace (and therefore its mounts) died with it. */
+static int nv_loop_attach(const char *img, dev_t *devno)
+{
+    DIR *d = opendir("/sys/block");
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d)) != NULL) {
+            if (strncmp(e->d_name, "loop", 4) != 0) continue;
+            char attr[PATH_MAX], val[PATH_MAX];
+            snprintf(attr, sizeof attr, "/sys/block/%s/loop/backing_file",
+                     e->d_name);
+            int fd = open(attr, O_RDONLY | O_CLOEXEC);
+            if (fd < 0) continue;
+            ssize_t r = read(fd, val, sizeof val - 1);
+            close(fd);
+            if (r <= 0) continue;
+            val[r] = '\0';
+            char *nl = strchr(val, '\n');
+            if (nl) *nl = '\0';
+            if (strcmp(val, img) == 0) {
+                int index = atoi(e->d_name + 4);
+                closedir(d);
+                return nv_loop_devno(index, devno) == 0 ? index : -1;
+            }
+        }
+        closedir(d);
+    }
+
+    int ctl = open("/dev/loop-control", O_RDWR | O_CLOEXEC);
+    if (ctl < 0) return -1;
+    int index = ioctl(ctl, LOOP_CTL_GET_FREE);
+    close(ctl);
+    if (index < 0) return -1;
+    if (nv_loop_devno(index, devno) < 0) return -1;
+
+    /* LOOP_CTL_GET_FREE may have just created the device; its /dev node
+     * arrives asynchronously via ueventd, so fall back to our own. */
+    char devp[64];
+    snprintf(devp, sizeof devp, "/dev/loop%d", index);
+    int dfd = open(devp, O_RDWR | O_CLOEXEC);
+    if (dfd < 0) {
+        if (mknod_min(devp, S_IFBLK | 0600, *devno) < 0) return -1;
+        dfd = open(devp, O_RDWR | O_CLOEXEC);
+        if (dfd < 0) return -1;
+    }
+
+    int ffd = open(img, O_RDWR | O_CLOEXEC);
+    if (ffd < 0) { close(dfd); return -1; }
+    int rc = ioctl(dfd, LOOP_SET_FD, ffd);
+    if (rc == 0) {
+        struct loop_info64 li;
+        memset(&li, 0, sizeof li);
+        snprintf((char *)li.lo_file_name, sizeof li.lo_file_name, "%s", img);
+        (void)ioctl(dfd, LOOP_SET_STATUS64, &li);
+    }
+    close(ffd);
+    close(dfd);
+    return rc == 0 ? index : -1;
+}
+
+/* Parent side, before clone(2): seed the images if needed and bind them to
+ * loop devices.  Everything here needs the OHOS namespace (/data,
+ * /dev/loop-control, /system/bin/mke2fs), which the child loses at the
+ * pivot — the child only mknods and mounts. */
+static void nv_prepare(void)
+{
+    for (int i = 0; i < NV_PART_COUNT; i++) {
+        g_nv_loop[i] = -1;
+        g_nv_dev[i] = 0;
+    }
+
+    char hw[64] = "";
+    if (cmdline_hardware(hw, sizeof hw) < 0 || strcmp(hw, "ansuz") != 0) {
+        logmsg("nv: hardware '%s' has no modem NV mount table — skipped",
+               hw[0] ? hw : "?");
+        return;
+    }
+
+    if (mkdir_p(NV_IMAGE_DIR, 0700) < 0) {
+        logmsg("nv: mkdir %s: %s — modem will stay in exception",
+               NV_IMAGE_DIR, strerror(errno));
+        return;
+    }
+
+    for (int i = 0; i < NV_PART_COUNT; i++) {
+        const struct nv_part *np = &g_nv_parts[i];
+        char img[PATH_MAX];
+        snprintf(img, sizeof img, "%s/%s", NV_IMAGE_DIR, np->img);
+
+        struct stat st;
+        if (stat(img, &st) < 0 || st.st_size == 0) {
+            char blk[PATH_MAX];
+            if (nv_block_path(np->part, blk, sizeof blk) < 0) {
+                logmsg("nv: %s: no block device found — skipped", np->part);
+                continue;
+            }
+            if (nv_copy_image(blk, img) < 0) {
+                logmsg("nv: %s: copy %s -> %s: %s",
+                       np->part, blk, img, strerror(errno));
+                unlink(img);
+                continue;
+            }
+            logmsg("nv: seeded %s from %s", img, blk);
+        }
+
+        if (!nv_has_ext4(img)) {
+            if (nv_mkfs(img, np->part) < 0) {
+                logmsg("nv: %s: mke2fs failed — skipped", np->part);
+                continue;
+            }
+            logmsg("nv: formatted %s (no ext4 superblock — blank partition)",
+                   img);
+        }
+
+        dev_t devno = 0;
+        int index = nv_loop_attach(img, &devno);
+        if (index < 0) {
+            logmsg("nv: %s: loop attach failed: %s", np->part, strerror(errno));
+            continue;
+        }
+        g_nv_loop[i] = index;
+        g_nv_dev[i] = devno;
+        logmsg("nv: %s -> loop%d (%u:%u) -> %s", np->img, index,
+               major(devno), minor(devno), np->mnt);
+    }
+
+    g_nv_ready = 1;
+}
+
+/* Child side, after the pivot and after the tmpfs /mnt is in place (the
+ * Halium rootfs ships /mnt read-only, so the mount points cannot exist
+ * before that).  Must run before /system/bin/init is exec'd: the vendor rc
+ * files chown/chmod these paths on post-fs-data and ccci_mdinit reads them
+ * moments later. */
+static void nv_attach(void)
+{
+    if (!g_nv_ready) return;
+
+    if (mkdir("/mnt/vendor", 0755) < 0 && errno != EEXIST) {
+        logmsg("nv: mkdir /mnt/vendor: %s", strerror(errno));
+        return;
+    }
+    if (mkdir_p("/dev/block", 0755) < 0) {
+        logmsg("nv: mkdir /dev/block: %s", strerror(errno));
+        return;
+    }
+
+    for (int i = 0; i < NV_PART_COUNT; i++) {
+        const struct nv_part *np = &g_nv_parts[i];
+        if (g_nv_loop[i] < 0) continue;
+
+        char dev[64];
+        snprintf(dev, sizeof dev, "/dev/block/loop%d", g_nv_loop[i]);
+        if (mknod_min(dev, S_IFBLK | 0600, g_nv_dev[i]) < 0) {
+            logmsg("nv: mknod %s: %s", dev, strerror(errno));
+            continue;
+        }
+        if (mkdir_p(np->mnt, 0771) < 0) {
+            logmsg("nv: mkdir %s: %s", np->mnt, strerror(errno));
+            continue;
+        }
+        /* Options verbatim from fstab.mt6878. */
+        if (mount(dev, np->mnt, "ext4", MS_NOATIME | MS_NOSUID | MS_NODEV,
+                  "noauto_da_alloc,commit=1,nodelalloc") < 0) {
+            logmsg("nv: mount %s on %s: %s", dev, np->mnt, strerror(errno));
+            continue;
+        }
+        logmsg("nv: mounted %s (%s)", np->mnt, dev);
+    }
 }
 
 /* Track which apex modules we successfully bound, so apex_info_list_write()
@@ -752,6 +1143,10 @@ static int child_main(void *arg)
         mkdir("/mnt/androidwritable", 0755);
     }
 
+    /* Modem NV — must land on the tmpfs /mnt above, and before init runs
+     * its post-fs-data triggers.  See nv_prepare()/nv_attach(). */
+    nv_attach();
+
     /* ---------------------------------------------------------------------
      * /linkerconfig — tmpfs only; let init's own init.rc do the actual
      * `linkerconfig` invocation.  We tried running it pre-emptively
@@ -1021,6 +1416,10 @@ int main(int argc, char **argv)
      * to add our `android-binder`. */
     if (create_binderfs_device("android-binder") < 0)
         die("provisioning android-binder failed");
+
+    /* Seed + loop-attach the MTK modem NV images while we still have the
+     * OHOS namespace.  The child mounts them post-pivot (nv_attach()). */
+    nv_prepare();
 
     void *stack = mmap(NULL, CHILD_STACK_SIZE,
                        PROT_READ | PROT_WRITE,
