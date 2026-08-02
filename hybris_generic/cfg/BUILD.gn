@@ -13,30 +13,14 @@
 
 import("//build/ohos.gni")
 
-# Install the hybris-specific render_service env var override into
-# /system/etc/init/. The init system loads all .cfg files from this directory
-# on normal boot (via ParseCfgByPriority("etc/init")). This file redefines
-# render_service with the same fields as foundation/graphic/graphic_2d/graphic.cfg
-# plus the libhybris env vars needed to load the Mali GPU via the Android HAL:
-#
-#   LIBEGL / LIBGLESV2: point libhybris at the vendor Mali EGL/GLES impl
-#   HYBRIS_LD_LIBRARY_PATH: Android bionic linker search path (for libhybris)
-#   LD_LIBRARY_PATH: OHOS musl linker search path (for libhybris platform plugins)
-#
-# On MUSL builds, init merges duplicate service definitions rather than
-# ignoring the second one (see init_service_manager.c), so this file
-# is safe even if loaded before graphic.cfg.
-ohos_prebuilt_etc("hybris_graphic_env") {
-  source = "hybris_graphic_env.cfg"
-  relative_install_dir = "init"
-  install_images = [ "system" ]
-  part_name = "device_hybris_generic"
-  subsystem_name = "device_hybris_generic"
-}
-
-group("hybris_graphic_env_group") {
-  deps = [ ":hybris_graphic_env" ]
-}
+# NOTE: the former hybris_graphic_env.cfg / z_hybris_hdf_env.cfg overlays
+# (per-service LIBEGL/LIBGLESV2/HYBRIS_LD_LIBRARY_PATH/LD_LIBRARY_PATH/
+# HYBRIS_EGLPLATFORM env vars) are gone: libhybris now compiles in
+# equivalent defaults (third_party/libhybris/libhybris_args.gni), and the
+# linker/EGL-platform plugins were always loaded by absolute path.  A
+# device that needs different values can still override per-service via
+# env in its init.<device>.cfg — the env vars keep priority over the
+# compiled-in defaults.
 
 ohos_prebuilt_etc("hybris_input_caps") {
   source = "z_multimodalinput_caps.cfg"
@@ -72,18 +56,6 @@ ohos_prebuilt_etc("hybris_device_node_perms") {
 
 group("hybris_device_node_perms_group") {
   deps = [ ":hybris_device_node_perms" ]
-}
-
-ohos_prebuilt_etc("hybris_hdf_env") {
-  source = "z_hybris_hdf_env.cfg"
-  relative_install_dir = "init"
-  install_images = [ "system" ]
-  part_name = "device_hybris_generic"
-  subsystem_name = "device_hybris_generic"
-}
-
-group("hybris_hdf_env_group") {
-  deps = [ ":hybris_hdf_env" ]
 }
 
 # Phase N8 — composer-ready gate.  Overlays composer_host/allocator_host
