@@ -1,0 +1,5784 @@
+diff --git a/fs/Kconfig b/fs/Kconfig
+index 002bad929..5464bfced 100644
+--- a/fs/Kconfig
++++ b/fs/Kconfig
+@@ -118,6 +118,8 @@ config FILE_LOCKING
+ 
+ source "fs/crypto/Kconfig"
+ 
++source "fs/dec/Kconfig"
++
+ source "fs/verity/Kconfig"
+ 
+ source "fs/notify/Kconfig"
+@@ -127,6 +129,7 @@ source "fs/quota/Kconfig"
+ source "fs/autofs/Kconfig"
+ source "fs/fuse/Kconfig"
+ source "fs/hmdfs/Kconfig"
++source "fs/sharefs/Kconfig"
+ source "fs/overlayfs/Kconfig"
+ source "fs/incfs/Kconfig"
+ 
+@@ -383,6 +386,7 @@ endif # NETWORK_FILESYSTEMS
+ source "fs/nls/Kconfig"
+ source "fs/dlm/Kconfig"
+ source "fs/unicode/Kconfig"
++source "fs/epfs/Kconfig"
+ 
+ config IO_WQ
+ 	bool
+diff --git a/fs/Makefile b/fs/Makefile
+index f44dfd88f..596597dc1 100644
+--- a/fs/Makefile
++++ b/fs/Makefile
+@@ -35,6 +35,7 @@ obj-$(CONFIG_USERFAULTFD)	+= userfaultfd.o
+ obj-$(CONFIG_AIO)               += aio.o
+ obj-$(CONFIG_FS_DAX)		+= dax.o
+ obj-$(CONFIG_FS_ENCRYPTION)	+= crypto/
++obj-$(CONFIG_SECURITY_DEC)	+= dec/
+ obj-$(CONFIG_FS_VERITY)		+= verity/
+ obj-$(CONFIG_FILE_LOCKING)      += locks.o
+ obj-$(CONFIG_BINFMT_MISC)	+= binfmt_misc.o
+@@ -110,6 +111,7 @@ obj-$(CONFIG_AUTOFS_FS)		+= autofs/
+ obj-$(CONFIG_ADFS_FS)		+= adfs/
+ obj-$(CONFIG_FUSE_FS)		+= fuse/
+ obj-$(CONFIG_HMDFS_FS)		+= hmdfs/
++obj-$(CONFIG_SHARE_FS)		+= sharefs/
+ obj-$(CONFIG_OVERLAY_FS)	+= overlayfs/
+ obj-$(CONFIG_ORANGEFS_FS)       += orangefs/
+ obj-$(CONFIG_INCREMENTAL_FS)	+= incfs/
+@@ -136,3 +138,4 @@ obj-$(CONFIG_EFIVAR_FS)		+= efivarfs/
+ obj-$(CONFIG_EROFS_FS)		+= erofs/
+ obj-$(CONFIG_VBOXSF_FS)		+= vboxsf/
+ obj-$(CONFIG_ZONEFS_FS)		+= zonefs/
++obj-$(CONFIG_EPFS)		+= epfs/
+diff --git a/fs/dec/Kconfig b/fs/dec/Kconfig
+new file mode 100644
+index 000000000..db000221d
+--- /dev/null
++++ b/fs/dec/Kconfig
+@@ -0,0 +1,24 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Copyright (c) 2024 Huawei Device Co., Ltd.
++#
++config SECURITY_DEC
++	bool "Data enhance control features"
++
++	depends on SECURITY_PATH
++	default y
++	help
++	  This option enables file operation permission verification
++	  at VFS layer.
++
++	  If unsure, say N.
++
++config SECURITY_DEC_DEVELOP
++	bool "Enable Data enhance control develop mode"
++
++	depends on SECURITY_DEC
++	default y
++	help
++	  This option controls the operating mode of Data Enhance Control:
++	  - If enabled (Y): DEC runs in DEVELOP mode.
++	  - If disabled (N): DEC runs in PRODUCT mode, which enforces strict
++			permission checks and log desensitization
+\ No newline at end of file
+diff --git a/fs/dec/Makefile b/fs/dec/Makefile
+new file mode 100644
+index 000000000..296a21f6f
+--- /dev/null
++++ b/fs/dec/Makefile
+@@ -0,0 +1,15 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Copyright (c) 2024 Huawei Device Co., Ltd.
++#
++# (The upstream OHOS Makefile also generated selinux flask.h /
++# av_permissions.h here; no dec source includes them and the rule races
++# scripts/selinux/genheaders on parallel builds — dropped.)
++obj-$(CONFIG_SECURITY_DEC)	+= \
++	dec_constraint_tree.o dec_kernel_interface.o dec_misc.o dec_path_tree.o dec_security_hook.o dec_utils.o sysctl.o
++
++ccflags-$(CONFIG_SECURITY_DEC) += \
++	-I$(srctree)/fs/dec
++
++# OHOS reference builds are not -Werror; these byte-identical sources
++# carry benign warnings that CONFIG_WERROR would otherwise promote.
++ccflags-remove-y += -Werror
+diff --git a/fs/dec/dec_common.h b/fs/dec/dec_common.h
+new file mode 100644
+index 000000000..c36956fdc
+--- /dev/null
++++ b/fs/dec/dec_common.h
+@@ -0,0 +1,100 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#ifndef _DEC_COMMON_H
++#define _DEC_COMMON_H
++
++#include <linux/types.h>
++#include <linux/rbtree.h>
++#include <linux/spinlock.h>
++#include <linux/list.h>
++
++/* Dec operation modes */
++#define DEC_NONE          0
++#define DEC_READ          (1 << 0)
++#define DEC_WRITE         (1 << 1)
++#define DEC_PREFIX        (1 << 9)
++
++#define DEC_TOKENID_MASK 0x00000000FFFFFFFF
++
++/**
++ * struct permission - Permission entry for a token
++ * @tokenid: Unique token identifier
++ * @mode: Access mode (allowed DEC_READ/DEC_WRITE)
++ * @userid: User identifier associated with this permission
++ * @persist_flag: Whether this permission should be persisted
++ * @timestamp: Time when permission was created/updated
++ * @rb_node: Red-black tree node for insertion into rb_root
++ */
++struct permission {
++    uint64_t tokenid;
++    uint32_t mode;
++    int userid;
++    bool persist_flag;
++    uint64_t timestamp;
++    struct rb_node rb_node;
++};
++
++/**
++ * struct trie_node - Trie node for path-based permission storage
++ * @component: Path component (directory/file name)
++ * @permissions: RB root containing permission entries for this path
++ * @children: RB root containing child trie nodes
++ * @has_permissions: Flag indicating if this node has active permissions
++ * @rb_node: RB node for sorting children
++ */
++struct trie_node {
++    char *component;
++    struct rb_root permissions;
++    struct rb_root children;
++    bool has_permissions;
++    struct rb_node rb_node;
++};
++
++/**
++ * struct trie_stack_item - Stack item for trie traversal
++ * @node: Current trie node being processed
++ * @parent: Parent node of the current node
++ * @child_key: Child component name being looked up
++ * @visited_children: Flag indicating if children have been processed
++ * @list: List head for linking stack items
++ */
++struct trie_stack_item {
++    struct trie_node *node;
++    struct trie_node *parent;
++    char *child_key;
++    bool visited_children;
++    struct list_head list;
++};
++
++/**
++ * struct path_component - Linked list node for path component decomposition
++ * @list: List head for linking components
++ * @name: Name of the path component
++ */
++struct path_component {
++    struct list_head list;
++    char name[0];
++};
++
++/**
++ * struct path_tree_params - Parameters for path tree operations
++ * @path: Target path for permission operation
++ * @tokenid: Token ID to apply permissions
++ * @mode: Access mode
++ * @userid: User ID for the permission
++ * @persist_flag: Persistence flag for the permission
++ * @timestamp: Timestamp for the permission
++ */
++struct path_tree_params {
++    const char *path;
++    uint64_t tokenid;
++    uint32_t mode;
++    int userid;
++    bool persist_flag;
++    uint64_t timestamp;  
++};
++
++#endif /* _DEC_COMMON_H */
+\ No newline at end of file
+diff --git a/fs/dec/dec_constraint_tree.c b/fs/dec/dec_constraint_tree.c
+new file mode 100644
+index 000000000..4a31bfc15
+--- /dev/null
++++ b/fs/dec/dec_constraint_tree.c
+@@ -0,0 +1,119 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#include <linux/init.h>
++#include <linux/errno.h>
++#include <linux/rwsem.h>
++#include <linux/slab.h>
++
++#include "dec_constraint_tree.h"
++#include "dec_common.h"
++#include "dec_log.h"
++#include "dec_utils.h"
++
++static struct trie_node *constraint_tree = NULL;
++static struct rw_semaphore *dec_constraint_rwsem = NULL;
++
++static int __init dec_constraint_tree_init(void)
++{
++    dec_constraint_rwsem = kmalloc(sizeof(struct rw_semaphore), GFP_KERNEL);
++    if (!dec_constraint_rwsem) {
++        dec_loge("Failed to allocate rwsem for constraint tree");
++        return -ENOMEM;
++    }
++    init_rwsem(dec_constraint_rwsem);
++
++    constraint_tree = trie_node_create("/");
++    if (!constraint_tree) {
++        kfree(dec_constraint_rwsem);
++        dec_constraint_rwsem = NULL;
++        dec_loge("Failed to create root node for constraint tree");
++        return -ENOMEM;
++    }
++    dec_logd("Constraint tree initialized successfully");
++    return 0;
++}
++
++bool dec_constraint_query(const char *path)
++{
++    struct list_head comp_list;
++    struct trie_node *node = constraint_tree;
++    struct path_component *comp = NULL;
++    bool found = false;
++
++    INIT_LIST_HEAD(&comp_list);
++
++    if (split_path_to_component_list(path, &comp_list) < 0) {
++        free_component_list(&comp_list);
++        return found;
++    }
++
++    down_read(dec_constraint_rwsem);
++    /* Check root node first */
++    if (node->has_permissions) {
++        found = true;
++        goto cleanup;
++    }
++    /* Traverse path components to check child nodes */
++    list_for_each_entry(comp, &comp_list, list) {
++        node = find_child(node, comp->name);
++        if (node == NULL) {
++            goto cleanup;
++        }
++
++        if (node->has_permissions) {
++            found = true;
++            goto cleanup;
++        }
++    }
++cleanup:
++    up_read(dec_constraint_rwsem);
++    free_component_list(&comp_list);
++    return found;
++}
++
++int dec_constraint_add(char *path)
++{
++    if (is_path_valid(path) != 0) {
++        dec_loge("Invalid path for constraint add: %s", path);
++        return -EINVAL;
++    }
++    int ret = 0;
++    struct trie_node *node = constraint_tree;
++    struct list_head comp_list;
++    INIT_LIST_HEAD(&comp_list);
++
++    ret = split_path_to_component_list(path, &comp_list);
++    if (ret < 0) {
++        dec_loge("Failed to split path components for add: %s (err=%d)", path, ret);
++        free_component_list(&comp_list);
++        return ret;
++    }
++
++    down_write(dec_constraint_rwsem);
++    struct path_component *comp;
++    list_for_each_entry(comp, &comp_list, list) {
++        struct trie_node *child = find_child(node, comp->name);
++        if (child == NULL) {
++            child = insert_child(node, comp->name);
++            if (child == NULL) {
++                dec_loge("Failed to allocate child node for %s", comp->name);
++                ret = -ENOMEM;
++                goto cleanup;
++            }
++        }
++        node = child;
++    }
++
++    node->has_permissions = true;
++    dec_logi("Constraint added for path: %s", path);
++cleanup:
++    up_write(dec_constraint_rwsem);
++    free_component_list(&comp_list);
++    return ret;
++}
++
++/* Register initialization function for filesystem init phase */
++fs_initcall(dec_constraint_tree_init);
+\ No newline at end of file
+diff --git a/fs/dec/dec_constraint_tree.h b/fs/dec/dec_constraint_tree.h
+new file mode 100644
+index 000000000..55aa4fdee
+--- /dev/null
++++ b/fs/dec/dec_constraint_tree.h
+@@ -0,0 +1,13 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#ifndef _DEC_CONSTRAINT_H
++#define _DEC_CONSTRAINT_H
++
++#include <linux/types.h>
++
++bool dec_constraint_query(const char *path);
++int dec_constraint_add(char *path);
++#endif /* _DEC_CONSTRAINT_H */
+diff --git a/fs/dec/dec_kernel_interface.c b/fs/dec/dec_kernel_interface.c
+new file mode 100644
+index 000000000..3a402c2e3
+--- /dev/null
++++ b/fs/dec/dec_kernel_interface.c
+@@ -0,0 +1,103 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#include <linux/sched.h>
++#include <linux/string.h>
++
++#include "dec_kernel_interface.h"
++#include "dec_constraint_tree.h"
++#include "dec_path_tree.h"
++#include "dec_common.h"
++#include "dec_utils.h"
++#include "dec_log.h"
++#include "sysctl.h"
++
++/* DEC enforcement modes */
++#define DEC_MODE_ENFORCED 1    /* Enforce rules (deny access on violation) */
++#define DEC_MODE_PERMISSIVE 0  /* Log violations but allow access */
++
++/* Global DEC enforcement mode (0=permissive, 1=enforced) */
++extern int dec_mode;
++
++static int32_t dec_get_pid(void)
++{
++    struct task_struct *curr = current;
++    return curr->pid;
++}
++
++static char *dec_get_pname(void)
++{
++    struct task_struct *curr = current;
++    return curr->comm;
++}
++
++static char *mode_to_string(uint32_t mode)
++{
++    static char mode_str[32];
++    mode_str[0] = '\0';
++
++    if (mode == DEC_READ) {
++        strcat(mode_str, "r");
++    } else if (mode == DEC_WRITE) {
++        strcat(mode_str, "w");
++    } else if (mode == (DEC_READ | DEC_WRITE)) {
++        strcat(mode_str, "rw");
++    }
++
++    return mode_str;
++}
++
++static bool dec_mode_is_enforced(void)
++{
++    return dec_mode == DEC_MODE_ENFORCED;
++}
++
++int dec_rule_query(struct path_tree_params *params)
++{
++    uint64_t tokenid;
++    const char *path;
++    uint32_t mode;
++    bool is_persist;
++    int ret = 0;
++
++    if (!params || !params->path) {
++        dec_loge("DEC: Invalid parameters for rule query (params=%p, path=%p)",
++                 params, params ? params->path : NULL);
++        return -EINVAL;
++    }
++
++    tokenid = params->tokenid & DEC_TOKENID_MASK;
++    path = params->path;
++    mode = params->mode;
++    is_persist = params->persist_flag;
++
++    if (is_path_valid(path) != 0) {
++        dec_loge("DEC: Invalid path for rule query: %s", path);
++        return -EINVAL;
++    }
++
++    /* Bypass check if path is not in constraint tree (not regulated) */
++    if (!dec_constraint_query(path)) {
++        return ret;
++    }
++
++    /* Perform actual permission check against path tree */
++    if (!dec_path_tree_query(tokenid, path, mode, is_persist)) {
++        ret = -EPERM;
++    }
++
++    if (ret) {
++        dec_logw("dec denied for pid=%d pname=\"%s\" policy_path=%s policy_mode=%s permissive=%d", 
++            dec_get_pid(), dec_get_pname(), path, mode_to_string(mode), !dec_mode_is_enforced());
++    }
++
++    /* In permissive mode, allow access even if permission check failed */
++#ifdef CONFIG_SECURITY_DEC_DEVELOP
++    if (!dec_mode_is_enforced()) {
++        return 0;
++    }
++#endif
++    return ret;
++}
+\ No newline at end of file
+diff --git a/fs/dec/dec_kernel_interface.h b/fs/dec/dec_kernel_interface.h
+new file mode 100644
+index 000000000..8f7788323
+--- /dev/null
++++ b/fs/dec/dec_kernel_interface.h
+@@ -0,0 +1,15 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#ifndef _DEC_KERNEL_INTERFACE_H
++#define _DEC_KERNEL_INTERFACE_H
++
++#include <linux/types.h>
++#include <linux/errno.h>
++
++#include "dec_common.h"
++
++int dec_rule_query(struct path_tree_params *params);
++#endif /* _DEC_KERNEL_INTERFACE_H */
+\ No newline at end of file
+diff --git a/fs/dec/dec_log.h b/fs/dec/dec_log.h
+new file mode 100644
+index 000000000..1fb47a14c
+--- /dev/null
++++ b/fs/dec/dec_log.h
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#ifndef _DEC_LOG_H
++#define _DEC_LOG_H
++
++#include <linux/printk.h>
++
++#define DEC_LOG_PREFIX "DEC: "
++
++#define dec_logd(fmt, ...) pr_debug(DEC_LOG_PREFIX fmt, ##__VA_ARGS__)
++#define dec_logi(fmt, ...) pr_info(DEC_LOG_PREFIX fmt, ##__VA_ARGS__)
++#define dec_logw(fmt, ...) pr_warn(DEC_LOG_PREFIX fmt, ##__VA_ARGS__)
++#define dec_loge(fmt, ...) pr_err(DEC_LOG_PREFIX fmt, ##__VA_ARGS__)
++#define dec_logf(fmt, ...) pr_crit(DEC_LOG_PREFIX fmt, ##__VA_ARGS__)
++
++#endif /* _DEC_LOG_H */
+\ No newline at end of file
+diff --git a/fs/dec/dec_misc.c b/fs/dec/dec_misc.c
+new file mode 100644
+index 000000000..32d7f4cd1
+--- /dev/null
++++ b/fs/dec/dec_misc.c
+@@ -0,0 +1,539 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2024 Huawei Device Co., Ltd.
++ */
++
++#include <linux/errno.h>
++#include <linux/types.h>
++#include <linux/uaccess.h>
++#include <linux/miscdevice.h>
++#include <linux/module.h>
++#include <linux/fs.h>
++#include <linux/init.h>
++#include <linux/compat.h>
++#include <linux/slab.h>
++#include <linux/limits.h>
++#include <linux/string.h>
++
++#include "dec_misc.h"
++#include "dec_security_hook.h"
++#include "sysctl.h"
++#include "dec_common.h"
++#include "dec_log.h"
++#include "dec_utils.h"
++#include "dec_path_tree.h"
++#include "dec_constraint_tree.h"
++
++static const char *cmd_to_string(unsigned int cmd)
++{
++    switch (cmd) {
++        case SET_DEC_RULE_CMD:
++        case SET_DEC_RULE_CMD_32:
++            return "SET_DEC_RULE";
++        case DEL_DEC_RULE_CMD:
++        case DEL_DEC_RULE_CMD_32:
++            return "DEL_DEC_RULE";
++        case QUERY_DEC_RULE_CMD:
++        case QUERY_DEC_RULE_CMD_32:
++            return "QUERY_DEC_RULE";
++        case CHECK_DEC_RULE_CMD:
++        case CHECK_DEC_RULE_CMD_32:
++            return "CHECK_DEC_RULE";
++        case DESTROY_DEC_RULE_CMD:
++        case DESTROY_DEC_RULE_CMD_32:
++            return "DESTROY_DEC_RULE";
++        case CONSTRAINT_DEC_RULE_CMD:
++        case CONSTRAINT_DEC_RULE_CMD_32:
++            return "CONSTRAINT_DEC_RULE";
++        case DEL_DEC_RULE_BY_USER_CMD:
++        case DEL_DEC_RULE_BY_USER_CMD_32:
++            return "DEL_DEC_RULE_BY_USER";
++        case SET_DEC_PREFIX_CMD:
++        case SET_DEC_PREFIX_CMD_32:
++            return "SET_DEC_PREFIX";
++        default:
++            return "UNKNOWN_CMD";
++    }
++}
++
++static char *copy_user_path(uintptr_t user_path_ptr, uint32_t path_len)
++{
++    if (path_len == 0 || path_len > PATH_MAX) {
++        dec_logw("Invalid path length %u (max %d)", path_len, PATH_MAX);
++        return NULL;
++    }
++
++    char *kernel_path = kmalloc(path_len + 1, GFP_KERNEL);
++    if (kernel_path == NULL) {
++        dec_loge("Failed to allocate memory for path (size %u)", path_len + 1);
++        return NULL;
++    }
++    if (copy_from_user(kernel_path, (const char __user *)user_path_ptr, path_len) != 0) {
++        dec_loge("Failed to copy path from user space (ptr=0x%lx, len=%u)",
++                 (unsigned long)user_path_ptr, path_len);
++        kfree(kernel_path);
++        return NULL;
++    }
++    kernel_path[path_len] = '\0';
++    return kernel_path;
++}
++
++static void ioctl_set_rule(struct dec_rule_s *info)
++{
++    int ret = 0;
++    uint64_t tokenid = info->tokenid & DEC_TOKENID_MASK;
++
++    for (unsigned int i = 0; i < info->path_num; i++) {
++        char *path = copy_user_path((uintptr_t)info->path[i].path, info->path[i].path_len);
++        if (!path) {
++            dec_logw("Failed to get path for index %u", i);
++            continue;
++        }
++        uint32_t mode = info->path[i].mode;
++
++        struct path_tree_params params = {0};
++        params.path = path;
++        params.tokenid = tokenid;
++        params.mode = mode;
++        params.userid = info->user_id;
++        params.persist_flag = info->persist_flag;
++        params.timestamp = info->timestamp;
++
++        ret = dec_set_rule(&params);
++        if (ret) {
++            dec_loge("Failed to set rule for path '%s' (tokenid=0x%llx, mode=0x%x): %d",
++                     path, tokenid, mode, ret);
++            info->path[i].ret_flag = FLAG_FALSE;
++        } else {
++            info->path[i].ret_flag = FLAG_TRUE;
++        }
++
++        kfree(path);
++    }
++}
++
++static void ioctl_delete_rule(struct dec_rule_s *info)
++{
++    int ret = 0;
++    uint64_t tokenid = info->tokenid & DEC_TOKENID_MASK;
++
++    for (unsigned int i = 0; i < info->path_num; i++) {
++        char *path = copy_user_path((uintptr_t)info->path[i].path, info->path[i].path_len);
++        if (!path) {
++            dec_logw("Failed to get path for index %u", i);
++            continue;
++        }
++        uint64_t timestamp = info->timestamp;
++        ret = dec_delete_rule(tokenid, path, timestamp);
++        if (ret) {
++            dec_loge("Failed to delete rule for path %s, ret=%d", path, ret);
++            info->path[i].ret_flag = FLAG_FALSE;
++        } else {
++            info->path[i].ret_flag = FLAG_TRUE;
++        }
++
++        kfree(path);
++    }
++}
++
++static void ioctl_query_rule(struct dec_rule_s *info, bool is_persist)
++{
++    uint64_t tokenid = info->tokenid & DEC_TOKENID_MASK;
++
++    for (unsigned int i = 0; i < info->path_num; i++) {
++        char *path = copy_user_path((uintptr_t)info->path[i].path, info->path[i].path_len);
++        if (is_path_valid(path) != 0) {
++            dec_logw("Invalid path for query: %s", path);
++            info->path[i].ret_flag = FLAG_FALSE;
++            if (path) kfree(path);
++            continue;
++        }
++
++        /* Bypass check if path is not in constraint tree */
++        if (!dec_constraint_query(path)) {
++            info->path[i].ret_flag = FLAG_TRUE;
++            dec_logd("Path '%s' not in constraint tree - access allowed", path);
++            kfree(path);
++            continue;
++        }
++
++        /* Check permission in path tree */
++        uint32_t mode = info->path[i].mode;
++        if (dec_path_tree_query(tokenid, path, mode, is_persist)) {
++            info->path[i].ret_flag = FLAG_TRUE;
++        } else {
++            info->path[i].ret_flag = FLAG_FALSE;
++        }
++        dec_logd("Query rule for path '%s' (tokenid=0x%llx, mode=0x%x, is_persist=%d): %s",
++                 path, tokenid, mode, is_persist,
++                 info->path[i].ret_flag == FLAG_TRUE ? "ALLOWED" : "DENIED");
++
++        kfree(path);
++    }
++
++    return;
++}
++
++static void ioctl_constraint_add(struct dec_rule_s *info)
++{
++    int ret = 0;
++
++    for (unsigned int i = 0; i < info->path_num; i++) {
++        char *path = copy_user_path((uintptr_t)info->path[i].path, info->path[i].path_len);
++        if (!path) {
++            dec_logw("Failed to get path for index %u", i);
++            continue;
++        }
++        ret = dec_constraint_add(path);
++        if (ret != 0) {
++            dec_loge("Failed to add constraint path %s, ret=%d", path, ret);
++            info->path[i].ret_flag = FLAG_FALSE;
++        } else {
++            info->path[i].ret_flag = FLAG_TRUE;
++        }
++
++        kfree(path);
++    }
++}
++
++static void ioctl_set_prefix(struct dec_rule_s *info)
++{
++    int ret = 0;
++
++    for (unsigned int i = 0; i < info->path_num; i++) {
++        char *path = copy_user_path((uintptr_t)info->path[i].path, info->path[i].path_len);
++        if (!path) {
++            dec_logw("Failed to get path for index %u", i);
++            continue;
++        }
++        ret = dec_set_prefix(path);
++        if (ret) {
++            dec_loge("Failed to set constraint prefix %s, ret=%d", path, ret);
++            info->path[i].ret_flag = FLAG_FALSE;
++        } else {
++            info->path[i].ret_flag = FLAG_TRUE;
++        }
++
++        kfree(path);
++    }
++}
++
++static void ioctl_delete_rule_by_tokenid(struct dec_rule_s *info)
++{
++    struct dec_destroy_ctx ctx = {0};
++    ctx.criteria = DELETE_BY_TOKENID;
++    ctx.params.tokeninfo.tokenid = info->tokenid & DEC_TOKENID_MASK;
++    ctx.timestamp = info->timestamp;
++    dec_destroy_rule_by_id(&ctx);
++}
++
++static void ioctl_delete_rule_by_userid(struct dec_rule_s *info)
++{
++    for (unsigned int i = 0; i < info->path_num; i++) {
++        char *path = copy_user_path((uintptr_t)info->path[i].path, info->path[i].path_len);
++        if (!path) {
++            dec_logw("Failed to get path for index %u", i);
++            continue;
++        }
++        struct dec_destroy_ctx ctx = {0};
++        ctx.criteria = DELETE_BY_USERID;
++        ctx.params.userinfo.userid = info->user_id;
++        ctx.params.userinfo.path = path;
++        ctx.timestamp = info->timestamp;
++        if (dec_destroy_rule_by_id(&ctx) == 0) {
++            info->path[i].ret_flag = FLAG_TRUE;
++        } else {
++            dec_loge("Failed to delete rule by userid %d and path %s", info->user_id, path);
++            info->path[i].ret_flag = FLAG_FALSE;
++        }
++
++        kfree(path);
++    }
++}
++
++static void dec_rule_32_to_64(struct dec_rule_s_32 *info_32, struct dec_rule_s *info)
++{
++    if (info_32 == NULL || info == NULL) {
++        dec_loge("Invalid parameters for 32-to-64 rule conversion");
++        return;
++    }
++    info->tokenid = info_32->tokenid;
++    info->timestamp = info_32->timestamp;
++    info->path_num = info_32->path_num;
++    info->user_id = info_32->user_id;
++    info->persist_flag = info_32->persist_flag;
++    memcpy(info->reserved, info_32->reserved, sizeof(info->reserved));
++
++    for (unsigned int i = 0; i < info->path_num; i++) {
++        info->path[i].path = (uintptr_t)(uint32_t)info_32->path[i].path;
++        info->path[i].path_len = info_32->path[i].path_len;
++        info->path[i].mode = info_32->path[i].mode;
++        info->path[i].ret_flag = FLAG_FALSE;
++    }
++}
++
++static void dec_rule_64_to_32(struct dec_rule_s *info, struct dec_rule_s_32 *info_32)
++{
++    if (info_32 == NULL || info == NULL) {
++        dec_loge("Invalid parameters for 64-to-32 rule conversion");
++        return;
++    }
++    info_32->tokenid = info->tokenid;
++    info_32->timestamp = info->timestamp;
++    info_32->path_num = info->path_num;
++    info_32->user_id = info->user_id;
++    info_32->persist_flag = info->persist_flag;
++    memcpy(info_32->reserved, info->reserved, sizeof(info_32->reserved));
++
++    for (unsigned int i = 0; i < info->path_num; i++) {
++        info_32->path[i].path = (uint32_t)(uintptr_t)info->path[i].path;
++        info_32->path[i].path_len = info->path[i].path_len;
++        info_32->path[i].mode = info->path[i].mode;
++        info_32->path[i].ret_flag = info->path[i].ret_flag;
++    }
++}
++
++static int vfs_deal_rule_cmd(unsigned int cmd, void __user *arg)
++{
++    struct dec_rule_s info = { 0 };
++    bool needs_copy_back = true;
++
++    if (copy_from_user(&info, arg, sizeof(info))) {
++        dec_loge("Failed to copy 64-bit rule from user space");
++        return -EFAULT;
++    }
++
++    if (info.path_num > MAX_POLICY_NUM) {
++        dec_loge("Invalid path count %u (max %d)", info.path_num, MAX_POLICY_NUM);
++        return -EINVAL;
++    }
++
++    switch (cmd) {
++        case SET_DEC_RULE_CMD:
++            ioctl_set_rule(&info);
++            break;
++        case DEL_DEC_RULE_CMD:
++            ioctl_delete_rule(&info);
++            break;
++        case QUERY_DEC_RULE_CMD:
++            ioctl_query_rule(&info, true);  /* Persistent rules */
++            break;
++        case CHECK_DEC_RULE_CMD:
++            ioctl_query_rule(&info, false); /* Temporary rules */
++            break;
++        case DESTROY_DEC_RULE_CMD:
++            ioctl_delete_rule_by_tokenid(&info);
++            needs_copy_back = false;
++            break;
++        case CONSTRAINT_DEC_RULE_CMD:
++            ioctl_constraint_add(&info);
++            break;
++        case DEL_DEC_RULE_BY_USER_CMD:
++            ioctl_delete_rule_by_userid(&info);
++            break;
++        case SET_DEC_PREFIX_CMD:
++            ioctl_set_prefix(&info);
++            break;
++        default:
++            dec_loge("Unknown 64-bit DEC command: %u", cmd);
++            return -EINVAL;
++            break;
++    }
++
++    if (needs_copy_back && copy_to_user(arg, &info, sizeof(info))) {
++        dec_loge("Failed to copy 64-bit rule to user space");
++        return -EFAULT;
++    }
++    dec_logi("Completed 64-bit DEC command: %s (tokenid=0x%llx, path_num=%u)",
++             cmd_to_string(cmd), info.tokenid, info.path_num);
++
++    return 0;
++}
++
++static int vfs_deal_rule_cmd_32(unsigned int cmd, void __user *arg)
++{
++    int ret = 0;
++    struct dec_rule_s_32 *info_32 = NULL;
++    struct dec_rule_s *info = NULL;
++    bool needs_copy_back = true;
++
++    /* Allocate memory for rule structures (prevent stack overflow) */
++    info_32 = kmalloc(sizeof(struct dec_rule_s_32), GFP_KERNEL);
++    info = kmalloc(sizeof(struct dec_rule_s), GFP_KERNEL);
++    if (!info_32 || !info) {
++        dec_loge("Failed to allocate memory for 32-bit rule processing");
++        ret = -ENOMEM;
++        goto cleanup;
++    }
++
++    if (copy_from_user(info_32, arg, sizeof(struct dec_rule_s_32))) {
++        dec_loge("Failed to copy 32-bit rule from user space");
++        ret = -EFAULT;
++        goto cleanup;
++    }
++
++    if (info_32->path_num > MAX_POLICY_NUM) {
++        dec_loge("Invalid path count %u (max %d)", info_32->path_num, MAX_POLICY_NUM);
++        ret = -EINVAL;
++        goto cleanup;
++    }
++    dec_rule_32_to_64(info_32, info);
++    switch (cmd) {
++        case SET_DEC_RULE_CMD_32:
++            ioctl_set_rule(info);
++            break;
++        case DEL_DEC_RULE_CMD_32:
++            ioctl_delete_rule(info);
++            break;
++        case QUERY_DEC_RULE_CMD_32:
++            ioctl_query_rule(info, true);  /* Persistent rules */
++            break;
++        case CHECK_DEC_RULE_CMD_32:
++            ioctl_query_rule(info, false); /* Temporary rules */
++            break;
++        case DESTROY_DEC_RULE_CMD_32:
++            ioctl_delete_rule_by_tokenid(info);
++            needs_copy_back = false;
++            break;
++        case CONSTRAINT_DEC_RULE_CMD_32:
++            ioctl_constraint_add(info);
++            break;
++        case DEL_DEC_RULE_BY_USER_CMD_32:
++            ioctl_delete_rule_by_userid(info);
++            break;
++        case SET_DEC_PREFIX_CMD_32:
++            ioctl_set_prefix(info);
++            break;
++        default:
++            dec_loge("Unknown 32-bit DEC command: %u", cmd);
++            ret = -EINVAL;
++            goto cleanup;
++    }
++
++    if (needs_copy_back) {
++        dec_rule_64_to_32(info, info_32);
++        if (copy_to_user(arg, info_32, sizeof(struct dec_rule_s_32))) {
++            dec_loge("Failed to copy 32-bit rule to user space");
++            ret = -EFAULT;
++            goto cleanup;
++        }
++    }
++    dec_logi("Completed 32-bit DEC command: %s (tokenid=0x%llx, path_num=%u)",
++             cmd_to_string(cmd), info_32->tokenid, info_32->path_num);
++
++cleanup:
++    if (info_32) kfree(info_32);
++    if (info) kfree(info);
++    return ret;
++}
++
++static int dec_open(struct inode *inode, struct file *filp)
++{
++    dec_logi("dec device opened");
++    return 0;
++}
++
++static int dec_release(struct inode *inode, struct file *filp)
++{
++    dec_logi("dec device released");
++    return 0;
++}
++
++static long dec_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
++{
++    int ret = 0;
++
++    switch (cmd) {
++        case SET_DEC_RULE_CMD:
++        case DEL_DEC_RULE_CMD:
++        case QUERY_DEC_RULE_CMD:
++        case CHECK_DEC_RULE_CMD:
++        case DESTROY_DEC_RULE_CMD:
++        case CONSTRAINT_DEC_RULE_CMD:
++        case DEL_DEC_RULE_BY_USER_CMD:
++        case SET_DEC_PREFIX_CMD:
++            dec_logi("Handling 64-bit ioctl cmd=%s", cmd_to_string(cmd));
++            ret = vfs_deal_rule_cmd(cmd, (void __user *)arg);
++            break;
++        default:
++            dec_loge("Unknown 64-bit ioctl cmd=%u", cmd);
++            ret = -EINVAL;
++            break;
++    }
++
++    return ret;
++}
++
++#ifdef CONFIG_COMPAT
++static long dec_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
++{
++    int ret = 0;
++
++    switch (cmd) {
++        case SET_DEC_RULE_CMD_32:
++        case DEL_DEC_RULE_CMD_32:
++        case QUERY_DEC_RULE_CMD_32:
++        case CHECK_DEC_RULE_CMD_32:
++        case DESTROY_DEC_RULE_CMD_32:
++        case CONSTRAINT_DEC_RULE_CMD_32:
++        case DEL_DEC_RULE_BY_USER_CMD_32:
++        case SET_DEC_PREFIX_CMD_32:
++            dec_logi("Handling 32-bit ioctl cmd=%s", cmd_to_string(cmd));
++            ret = vfs_deal_rule_cmd_32(cmd, compat_ptr(arg));
++            break;
++        default:
++            dec_loge("Unknown 32-bit ioctl cmd=%u", cmd);
++            ret = -EINVAL;
++            break;
++    }
++
++    return ret;
++}
++#endif
++
++static const struct file_operations dec_fops = {
++    .owner = THIS_MODULE,
++    .open = dec_open,
++    .release = dec_release,
++    .unlocked_ioctl = dec_ioctl,
++#ifdef CONFIG_COMPAT
++    .compat_ioctl = dec_compat_ioctl,
++#endif
++};
++
++static struct miscdevice dec_misc = {
++    .minor = MISC_DYNAMIC_MINOR,
++    .name = "dec",
++    .fops = &dec_fops,
++};
++
++static int __init dec_init(void)
++{
++    int err = 0;
++    dec_logi("Initializing DEC module");
++
++    dec_sysctl_init();
++
++    err = misc_register(&dec_misc);
++    if (err) {
++        dec_loge("Failed to register DEC misc device: %d", err);
++        return err;
++    }
++
++    dec_hook_init();
++    dec_logi("DEC module initialized successfully");
++    return 0;
++}
++
++static void __exit dec_exit(void)
++{
++    dec_logi("Cleaning up DEC module");
++    dec_hook_exit();
++    misc_deregister(&dec_misc);
++    dec_logi("DEC misc device deregistered");
++}
++
++module_init(dec_init);
++module_exit(dec_exit);
++
++MODULE_LICENSE("GPL");
+\ No newline at end of file
+diff --git a/fs/dec/dec_misc.h b/fs/dec/dec_misc.h
+new file mode 100644
+index 000000000..71a492703
+--- /dev/null
++++ b/fs/dec/dec_misc.h
+@@ -0,0 +1,106 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2024 Huawei Device Co., Ltd.
++ */
++
++#ifndef _DEC_MISC_H
++#define _DEC_MISC_H
++
++#include <linux/ioctl.h>
++#include <linux/types.h>
++#include <linux/rbtree.h>
++#include <linux/spinlock.h>
++
++/*
++ * DEC IOCTL command base identifier
++ * Uses 's' (0x73) as the magic number for DEC subsystem IOCTL commands
++ */
++#define DEC_IOCTL_BASE 's'
++
++/* DEC IOCTL command identifiers (subcodes) */
++#define SET_RULE_ID          1   /* Add new DEC access rule */
++#define DEL_RULE_ID          2   /* Delete specific DEC rule */
++#define QUERY_RULE_ID        3   /* Query persistent DEC rules */
++#define CHECK_RULE_ID        4   /* Check temporary DEC rules */
++#define DESTROY_RULE_ID      5   /* Destroy all rules for a token ID */
++#define CONSTRAINT_RULE_ID   6   /* Add path to constraint tree */
++#define DEL_BY_USER_RULE_ID  7   /* Delete rules by user ID */
++#define SET_PREFIX_ID        8   /* Set constraint prefix path */
++
++#define MAX_POLICY_NUM 8
++#define DEC_POLICY_HEADER_RESERVED 64
++
++enum {
++    FLAG_FALSE = 0,
++    FLAG_TRUE = 1,
++};
++
++struct path_info {
++    __u64 path;
++    __u32 path_len;
++    __u32 mode;
++    __u8 ret_flag;
++};
++
++struct dec_rule_s {
++    __u64 tokenid;
++    __u64 timestamp;
++    struct path_info path[MAX_POLICY_NUM];
++    __u32 path_num;
++    __s32 user_id;
++    __u64 reserved[DEC_POLICY_HEADER_RESERVED];
++    __u8 persist_flag;
++};
++
++struct path_info_32 {
++    __u32 path;
++    __u32 path_len;
++    __u32 mode;
++    __u8 ret_flag;
++};
++
++struct dec_rule_s_32 {
++    __u64 tokenid;
++    __u64 timestamp;
++    struct path_info_32 path[MAX_POLICY_NUM];
++    __u32 path_num;
++    __s32 user_id;
++    __u64 reserved[DEC_POLICY_HEADER_RESERVED];
++    __u8 persist_flag;
++};
++
++#define SET_DEC_RULE_CMD \
++    _IOWR(DEC_IOCTL_BASE, SET_RULE_ID, struct dec_rule_s)
++#define DEL_DEC_RULE_CMD \
++    _IOWR(DEC_IOCTL_BASE, DEL_RULE_ID, struct dec_rule_s)
++#define QUERY_DEC_RULE_CMD \
++    _IOWR(DEC_IOCTL_BASE, QUERY_RULE_ID, struct dec_rule_s)
++#define CHECK_DEC_RULE_CMD \
++    _IOWR(DEC_IOCTL_BASE, CHECK_RULE_ID, struct dec_rule_s)
++#define DESTROY_DEC_RULE_CMD \
++    _IOWR(DEC_IOCTL_BASE, DESTROY_RULE_ID, struct dec_rule_s)
++#define CONSTRAINT_DEC_RULE_CMD \
++    _IOW(DEC_IOCTL_BASE, CONSTRAINT_RULE_ID, struct dec_rule_s)
++#define DEL_DEC_RULE_BY_USER_CMD \
++    _IOWR(DEC_IOCTL_BASE, DEL_BY_USER_RULE_ID, struct dec_rule_s)
++#define SET_DEC_PREFIX_CMD \
++    _IOWR(DEC_IOCTL_BASE, SET_PREFIX_ID, struct dec_rule_s)
++
++#define SET_DEC_RULE_CMD_32 \
++    _IOWR(DEC_IOCTL_BASE, SET_RULE_ID, struct dec_rule_s_32)
++#define DEL_DEC_RULE_CMD_32 \
++    _IOWR(DEC_IOCTL_BASE, DEL_RULE_ID, struct dec_rule_s_32)
++#define QUERY_DEC_RULE_CMD_32 \
++    _IOWR(DEC_IOCTL_BASE, QUERY_RULE_ID, struct dec_rule_s_32)
++#define CHECK_DEC_RULE_CMD_32 \
++    _IOWR(DEC_IOCTL_BASE, CHECK_RULE_ID, struct dec_rule_s_32)
++#define DESTROY_DEC_RULE_CMD_32 \
++    _IOWR(DEC_IOCTL_BASE, DESTROY_RULE_ID, struct dec_rule_s_32)
++#define CONSTRAINT_DEC_RULE_CMD_32 \
++    _IOW(DEC_IOCTL_BASE, CONSTRAINT_RULE_ID, struct dec_rule_s_32)
++#define DEL_DEC_RULE_BY_USER_CMD_32 \
++    _IOWR(DEC_IOCTL_BASE, DEL_BY_USER_RULE_ID, struct dec_rule_s_32)
++#define SET_DEC_PREFIX_CMD_32 \
++    _IOWR(DEC_IOCTL_BASE, SET_PREFIX_ID, struct dec_rule_s_32)
++
++#endif /* _DEC_MISC_H */
+\ No newline at end of file
+diff --git a/fs/dec/dec_path_tree.c b/fs/dec/dec_path_tree.c
+new file mode 100644
+index 000000000..323c682ca
+--- /dev/null
++++ b/fs/dec/dec_path_tree.c
+@@ -0,0 +1,567 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/rwsem.h>
++#include <linux/errno.h>
++
++#include "dec_path_tree.h"
++#include "dec_common.h"
++#include "dec_utils.h"
++#include "dec_log.h"
++
++/* Prefix tokenid greater then tokenid mask */
++#define PREFIX_TOKENID  (1ULL << 32)
++#define PREFIX_USERID   (1 << 30)
++
++enum query_state {
++    DEC_INIT,
++    DEC_ALLOWED,
++    DEC_NOT_ALLOWED,
++};
++
++static struct trie_node *path_tree = NULL;
++static struct rw_semaphore *dec_path_tree_rwsem = NULL;
++
++static int __init dec_path_tree_init(void)
++{
++    dec_path_tree_rwsem = kmalloc(sizeof(struct rw_semaphore), GFP_KERNEL);
++    if (!dec_path_tree_rwsem) {
++        dec_loge("Failed to allocate rwsem for path tree");
++        return -ENOMEM;
++    }
++    init_rwsem(dec_path_tree_rwsem);
++    
++    path_tree = trie_node_create("/");
++    if (!path_tree) {
++        dec_loge("Failed to create root node for path tree");
++        kfree(dec_path_tree_rwsem);
++        dec_path_tree_rwsem = NULL;
++        return -ENOMEM;
++    }
++    dec_logd("Path tree initialized successfully");
++    return 0;
++}
++
++static struct list_head *create_path_stack(void)
++{
++    struct list_head *stack = kmalloc(sizeof(struct list_head), GFP_KERNEL);
++    if (!stack) {
++        dec_loge("Failed to allocate memory for path stack");
++        return NULL;
++    }
++
++    INIT_LIST_HEAD(stack);
++    return stack;
++}
++
++static int add_to_path_stack(struct list_head *stack, struct trie_node *node, 
++                            struct trie_node *parent, const char *child_key)
++{
++    struct trie_stack_item *item = kmalloc(sizeof(struct trie_stack_item), GFP_KERNEL);
++    if (!item)
++        return -ENOMEM;
++
++    item->node = node;
++    item->parent = parent;
++    item->child_key = child_key ? kstrdup(child_key, GFP_KERNEL) : NULL;
++    item->visited_children = false;
++    INIT_LIST_HEAD(&item->list);
++
++    list_add(&item->list, stack);
++    return 0;
++}
++
++static void destroy_path_stack(struct list_head *stack)
++{
++    if (stack) {
++        struct trie_stack_item *item, *tmp;
++        list_for_each_entry_safe(item, tmp, stack, list) {
++            list_del(&item->list);
++            if (item->child_key)
++                kfree(item->child_key);
++            kfree(item);
++        }
++        kfree(stack);
++    }
++}
++
++static struct permission *find_permission(struct trie_node *node, uint64_t tokenid)
++{
++    struct rb_node *rb_node = node->permissions.rb_node;
++
++    while (rb_node) {
++        struct permission *perm = container_of(rb_node, struct permission, rb_node);
++        if (tokenid < perm->tokenid) {
++            rb_node = rb_node->rb_left;
++        } else if (tokenid > perm->tokenid) {
++            rb_node = rb_node->rb_right;
++        } else {
++            return perm;
++        }
++    }
++
++    return NULL;
++}
++
++int insert_permission(struct trie_node *node, struct permission *new_perm)
++{
++    if (!node || !new_perm) {
++        dec_loge("Invalid input to insert_permission (node=%p, new_perm=%p)",
++            node, new_perm);
++        return -EINVAL;
++    }
++
++    struct rb_node **new_rb_node = &(node->permissions.rb_node);
++    struct rb_node *parent_rb_node = NULL;
++    struct permission *exist_perm = NULL;
++
++    while (*new_rb_node) {
++        parent_rb_node = *new_rb_node;
++        exist_perm = container_of(parent_rb_node, struct permission, rb_node);
++
++        if (new_perm->tokenid < exist_perm->tokenid) {
++            new_rb_node = &((*new_rb_node)->rb_left);
++        } else if (new_perm->tokenid > exist_perm->tokenid) {
++            new_rb_node = &((*new_rb_node)->rb_right);
++        } else {
++            dec_loge("Token ID 0x%llx already exists in node - insert failed",
++                (unsigned long long)new_perm->tokenid);
++            return -EEXIST;
++        }
++    }
++
++    rb_link_node(&new_perm->rb_node, parent_rb_node, new_rb_node);
++    rb_insert_color(&new_perm->rb_node, &node->permissions);
++
++    dec_logi("Inserted permission for token ID 0x%llx into node",
++        (unsigned long long)new_perm->tokenid);
++    return 0;
++}
++
++static bool should_delete_permission(struct permission *perm, struct dec_destroy_ctx *ctx)
++{
++    if (!perm) {
++        dec_loge(" NULL permission passed to should_delete_permission");
++        return false;
++    }
++    bool id_match = false;
++    bool timestamp_match = (ctx->timestamp == 0) || (ctx->timestamp >= perm->timestamp);
++    switch (ctx->criteria) {
++        case DELETE_BY_TOKENID:
++            id_match = perm->tokenid == ctx->params.tokeninfo.tokenid;
++            return id_match && timestamp_match;
++        case DELETE_BY_USERID:
++            id_match = perm->userid == ctx->params.userinfo.userid;
++            return id_match && timestamp_match;
++        default:
++            dec_loge("Invalid delete criteria: %d", ctx->criteria);
++            return false;
++    }
++}
++
++static struct trie_node *get_node_by_path(const char *path)
++{
++    struct list_head comp_list;
++    struct trie_node *node = path_tree;
++    struct path_component *comp = NULL;
++
++    if (is_path_valid(path) != 0) {
++        dec_loge("Invalid path '%s' in get_node_by_path", path);
++        return NULL;
++    }
++
++    INIT_LIST_HEAD(&comp_list);
++    if (split_path_to_component_list(path, &comp_list) < 0)
++        goto cleanup;
++
++    list_for_each_entry(comp, &comp_list, list) {
++        node = find_child(node, comp->name);
++        if (node == NULL)
++            break;
++    }
++
++cleanup:
++    free_component_list(&comp_list);
++    return node;
++}
++
++static enum query_state update_state(struct permission *perm, uint32_t mode, bool is_persist, enum query_state state)
++{
++    enum query_state current_status = state;
++    /* If mode doesn't match, deny access (if in initial state) */
++    if ((perm->mode & mode) != mode) {
++        if (current_status == DEC_INIT) {
++            return DEC_NOT_ALLOWED;
++        }
++        return current_status;
++    }
++
++    /* Temporary rule check (inherits parent directory permissions) */
++    if (!is_persist) {
++        if (current_status == DEC_INIT) {
++            return DEC_ALLOWED;
++        }
++        return current_status;
++    }
++
++    /* Persistent rule check (explicit permission required) */
++    if (perm->persist_flag) {
++        return DEC_ALLOWED;
++    }
++
++    return current_status;
++}
++
++bool dec_path_tree_query(uint64_t tokenid, const char *path, uint32_t mode, bool is_persist)
++{
++    struct list_head comp_list;
++    struct trie_node *node = path_tree;
++    struct path_component *comp = NULL;
++
++    INIT_LIST_HEAD(&comp_list);
++    if (split_path_to_component_list(path, &comp_list) < 0) {
++        dec_loge("Failed to split path '%s' into components for query", path);
++        free_component_list(&comp_list);
++        return false;
++    }
++
++    down_read(dec_path_tree_rwsem);
++    enum query_state state = DEC_INIT;
++    /* Check root node ("/") first */
++    struct permission *root_prefix_perm = find_permission(node, PREFIX_TOKENID);
++    if (root_prefix_perm != NULL) {
++        if ((root_prefix_perm->mode & DEC_PREFIX) != 0) {
++            state = DEC_INIT;
++        }
++    }
++    struct permission *root_perm = find_permission(node, tokenid);
++    if (root_perm != NULL) {
++        state = update_state(root_perm, mode, is_persist, state);
++    }
++
++    /* Traverse path components to check child nodes */
++    list_for_each_entry(comp, &comp_list, list) {
++        node = find_child(node, comp->name);
++        if (!node) {
++            dec_logd("Path component '%s' not found in tree - stopping traversal", comp->name);
++            break;
++        }
++
++        /* Check global prefix constraint for this node */
++        struct permission *prefix_perm = find_permission(node, PREFIX_TOKENID);
++        if (prefix_perm != NULL) {
++            if ((prefix_perm->mode & DEC_PREFIX) != 0) {
++                state = DEC_INIT;
++            }
++        }
++
++        /* Check token-specific permission for this node */
++        struct permission *perm = find_permission(node, tokenid);
++        if (perm != NULL) {
++            state = update_state(perm, mode, is_persist, state);
++        }
++    }
++
++    up_read(dec_path_tree_rwsem);
++    free_component_list(&comp_list);
++
++    return (state == DEC_ALLOWED);
++}
++
++int dec_set_rule(struct path_tree_params *params)
++{
++    struct list_head comp_list;
++    struct trie_node *node = path_tree;
++    struct permission *perm = NULL;
++    int ret = 0;
++    ret = is_path_valid(params->path);
++    if (ret != 0) {
++        return ret;
++    }
++    dec_logi("Setting rule - token=0x%llx, path='%s', mode=0x%x, timestamp=%llu",
++        params->tokenid, params->path, params->mode, params->timestamp);
++
++    INIT_LIST_HEAD(&comp_list);
++    ret = split_path_to_component_list(params->path, &comp_list);
++    if (ret < 0) {
++        free_component_list(&comp_list);
++        return ret;
++    }
++
++    down_write(dec_path_tree_rwsem);
++    struct path_component *comp;
++    list_for_each_entry(comp, &comp_list, list) {
++        struct trie_node *child = find_child(node, comp->name);
++        if (!child) {
++            child = insert_child(node, comp->name);
++            if (!child) {
++                dec_loge("Failed to create child node for '%s'", comp->name);
++                ret = -ENOMEM;
++                goto cleanup;
++            }
++        }
++
++        node = child;
++    }
++
++    struct permission *existing_perm = find_permission(node, params->tokenid);
++    if (existing_perm != NULL) {
++        existing_perm->mode |= params->mode;
++        existing_perm->userid = params->userid;
++        existing_perm->persist_flag = params->persist_flag;
++        existing_perm->timestamp = params->timestamp;
++        dec_logi("Updated existing permission - token=0x%llx, mode=0x%x",
++            existing_perm->tokenid, existing_perm->mode);
++        goto cleanup;
++    }
++
++    perm = kmalloc(sizeof(struct permission), GFP_KERNEL);
++    if (!perm) {
++        dec_loge("Failed to allocate memory for new permission");
++        ret = -ENOMEM;
++        goto cleanup;
++    }
++    perm->tokenid = params->tokenid;
++    perm->mode = params->mode;
++    perm->userid = params->userid;
++    perm->persist_flag = params->persist_flag;
++    perm->timestamp = params->timestamp;
++    ret = insert_permission(node, perm);
++    if (ret) {
++        dec_loge("Failed to insert permission for token 0x%llx (err=%d)",
++            params->tokenid, ret);
++        kfree(perm);
++        goto cleanup;
++    }
++    node->has_permissions = true;
++    dec_logi("Added new permission: tokenid=%llu, mode=%u", perm->tokenid, perm->mode);
++
++cleanup:
++    up_write(dec_path_tree_rwsem);
++    free_component_list(&comp_list);
++    return ret;
++}
++
++int dec_delete_rule(uint64_t tokenid, const char *path, uint64_t timestamp)
++{
++    dec_logi("Deleting rule - token=0x%llx, path='%s', timestamp=%llu",
++        tokenid, path, timestamp);
++    struct list_head comp_list;
++    struct trie_node *node = path_tree;
++    struct list_head *path_stack;
++    int ret = 0;
++    ret = is_path_valid(path);
++    if (ret != 0) {
++        return ret;
++    }
++
++    INIT_LIST_HEAD(&comp_list);
++
++    ret = split_path_to_component_list(path, &comp_list);
++    if (ret < 0) {
++        free_component_list(&comp_list);
++        return ret;
++    }
++    path_stack = create_path_stack();
++    if (!path_stack) {
++        dec_loge("Failed to create path stack for delete operation");
++        free_component_list(&comp_list);
++        return -ENOMEM;
++    }
++
++    down_write(dec_path_tree_rwsem);
++    struct path_component *comp;
++    list_for_each_entry(comp, &comp_list, list) {
++        struct trie_node *child = find_child(node, comp->name);
++        if (!child) {
++            dec_loge("Path component '%s' not found in tree", comp->name);
++            ret = -ENOENT;
++            goto cleanup;
++        }
++        if (add_to_path_stack(path_stack, child, node, comp->name) < 0) {
++            dec_loge("Failed to add '%s' to path stack", comp->name);
++            ret = -ENOMEM;
++            goto cleanup;
++        }
++        node = child;
++    }
++
++    struct permission *perm = find_permission(node, tokenid);
++    if (perm == NULL) {
++        dec_loge("Permission for token 0x%llx not found at path '%s'",
++            tokenid, path);
++        ret = -ENOENT;
++        goto cleanup;
++    }
++    if (timestamp != 0 && timestamp < perm->timestamp) {
++        dec_loge("DEC: Timestamp %llu not newer than permission timestamp %llu",
++            timestamp, perm->timestamp);
++        ret = -ENOENT;
++        goto cleanup;
++    }
++    rb_erase(&perm->rb_node, &node->permissions);
++    kfree(perm);
++
++     /* Clean up empty nodes (traverse stack in reverse) */
++    node->has_permissions = !RB_EMPTY_ROOT(&node->permissions);
++    struct trie_stack_item *item, *tmp;
++    list_for_each_entry_safe_reverse(item, tmp, path_stack, list) {
++        if (!item->node->has_permissions && RB_EMPTY_ROOT(&item->node->children) && item->parent) {
++            /* Remove empty node from parent */
++            rb_erase(&item->node->rb_node, &item->parent->children);
++            trie_node_destroy(item->node);
++            item->node = NULL;
++        } else {
++            break;  /* Stop at first non-empty node */
++        }
++    }
++
++cleanup:
++    up_write(dec_path_tree_rwsem);
++    free_component_list(&comp_list);
++    destroy_path_stack(path_stack);
++    return ret;
++}
++
++int dec_destroy_rule_by_id(struct dec_destroy_ctx *ctx)
++{
++    enum delete_criteria criteria = ctx->criteria;
++    if (criteria != DELETE_BY_TOKENID && criteria != DELETE_BY_USERID) {
++        dec_loge("Invalid deletion criteria %d (must be token or user ID)", criteria);
++        return -EINVAL;
++    }
++
++    struct list_head stack_list;
++    INIT_LIST_HEAD(&stack_list);
++    struct trie_stack_item *first_item = kmalloc(sizeof(struct trie_stack_item), GFP_KERNEL);
++    if (!first_item) {
++        dec_loge("Failed to allocate initial stack item for bulk delete");
++        return -ENOMEM;
++    }
++
++    down_write(dec_path_tree_rwsem);
++    first_item->node = path_tree;
++    first_item->parent = NULL;
++    first_item->child_key = NULL;
++    first_item->visited_children = false;
++
++    if (criteria == DELETE_BY_USERID) {
++        struct trie_node *target_node = get_node_by_path(ctx->params.userinfo.path);
++        if (!target_node) {
++            dec_loge("Path '%s' not found for user ID deletion", ctx->params.userinfo.path);
++            up_write(dec_path_tree_rwsem);
++            kfree(first_item);
++            return -ENOENT;
++        }
++        first_item->node = target_node;
++    }
++
++    INIT_LIST_HEAD(&first_item->list);
++    list_add(&first_item->list, &stack_list);
++
++    /* Depth-first traversal of trie */
++    while (!list_empty(&stack_list)) {
++        struct trie_stack_item *item = list_first_entry(&stack_list, struct trie_stack_item, list);
++        struct trie_node *curr_node = item->node;
++
++        if (!item->visited_children) {
++            /* First visit: process permissions and queue children */
++            item->visited_children = true;
++
++            /* Delete matching permissions in current node */
++            struct rb_node *rb_iter = rb_first(&curr_node->permissions);
++            while (rb_iter) {
++                struct permission *perm = container_of(rb_iter, struct permission, rb_node);
++                struct rb_node *next_rb = rb_next(rb_iter);
++
++                if (should_delete_permission(perm, ctx)) {
++                    rb_erase(&perm->rb_node, &curr_node->permissions);
++                    dec_logi("Deleted permission - token=0x%llx, user=%d, node='%s'",
++                             (unsigned long long)perm->tokenid, perm->userid,
++                             curr_node->component ?: "root");
++                    kfree(perm);
++                }
++
++                rb_iter = next_rb;
++            }
++
++            /* Update node permission status */
++            curr_node->has_permissions = !RB_EMPTY_ROOT(&curr_node->permissions);
++
++            /* Queue child nodes for traversal (post-order) */
++            struct rb_node *child_rb = rb_first(&curr_node->children);
++            while (child_rb) {
++                struct trie_node *child_node = container_of(child_rb, struct trie_node, rb_node);
++                struct trie_stack_item *child_item = kmalloc(sizeof(struct trie_stack_item), GFP_KERNEL);
++                if (!child_item) {
++                    dec_loge("Failed to allocate child stack item during bulk delete");
++                    break;
++                }
++
++                child_item->node = child_node;
++                child_item->parent = curr_node;
++                child_item->child_key = child_node->component ? kstrdup(child_node->component, GFP_KERNEL) : NULL;
++                child_item->visited_children = false;
++                INIT_LIST_HEAD(&child_item->list);
++
++                /* Insert after current item (post-order traversal) */
++                list_add(&child_item->list, &stack_list);
++
++                child_rb = rb_next(child_rb);
++            }
++        } else {
++            /* Second visit: clean up empty nodes */
++            if (!item->node->has_permissions &&
++                RB_EMPTY_ROOT(&item->node->children) &&
++                item->parent != NULL)
++            {
++                rb_erase(&item->node->rb_node, &item->parent->children);
++                dec_logd("Removed empty node: %s", item->node->component ?: "root");
++                if (item->node->component)
++                    kfree(item->node->component);
++                kfree(item->node);
++                item->node = NULL;
++            }
++
++            list_del(&item->list);
++            if (item->child_key)
++                kfree(item->child_key);
++            kfree(item);
++        }
++    }
++
++    up_write(dec_path_tree_rwsem);
++
++    struct trie_stack_item *item, *tmp;
++    list_for_each_entry_safe(item, tmp, &stack_list, list) {
++        list_del(&item->list);
++        if (item->child_key)
++            kfree(item->child_key);
++        kfree(item);
++    }
++
++    return 0;
++}
++
++int dec_set_prefix(const char *prefix)
++{
++    int ret = 0;
++
++    /* Initialize parameters for global prefix rule */
++    struct path_tree_params param = {0};
++    param.path = (char *)prefix;
++    param.tokenid = PREFIX_TOKENID;
++    param.userid = PREFIX_USERID;
++    param.mode = DEC_PREFIX;
++    ret = dec_set_rule(&param);
++
++    return ret;
++}
++
++/* Register initialization function for filesystem init phase */
++fs_initcall(dec_path_tree_init);
+\ No newline at end of file
+diff --git a/fs/dec/dec_path_tree.h b/fs/dec/dec_path_tree.h
+new file mode 100644
+index 000000000..87b3229ff
+--- /dev/null
++++ b/fs/dec/dec_path_tree.h
+@@ -0,0 +1,40 @@
++/*
++// SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#ifndef _DEC_PATH_TREE_H
++#define _DEC_PATH_TREE_H
++
++#include <linux/types.h>
++
++#include "dec_common.h"
++
++enum delete_criteria {
++    DELETE_BY_TOKENID = 1,  
++    DELETE_BY_USERID,       
++};
++
++union dec_dectroy_params {
++    struct {
++        uint64_t tokenid;
++    } tokeninfo;
++    struct {
++        int userid;
++        const char *path;
++    } userinfo;
++};
++
++struct dec_destroy_ctx {
++    enum delete_criteria criteria;
++    union dec_dectroy_params params;
++    uint64_t timestamp;
++};
++
++bool dec_path_tree_query(uint64_t tokenid, const char *path, uint32_t mode, bool is_persist);
++int dec_set_rule(struct path_tree_params *params);
++int dec_delete_rule(uint64_t tokenid, const char *path, uint64_t timestamp);
++int dec_destroy_rule_by_id(struct dec_destroy_ctx *ctx);
++
++int dec_set_prefix(const char *prefix);
++#endif /* _DEC_PATH_TREE_H */
+\ No newline at end of file
+diff --git a/fs/dec/dec_security_hook.c b/fs/dec/dec_security_hook.c
+new file mode 100644
+index 000000000..001cd3c59
+--- /dev/null
++++ b/fs/dec/dec_security_hook.c
+@@ -0,0 +1,252 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#include <linux/lsm_hooks.h>
++#include <linux/security.h>
++#include <linux/errno.h>
++#include <linux/types.h>
++#include <linux/fs.h>
++#include <linux/namei.h>
++#include <linux/cred.h>
++#include <linux/sched.h>
++#include <linux/slab.h>
++#include <linux/dcache.h>
++#include <linux/path.h>
++#include <linux/mount.h>
++#include <linux/limits.h>
++#include <linux/ohos_access_token.h>
++
++#include "dec_security_hook.h"
++#include "dec_common.h"
++#include "dec_kernel_interface.h"
++#include "dec_log.h"
++
++#define SHAREFS_SUPER_MAGIC 0x20230212
++
++static uint64_t get_tokenid(void)
++{
++    /* KMI: this GKI kernel must not grow task_struct, so there is no
++     * task_struct::token (the OHOS 6.6 original reads current->token).
++     * Tokens live in the external store keyed by task pointer — see
++     * include/linux/ohos_access_token.h. */
++    return ohos_access_token_get(current);
++}
++
++static bool is_sharefs_magic(uint32_t fs_magic)
++{
++    return fs_magic == SHAREFS_SUPER_MAGIC;
++}
++
++static uint32_t dec_acc_permission_change(uint32_t may_mask)
++{
++    uint32_t dec_flags = 0;
++
++    if (may_mask & MAY_READ) {
++        dec_flags |= DEC_READ;
++    }
++
++    if ((may_mask & MAY_WRITE) || (may_mask & MAY_APPEND)) {
++        dec_flags |= DEC_WRITE;
++    }
++
++    return dec_flags;
++}
++
++static uint32_t dec_acc_open_change(uint32_t file_flags)
++{
++    uint32_t dec_flags = 0;
++    uint32_t acc_mode = file_flags & O_ACCMODE;
++
++    if (acc_mode == O_RDONLY || acc_mode == O_RDWR) {
++        dec_flags |= DEC_READ;
++    }
++
++    if (acc_mode == O_WRONLY || acc_mode == O_RDWR) {
++        dec_flags |= DEC_WRITE;
++    }
++
++    if (file_flags & (O_TRUNC | O_APPEND)) {
++        dec_flags |= DEC_WRITE;
++    }
++
++    return dec_flags;
++}
++
++static char *dec_get_path_buf(void)
++{
++    return kmalloc(PATH_MAX, GFP_KERNEL);
++}
++
++static void dec_free_path_buf(char *buf)
++{
++    if (buf) {
++        kfree(buf);
++    }
++}
++
++static int dec_generic_path_check(const struct path *dir, uint32_t dec_mode, const char *check_name)
++{
++    char *path_buf = NULL;
++    const char *full_path = NULL;
++    int ret = 0;
++    uint64_t tokenid = 0;
++
++    if (!dir || !dir->dentry || !dir->dentry->d_inode) {
++        dec_loge("%s: invalid param", check_name);
++        return -EINVAL;
++    }
++    uint32_t fs_magic = dir->dentry->d_inode->i_sb->s_magic;
++    if (!is_sharefs_magic(fs_magic)) {
++        return 0;
++    }
++
++    path_buf = dec_get_path_buf();
++    if (!path_buf) {
++        dec_loge("%s: path_buf malloc failed", check_name);
++        return -ENOMEM;
++    }
++
++    full_path = d_path(dir, path_buf, PATH_MAX);
++    if (IS_ERR(full_path)) {
++        dec_loge("%s: get dir path failed, err=%ld", check_name, PTR_ERR(full_path));
++        ret = PTR_ERR(full_path);
++        goto out;
++    }
++
++    tokenid = get_tokenid();
++
++    struct path_tree_params params = {0};
++    params.path = full_path;
++    params.tokenid = tokenid;
++    params.mode = dec_mode;
++    params.userid = 0;
++    params.persist_flag = false;
++    params.timestamp = 0;
++    ret = dec_rule_query(&params);
++
++out:
++    dec_free_path_buf(path_buf);
++    return ret;
++}
++
++static int dec_check_file_common(struct file *file, uint32_t dec_mode, const char *check_name)
++{
++    if (!file || !file->f_inode) {
++        dec_loge("%s: invalid param", check_name);
++        return -EINVAL;
++    }
++
++    return dec_generic_path_check(&file->f_path, dec_mode, check_name);
++}
++
++static int dec_check_permission(struct file *file, int may_mask)
++{
++    if (may_mask <= 0) {
++        return 0;
++    }
++    uint32_t dec_mode = dec_acc_permission_change(may_mask);
++    return dec_check_file_common(file, dec_mode, __func__);
++}
++
++static int dec_check_open(struct file *file)
++{
++    if (!file) {
++        dec_loge("%s: invalid param", __func__);
++        return -EINVAL;
++    }
++    uint32_t dec_mode = dec_acc_open_change(file->f_flags);
++    return dec_check_file_common(file, dec_mode, __func__);
++}
++
++static int dec_path_mkdir(const struct path *dir, struct dentry *dentry, umode_t mode)
++{
++    (void)dentry;
++    (void)mode;
++    return dec_generic_path_check(dir, DEC_WRITE, __func__);
++}
++
++static int dec_path_rmdir(const struct path *dir, struct dentry *dentry)
++{
++    (void)dentry;
++    return dec_generic_path_check(dir, DEC_WRITE, __func__);
++}
++
++static int dec_path_unlink(const struct path *dir, struct dentry *dentry)
++{
++    (void)dentry;
++    return dec_generic_path_check(dir, DEC_WRITE, __func__);
++}
++
++static int dec_path_mknod(const struct path *dir, struct dentry *dentry, umode_t mode, dev_t dev)
++{
++    (void)dev;
++    /* Only check DEC permissions for standard file types */
++    switch (mode & S_IFMT) {
++        case S_IFREG:
++        case S_IFDIR:
++        case S_IFLNK:
++            break;
++        default:
++            return 0;
++    }
++    return dec_generic_path_check(dir, DEC_WRITE, __func__);
++}
++
++static int dec_path_rename(const struct path *old_dir, struct dentry *old_dentry,
++                           const struct path *new_dir, struct dentry *new_dentry,
++                           unsigned int flags)
++{
++    (void)old_dentry;
++    (void)new_dentry;
++    (void)flags;
++    int ret = 0;
++
++    ret = dec_generic_path_check(old_dir, DEC_WRITE, __func__);
++    if (ret != 0) {
++        return ret;
++    }
++
++    ret = dec_generic_path_check(new_dir, DEC_WRITE, __func__);
++    return ret;
++}
++
++static int __maybe_unused dec_path_access(const struct path *path, int mode)
++{
++
++    uint32_t dec_mode = dec_acc_permission_change(mode);
++    if (dec_mode == DEC_NONE) {
++        return 0;
++    }
++    return dec_generic_path_check(path, dec_mode, __func__);
++}
++
++static struct security_hook_list dec_hooks[] __ro_after_init = {
++    LSM_HOOK_INIT(file_permission, dec_check_permission),
++    LSM_HOOK_INIT(file_open, dec_check_open),
++    LSM_HOOK_INIT(path_mknod, dec_path_mknod),
++    LSM_HOOK_INIT(path_mkdir, dec_path_mkdir),
++    LSM_HOOK_INIT(path_rmdir, dec_path_rmdir),
++    LSM_HOOK_INIT(path_rename, dec_path_rename),
++    LSM_HOOK_INIT(path_unlink, dec_path_unlink),
++#ifdef CONFIG_SECURITY_DEC_PATH_ACCESS_HOOK
++    /* path_access is an OHOS-*added* LSM hook: enabling it needs core
++     * edits to lsm_hook_defs.h / security.h / security.c / fs/open.c.
++     * Not taken on this GKI port — file_open + file_permission still
++     * gate every real I/O path; only faccessat() probing is uncovered. */
++    LSM_HOOK_INIT(path_access, dec_path_access),
++#endif
++};
++
++int __init dec_hook_init(void)
++{
++    dec_logi("dec security hooks init");
++    security_add_hooks(dec_hooks, ARRAY_SIZE(dec_hooks), "dec_lsm");
++    return 0;
++}
++
++void dec_hook_exit(void)
++{
++    dec_logi("dec security hooks exited");
++}
+\ No newline at end of file
+diff --git a/fs/dec/dec_security_hook.h b/fs/dec/dec_security_hook.h
+new file mode 100644
+index 000000000..cfeb31ab0
+--- /dev/null
++++ b/fs/dec/dec_security_hook.h
+@@ -0,0 +1,11 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#ifndef _DEC_SECURITY_HOOK_H
++#define _DEC_SECURITY_HOOK_H
++
++int dec_hook_init(void);
++void dec_hook_exit(void);
++#endif /* _DEC_SECURITY_HOOK_H */
+\ No newline at end of file
+diff --git a/fs/dec/dec_utils.c b/fs/dec/dec_utils.c
+new file mode 100644
+index 000000000..f766d0e02
+--- /dev/null
++++ b/fs/dec/dec_utils.c
+@@ -0,0 +1,271 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#include <linux/errno.h>
++#include <linux/types.h>
++#include <linux/slab.h>
++#include <linux/list.h>
++#include <linux/string.h>
++#include <linux/limits.h>
++
++#include "dec_utils.h"
++#include "dec_log.h"
++
++int is_path_valid(const char *path)
++{
++	const char *start;
++	const char *end;
++	size_t path_len;
++    bool prev_is_slash = false;
++
++	if (!path) {
++		dec_loge("path is NULL");
++		return -EINVAL;
++	}
++
++	path_len = strlen(path);
++	if (path_len == 0 || path_len > PATH_MAX) {
++		dec_loge("invalid path length: %zu (must be 1~%d)", path_len, PATH_MAX);
++		return -EINVAL;
++	}
++
++	/* Must be an absolute path */
++	if (*path != '/') {
++		dec_loge("path '%s' is not absolute (must start with '/')", path);
++		return -EINVAL;
++	}
++
++    /* Path with only '/' */
++    if (path_len == 1) {
++        return 0;
++    }
++
++	start = path;
++
++	/* Validate each path component */
++	while (*start) {
++        if (*start == '/') {
++            /* Reject consecutive '/' */
++            if (prev_is_slash) {
++                dec_loge("path '%s' contains consecutive '/'", path);
++                return -EINVAL;
++            }
++            prev_is_slash = true;
++            start++;
++            continue;
++        }
++        prev_is_slash = false;
++
++		size_t comp_len;
++		end = strchr(start, '/');
++		if (!end) {
++			comp_len = strlen(start);
++		} else {
++			comp_len = end - start;
++		}
++
++		/* Check component length validity */
++		if (comp_len == 0 || comp_len >= NAME_MAX) {
++			dec_loge("invalid component length %zu in path '%s'", comp_len, path);
++			return -EINVAL;
++		}
++
++		/* Reject single '.' component */
++		if (comp_len == 1 && *start == '.') {
++			dec_loge("path '%s' contains invalid component '.'", path);
++			return -EINVAL;
++		}
++
++		/* Reject '..' component */
++		if (comp_len == 2 && *start == '.' && *(start + 1) == '.') {
++			dec_loge("path '%s' contains invalid component '..'", path);
++			return -EINVAL;
++		}
++
++		if (!end)
++			break;
++
++		start = end;
++	}
++
++	return 0;
++}
++
++
++struct trie_node *trie_node_create(const char *component)
++{
++    if (!component) {
++        return NULL;
++    }
++
++    struct trie_node *node = kzalloc(sizeof(struct trie_node), GFP_KERNEL);
++    if (!node) {
++        return NULL;
++    }
++    node->component = kstrdup(component, GFP_KERNEL);
++    if (!node->component) {
++        kfree(node);
++        return NULL;
++    }
++    node->permissions = RB_ROOT;
++    node->children = RB_ROOT;
++    node->has_permissions = false;
++
++    return node;
++}
++
++struct trie_node *find_child(struct trie_node *node, const char *component)
++{
++    if (node == NULL || component == NULL || strlen(component) == 0) {
++        return NULL;
++    }
++
++    struct rb_node *rb_node = node->children.rb_node;
++    struct trie_node *child = NULL;
++    while (rb_node) {
++        child = container_of(rb_node, struct trie_node, rb_node);
++        if (child->component == NULL) {
++            return NULL;
++        }
++        int cmp = strcmp(component, child->component);
++
++        if (cmp < 0)
++            rb_node = rb_node->rb_left;
++        else if (cmp > 0)
++            rb_node = rb_node->rb_right;
++        else
++            return child;
++    }
++
++    return NULL;
++}
++
++struct trie_node *insert_child(struct trie_node *parent, const char *component)
++{
++    if (parent == NULL || component == NULL) {
++        return NULL;
++    }
++
++    struct rb_node **new_node = &(parent->children.rb_node);
++    struct rb_node *parent_rb = NULL;
++    struct trie_node *child = NULL;
++    int cmp = 0;
++
++    while (*new_node) {
++        parent_rb = *new_node;
++        child = container_of(parent_rb, struct trie_node, rb_node);
++        if (child->component == NULL) {
++            new_node = &((*new_node)->rb_right);
++            continue;
++        }
++
++        cmp = strcmp(component, child->component);
++        if (cmp < 0) {
++            new_node = &((*new_node)->rb_left);
++        } else if (cmp > 0) {
++            new_node = &((*new_node)->rb_right);
++        } else {
++            return NULL; /* Node already exists, insertion failed */
++        }
++    }
++
++    struct trie_node *new_child = trie_node_create(component);
++    if (new_child == NULL) {
++        dec_loge("failed to create trie node");
++        return NULL;
++    }
++
++    rb_link_node(&new_child->rb_node, parent_rb, new_node);
++    rb_insert_color(&new_child->rb_node, &parent->children);
++
++    return new_child;
++}
++
++ void trie_node_destroy(struct trie_node *node)
++{
++    struct rb_node *rb_node;
++    struct permission *perm;
++    struct trie_node *child;
++
++    if (node == NULL)
++        return;
++
++    while ((rb_node = rb_first(&node->permissions))) {
++        perm = container_of(rb_node, struct permission, rb_node);
++        rb_erase(rb_node, &node->permissions);
++        kfree(perm);
++    }
++
++    while ((rb_node = rb_first(&node->children))) {
++        child = container_of(rb_node, struct trie_node, rb_node);
++        rb_erase(rb_node, &node->children);
++        trie_node_destroy(child);
++    }
++
++    if (node->component)
++        kfree(node->component);
++
++    kfree(node);
++}
++
++
++int split_path_to_component_list(const char *path, struct list_head *comp_list)
++{
++    const char *start;
++    const char *end;
++    int ret = 0;
++
++    if (comp_list == NULL) {
++        dec_loge("split_path_to_component_list: comp_list is NULL");
++        return -EINVAL;
++    }
++
++    start = path;
++    while (*start == '/')
++        start++;
++
++    while (*start) {
++        size_t len;
++        end = strchr(start, '/');
++        if (end == NULL) {
++            len = strlen(start);
++        } else if (end > start) {
++            len = end - start;
++        } else {
++            start++;
++            continue;
++        }
++
++        struct path_component *comp = kmalloc(sizeof(*comp) + len + 1, GFP_KERNEL);
++        if (!comp) {
++            dec_loge("failed to allocate path_component");
++            free_component_list(comp_list);
++            return -ENOMEM;
++        }
++
++        memcpy(comp->name, start, len);
++        comp->name[len] = '\0';
++        INIT_LIST_HEAD(&comp->list);
++        list_add_tail(&comp->list, comp_list);
++
++        if (end == NULL)
++            break;
++
++        start = end + 1;
++        while (*start == '/')
++            start++;
++    }
++
++    return 0;
++}
++
++void free_component_list(struct list_head *comp_list)
++{
++    struct path_component *comp, *tmp;
++    list_for_each_entry_safe(comp, tmp, comp_list, list) {
++        list_del(&comp->list);
++        kfree(comp);
++    }
++}
+\ No newline at end of file
+diff --git a/fs/dec/dec_utils.h b/fs/dec/dec_utils.h
+new file mode 100644
+index 000000000..eb1d4e99e
+--- /dev/null
++++ b/fs/dec/dec_utils.h
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#ifndef _DEC_UTILS_H
++#define _DEC_UTILS_H
++
++#include "dec_common.h"
++
++int is_path_valid(const char *path);
++struct trie_node *trie_node_create(const char *component);
++struct trie_node *find_child(struct trie_node *node, const char *component);
++struct trie_node *insert_child(struct trie_node *parent, const char *component);
++void trie_node_destroy(struct trie_node *node);
++int split_path_to_component_list(const char *path, struct list_head *comp_list);
++void free_component_list(struct list_head *comp_list);
++
++#endif /* _DEC_UTILS_H */
+\ No newline at end of file
+diff --git a/fs/dec/sysctl.c b/fs/dec/sysctl.c
+new file mode 100644
+index 000000000..806c6e476
+--- /dev/null
++++ b/fs/dec/sysctl.c
+@@ -0,0 +1,37 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#include <linux/sysctl.h>
++
++#include "sysctl.h"
++#include "dec_log.h"
++
++int dec_mode = 1;
++#define dec_console_loglevel dec_mode
++
++static int dec_proc_dointvec(struct ctl_table *table, int write,
++			     void __user *buffer, size_t *lenp, loff_t *ppos)
++{
++	dec_logi("dec_mode changed to %d", dec_console_loglevel);
++	return proc_dointvec(table, write, buffer, lenp, ppos);
++}
++
++static struct ctl_table dec_sysctls[] = {
++	{
++		.procname	= "dec_mode",
++		.data		= &dec_console_loglevel,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= dec_proc_dointvec,
++	},
++	{}
++};
++
++void __init dec_sysctl_init(void)
++{
++#ifdef CONFIG_SECURITY_DEC_DEVELOP
++	register_sysctl_init("kernel", dec_sysctls);
++#endif
++}
+diff --git a/fs/dec/sysctl.h b/fs/dec/sysctl.h
+new file mode 100644
+index 000000000..ec4961d45
+--- /dev/null
++++ b/fs/dec/sysctl.h
+@@ -0,0 +1,11 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Copyright (c) 2026 Huawei Device Co., Ltd.
++ */
++
++#ifndef _SYSCTL_H
++#define _SYSCTL_H
++
++void __init dec_sysctl_init(void);
++
++#endif /* _SYSCTL_H */
+\ No newline at end of file
+diff --git a/fs/epfs/Kconfig b/fs/epfs/Kconfig
+new file mode 100644
+index 000000000..6a631dba7
+--- /dev/null
++++ b/fs/epfs/Kconfig
+@@ -0,0 +1,12 @@
++# SPDX-License-Identifier: GPL-2.0
++config EPFS
++	bool "Enhanced Proxy File System support"
++	depends on TMPFS
++	help
++	  Enhanced Proxy File System support. If unsure, say N.
++
++config EPFS_DEBUG
++	bool "Debug message of Enhanced Proxy File System"
++	depends on EPFS
++	help
++	  Enhanced Proxy File System debug support.
+diff --git a/fs/epfs/Makefile b/fs/epfs/Makefile
+new file mode 100644
+index 000000000..befc92e71
+--- /dev/null
++++ b/fs/epfs/Makefile
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: GPL-2.0
++obj-$(CONFIG_EPFS) += epfs.o
++epfs-y := main.o super.o dentry.o inode.o file.o dir.o
++
++# OHOS reference builds are not -Werror; these byte-identical sources
++# carry benign warnings that CONFIG_WERROR would otherwise promote.
++ccflags-remove-y += -Werror
+diff --git a/fs/epfs/dentry.c b/fs/epfs/dentry.c
+new file mode 100644
+index 000000000..62299eccd
+--- /dev/null
++++ b/fs/epfs/dentry.c
+@@ -0,0 +1,23 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * fs/epfs/main.c
++ *
++ * Copyright (c) 2022 Huawei Technologies Co., Ltd.
++ * Author: weilongping@huawei.com
++ * Create: 2022-06-10
++ */
++#include "internal.h"
++
++static int epfs_d_revalidate(struct dentry *dentry, unsigned int flags)
++{
++	return 1;
++}
++
++static void epfs_d_release(struct dentry *dentry)
++{
++}
++
++const struct dentry_operations epfs_dops = {
++	.d_revalidate = epfs_d_revalidate,
++	.d_release = epfs_d_release,
++};
+diff --git a/fs/epfs/dir.c b/fs/epfs/dir.c
+new file mode 100644
+index 000000000..4079feb28
+--- /dev/null
++++ b/fs/epfs/dir.c
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * fs/epfs/dir.c
++ *
++ * Copyright (c) 2022 Huawei Technologies Co., Ltd.
++ * Author: weilongping@huawei.com
++ * Create: 2022-06-10
++ */
++#include <linux/fs.h>
++
++#include "internal.h"
++
++static int epfs_iterate(struct file *file, struct dir_context *ctx)
++{
++	return 0;
++}
++
++const struct file_operations epfs_dir_fops = { .iterate_shared = epfs_iterate };
+diff --git a/fs/epfs/epfs.h b/fs/epfs/epfs.h
+new file mode 100644
+index 000000000..19e66e145
+--- /dev/null
++++ b/fs/epfs/epfs.h
+@@ -0,0 +1,43 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * fs/epfs/epfs.h
++ *
++ * Copyright (c) 2022 Huawei Technologies Co., Ltd.
++ * Author: weilongping@huawei.com
++ * Create: 2022-06-10
++ */
++#ifndef __FS_EPFS_H__
++#define __FS_EPFS_H__
++
++#include <linux/ioctl.h>
++#include <linux/printk.h>
++#include <linux/types.h>
++
++#define EPFS_MAX_RANGES 127
++
++struct __attribute__((__packed__)) epfs_range {
++	__u64 num;
++	__u64 reserved;
++	struct {
++		__u64 begin;
++		__u64 end;
++	} range[0];
++};
++
++#define EPFS_IOCTL_MAGIC 0x71
++#define IOC_SET_ORIGIN_FD _IOW(EPFS_IOCTL_MAGIC, 1, __s32)
++#define IOC_SET_EPFS_RANGE _IOW(EPFS_IOCTL_MAGIC, 2, struct epfs_range)
++#define EPFS_IOCTL_MAXNR 3
++
++#define EPFS_TAG "Epfs"
++
++#define epfs_err(fmt, ...)						\
++	pr_err("%s:%s:%d: " fmt, EPFS_TAG, __func__, __LINE__, ##__VA_ARGS__)
++#define epfs_info(fmt, ...)						\
++	pr_info("%s:%s:%d: " fmt, EPFS_TAG, __func__, __LINE__, ##__VA_ARGS__)
++#define epfs_warn(fmt, ...)						\
++	pr_warn("%s:%s:%d: " fmt, EPFS_TAG, __func__, __LINE__, ##__VA_ARGS__)
++#define epfs_debug(fmt, ...)						\
++	pr_debug("%s:%s:%d: " fmt, EPFS_TAG, __func__, __LINE__, ##__VA_ARGS__)
++
++#endif // __FS_EPFS_H__
+diff --git a/fs/epfs/file.c b/fs/epfs/file.c
+new file mode 100644
+index 000000000..d2938ebb6
+--- /dev/null
++++ b/fs/epfs/file.c
+@@ -0,0 +1,299 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * fs/epfs/file.c
++ *
++ * Copyright (c) 2022 Huawei Technologies Co., Ltd.
++ * Author: weilongping@huawei.com
++ * Create: 2022-06-10
++ */
++#include <linux/file.h>
++#include <linux/fs.h>
++#include <linux/fs_stack.h>
++#include <linux/slab.h>
++#include <linux/uaccess.h>
++
++#include "internal.h"
++
++long epfs_set_origin_fd(struct file *file, unsigned long arg)
++{
++	int fd = -1;
++	struct file *origin_file;
++	struct inode *inode = file->f_inode;
++	struct epfs_inode_info *info = epfs_inode_to_private(inode);
++	int ret = 0;
++
++	if (copy_from_user(&fd, (int *)arg, sizeof(fd)))
++		return -EFAULT;
++	if (IS_ENABLED(CONFIG_EPFS_DEBUG))
++		epfs_debug("original fd: %d", fd);
++	origin_file = fget(fd);
++	if (!origin_file) {
++		epfs_err("Original file not exist!");
++		return -EBADF;
++	}
++
++	mutex_lock(&info->lock);
++	if (info->origin_file) {
++		// origin_file had been set.
++		ret = -EEXIST;
++		fput(origin_file);
++	} else if (file_inode(origin_file) == inode) {
++		epfs_err("Could not set itself as origin_file!");
++		fput(origin_file);
++		ret = -EINVAL;
++	} else {
++		info->origin_file = origin_file;
++		fsstack_copy_attr_all(inode, file_inode(origin_file));
++		fsstack_copy_inode_size(inode, file_inode(origin_file));
++	}
++	mutex_unlock(&info->lock);
++	return ret;
++}
++
++int epfs_check_range(struct epfs_range *range)
++{
++	__u64 index;
++
++	if (range->range[0].begin >= range->range[0].end) {
++		epfs_err("Invalid range: [%llu, %llu)", range->range[0].begin,
++		       range->range[0].end);
++		return -EINVAL;
++	}
++
++	for (index = 1; index < range->num; index++) {
++		if ((range->range[index].begin >= range->range[index].end) ||
++		    (range->range[index].begin < range->range[index - 1].end)) {
++			epfs_err("Invalid range: [%llu, %llu), [%llu, %llu)",
++			       range->range[index - 1].begin,
++			       range->range[index - 1].end,
++			       range->range[index].begin,
++			       range->range[index].end);
++			return -EINVAL;
++		}
++	}
++	if (IS_ENABLED(CONFIG_EPFS_DEBUG)) {
++		epfs_debug("epfs_range recv %llu ranges:", range->num);
++		for (index = 0; index < range->num; index++) {
++			epfs_debug("range:[%llu %llu)",
++				 range->range[index].begin,
++				 range->range[index].end);
++		}
++		epfs_debug("\n");
++	}
++	return 0;
++}
++
++long epfs_set_range(struct file *file, unsigned long arg)
++{
++	struct inode *inode = file->f_inode;
++	struct inode *origin_inode;
++	struct epfs_inode_info *info = epfs_inode_to_private(inode);
++	int ret = 0;
++	__u64 num = 0;
++	struct epfs_range *range;
++	struct epfs_range header;
++
++	mutex_lock(&info->lock);
++	if (!info->origin_file) {
++		epfs_err("origin file not exist!");
++		ret = -EBADF;
++		goto out_set_range;
++	}
++	origin_inode = info->origin_file->f_inode;
++	if (!in_group_p(origin_inode->i_gid)) {
++		epfs_err("Only group member can set range: %u",
++			 i_gid_read(origin_inode));
++		ret = -EACCES;
++		goto out_set_range;
++	}
++
++	if (copy_from_user(&header, (struct epfs_range *)arg,
++			   sizeof(header))) {
++		ret = -EFAULT;
++		epfs_err("get header failed!");
++		goto out_set_range;
++	}
++	num = header.num;
++
++	if (num > EPFS_MAX_RANGES || num <= 0) {
++		ret = -EINVAL;
++		epfs_err("illegal num: %llu", num);
++		goto out_set_range;
++	}
++
++	range = kzalloc(sizeof(header) + sizeof(header.range[0]) * num,
++			GFP_KERNEL);
++	if (!range) {
++		ret = -ENOMEM;
++		goto out_set_range;
++	}
++
++	if (copy_from_user(range, (struct epfs_range *)arg,
++		sizeof(header) + sizeof(header.range[0]) * num)) {
++		ret = -EFAULT;
++		epfs_err("Failed to get range! num: %llu", num);
++		kfree(range);
++		goto out_set_range;
++	}
++	range->num = num;
++
++	ret = epfs_check_range(range);
++	if (ret) {
++		kfree(range);
++		goto out_set_range;
++	}
++
++	info->range = range;
++out_set_range:
++	mutex_unlock(&info->lock);
++	return ret;
++}
++
++static long __epfs_ioctl(struct file *file, unsigned int cmd,
++			 unsigned long arg)
++{
++	long rc = -ENOTTY;
++
++	if (unlikely(_IOC_TYPE(cmd) != EPFS_IOCTL_MAGIC)) {
++		epfs_err("Failed to check epfs magic: %u", _IOC_TYPE(cmd));
++		return -ENOTTY;
++	}
++	if (unlikely(_IOC_NR(cmd) >= EPFS_IOCTL_MAXNR)) {
++		epfs_err("Failed to check ioctl number: %u", _IOC_NR(cmd));
++		return -ENOTTY;
++	}
++	if (unlikely(!access_ok((void __user *)arg, _IOC_SIZE(cmd)))) {
++		epfs_err("Failed to check user address space range!");
++		return -EFAULT;
++	}
++
++	switch (cmd) {
++	case IOC_SET_ORIGIN_FD:
++		return epfs_set_origin_fd(file, arg);
++	case IOC_SET_EPFS_RANGE:
++		return epfs_set_range(file, arg);
++	default:
++		epfs_info("Exit epfs unsupported ioctl, ret: %ld", rc);
++		return rc;
++	}
++}
++
++static long epfs_compat_ioctl(struct file *file, unsigned int cmd,
++				   unsigned long arg)
++{
++	return __epfs_ioctl(file, cmd, arg);
++}
++
++static long epfs_unlocked_ioctl(struct file *file, unsigned int cmd,
++				     unsigned long arg)
++{
++	return __epfs_ioctl(file, cmd, arg);
++}
++
++static ssize_t epfs_read(struct file *file, char __user *buf, size_t count,
++			      loff_t *ppos)
++{
++	struct inode *inode = file_inode(file);
++	struct epfs_inode_info *info = epfs_inode_to_private(inode);
++	struct file *origin_file;
++	struct epfs_range *range;
++	ssize_t ret = 0;
++	loff_t pos = *ppos;
++	loff_t file_size;
++	int current_range_index = 0;
++
++	mutex_lock(&info->lock);
++	range = info->range;
++	if (!range) {
++		ret = -EINVAL;
++		epfs_err("Invalid inode range!");
++		goto out_read;
++	}
++
++	origin_file = info->origin_file;
++
++	if (!origin_file) {
++		ret = -ENOENT;
++		epfs_err("origin file not exist!");
++		goto out_read;
++	}
++
++	// Reduce count when it will read over file size.
++	file_size = i_size_read(file_inode(origin_file));
++	if (IS_ENABLED(CONFIG_EPFS_DEBUG))
++		if (count > (file_size - pos))
++			epfs_debug(
++				"count will be truncated to %llu, as file_size=%llu, pos=%llu",
++				file_size - pos, file_size, pos);
++	count = count <= (file_size - pos) ? count : (file_size - pos);
++
++	// Skip ranges before pos.
++	while ((range->range[current_range_index].end <= pos) &&
++	       (current_range_index < range->num))
++		current_range_index++;
++
++	while (count > 0) {
++		__u64 current_begin, current_end;
++
++		if (current_range_index >= range->num) {
++			// read directly when epfs range gone;
++			if (IS_ENABLED(CONFIG_EPFS_DEBUG))
++				epfs_debug(
++					"read from %llu with len %zu at the end.",
++					pos, count);
++			ret = vfs_read(origin_file, buf, count, &pos);
++			break;
++		}
++		current_begin = range->range[current_range_index].begin;
++		current_end = range->range[current_range_index].end;
++		if (current_begin <= pos) {
++			// Clear user memory
++			unsigned long clear_len = current_end - pos;
++
++			clear_len = clear_len < count ? clear_len : count;
++			if (IS_ENABLED(CONFIG_EPFS_DEBUG))
++				epfs_debug(
++					"clear user memory from %llu with len %lu",
++					pos, clear_len);
++			if (clear_user(buf, clear_len)) {
++				ret = EFAULT;
++				break;
++			}
++			buf += clear_len;
++			pos += clear_len;
++			count -= clear_len;
++			current_range_index++;
++		} else {
++			// Read from pos to (next)current_begin
++			unsigned long read_len = current_begin - pos;
++
++			read_len = read_len < count ? read_len : count;
++			if (IS_ENABLED(CONFIG_EPFS_DEBUG))
++				epfs_debug(
++					"read from %llu with len %lu",
++					pos, read_len);
++			ret = vfs_read(origin_file, buf, read_len, &pos);
++			if (ret < 0 || ret < read_len) {
++				// Could not read enough bytes;
++				break;
++			}
++			buf += ret;
++			count -= ret;
++		}
++	}
++
++	if (ret >= 0) {
++		ret = pos - *ppos;
++		*ppos = pos;
++	}
++out_read:
++	mutex_unlock(&info->lock);
++	return ret;
++}
++
++const struct file_operations epfs_file_fops = {
++	.unlocked_ioctl = epfs_unlocked_ioctl,
++	.compat_ioctl = epfs_compat_ioctl,
++	.read = epfs_read,
++	.llseek = generic_file_llseek,
++};
+diff --git a/fs/epfs/inode.c b/fs/epfs/inode.c
+new file mode 100644
+index 000000000..99b94108d
+--- /dev/null
++++ b/fs/epfs/inode.c
+@@ -0,0 +1,126 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * fs/epfs/inode.c
++ *
++ * Copyright (c) 2022 Huawei Technologies Co., Ltd.
++ * Author: weilongping@huawei.com
++ * Create: 2022-06-10
++ */
++#include <linux/fs.h>
++#include <linux/fs_stack.h>
++#include <linux/version.h>
++
++#include "internal.h"
++
++#define USER_DATA_RW		1008
++#define USER_DATA_RW_UID	KUIDT_INIT(USER_DATA_RW)
++#define USER_DATA_RW_GID	KGIDT_INIT(USER_DATA_RW)
++
++struct dentry *epfs_lookup(struct inode *dir, struct dentry *dentry,
++				unsigned int flags)
++{
++	return ERR_PTR(-ENOENT);
++}
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
++static int epfs_tmpfile(struct mnt_idmap *idmap, struct inode *dir,
++			     struct file *file, umode_t mode)
++#else
++static int epfs_tmpfile(struct user_namespace *mnt_userns, struct inode *dir,
++			     struct file *file, umode_t mode)
++#endif
++#else
++static int epfs_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
++#endif
++{
++	struct inode *inode = epfs_iget(dir->i_sb, false);
++
++	if (!inode)
++		return -ENOSPC;
++	d_tmpfile(file, inode);
++	if (IS_ENABLED(CONFIG_EPFS_DEBUG))
++		epfs_debug("epfs: tmpfile %p", inode);
++	return finish_open_simple(file, 0);;
++}
++
++const struct inode_operations epfs_dir_iops = {
++	.tmpfile = epfs_tmpfile,
++	.lookup = epfs_lookup,
++};
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
++static int epfs_getattr(struct mnt_idmap *idmap,
++			     const struct path *path, struct kstat *stat,
++			     u32 request_mask, unsigned int flags)
++#else
++static int epfs_getattr(struct user_namespace *mnt_userns,
++			     const struct path *path, struct kstat *stat,
++			     u32 request_mask, unsigned int flags)
++#endif
++#else
++static int epfs_getattr(const struct path *path, struct kstat *stat,
++			     u32 request_mask, unsigned int flags)
++#endif
++{
++	struct dentry *dentry = path->dentry;
++	struct inode *inode = d_inode(dentry);
++	struct epfs_inode_info *info = epfs_inode_to_private(inode);
++	struct file *origin_file;
++	struct kstat origin_stat;
++	int ret;
++
++	mutex_lock(&info->lock);
++	origin_file = info->origin_file;
++	if (!origin_file) {
++		ret = -ENOENT;
++		goto out_getattr;
++	}
++	ret = vfs_getattr(&(origin_file->f_path), &origin_stat, request_mask,
++			  flags);
++	if (ret)
++		goto out_getattr;
++	fsstack_copy_attr_all(inode, file_inode(origin_file));
++	fsstack_copy_inode_size(inode, file_inode(origin_file));
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
++	generic_fillattr(idmap, request_mask, d_inode(dentry), stat);
++#else
++	generic_fillattr(mnt_userns, d_inode(dentry), stat);
++#endif
++#else
++	generic_fillattr(d_inode(dentry), stat);
++#endif
++	stat->blocks = origin_stat.blocks;
++
++out_getattr:
++	mutex_unlock(&info->lock);
++	return ret;
++}
++
++const struct inode_operations epfs_file_iops = {
++	.getattr = epfs_getattr,
++};
++
++struct inode *epfs_iget(struct super_block *sb, bool is_dir)
++{
++	struct inode *inode = new_inode(sb);
++
++	if (!inode) {
++		epfs_err("Failed to allocate new inode");
++		return NULL;
++	}
++	if (is_dir) {
++		inode->i_op = &epfs_dir_iops;
++		inode->i_fop = &epfs_dir_fops;
++		inode->i_mode = S_IFDIR | 0770;
++	} else {
++		inode->i_op = &epfs_file_iops;
++		inode->i_fop = &epfs_file_fops;
++		inode->i_mode = S_IFREG;
++	}
++	inode->i_uid = USER_DATA_RW_UID;
++	inode->i_gid = USER_DATA_RW_GID;
++	return inode;
++}
+diff --git a/fs/epfs/internal.h b/fs/epfs/internal.h
+new file mode 100644
+index 000000000..c6634e705
+--- /dev/null
++++ b/fs/epfs/internal.h
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * fs/epfs/internal.h
++ *
++ * Copyright (c) 2022 Huawei Technologies Co., Ltd.
++ * Author: weilongping@huawei.com
++ * Create: 2022-06-10
++ */
++#ifndef __FS_EPFS_INTERNAL_H__
++#define __FS_EPFS_INTERNAL_H__
++
++#include <linux/fs.h>
++#include <linux/mutex.h>
++
++#include "epfs.h"
++
++#define EPFS_SUPER_MAGIC 0x20220607
++
++struct epfs_inode_info {
++	struct inode vfs_inode;
++	struct file *origin_file;
++	struct epfs_range *range;
++	struct mutex lock;
++};
++
++static inline struct epfs_inode_info *epfs_inode_to_private(struct inode *inode)
++{
++	return container_of(inode, struct epfs_inode_info, vfs_inode);
++}
++
++struct inode *epfs_iget(struct super_block *sb, bool is_dir);
++extern const struct dentry_operations epfs_dops;
++extern const struct file_operations epfs_dir_fops;
++extern const struct file_operations epfs_file_fops;
++extern struct file_system_type epfs_fs_type;
++extern struct kmem_cache *epfs_inode_cachep;
++
++#endif // __FS_EPFS_INTERNAL_H__
+diff --git a/fs/epfs/main.c b/fs/epfs/main.c
+new file mode 100644
+index 000000000..c91e94f8f
+--- /dev/null
++++ b/fs/epfs/main.c
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * fs/epfs/main.c
++ *
++ * Copyright (c) 2022 Huawei Technologies Co., Ltd.
++ * Author: weilongping@huawei.com
++ * Create: 2022-06-10
++ */
++#include <linux/fs.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++
++#include "internal.h"
++
++struct kmem_cache *epfs_inode_cachep;
++
++static int __init epfs_init(void)
++{
++	int ret;
++
++	epfs_inode_cachep =
++		kmem_cache_create("epfs_inode_cache",
++				  sizeof(struct epfs_inode_info), 0, 0,
++				  NULL);
++	if (!epfs_inode_cachep)
++		return -ENOMEM;
++	ret = register_filesystem(&epfs_fs_type);
++	if (ret)
++		kmem_cache_destroy(epfs_inode_cachep);
++	return ret;
++}
++
++static void __exit epfs_exit(void)
++{
++	unregister_filesystem(&epfs_fs_type);
++	kmem_cache_destroy(epfs_inode_cachep);
++}
++
++module_init(epfs_init)
++module_exit(epfs_exit)
++MODULE_DESCRIPTION("Enhanced Proxy File System for OpenHarmony");
++MODULE_AUTHOR("LongPing Wei weilongping@huawei.com");
++MODULE_LICENSE("GPL v2");
++MODULE_ALIAS_FS("epfs");
+diff --git a/fs/epfs/super.c b/fs/epfs/super.c
+new file mode 100644
+index 000000000..7368af775
+--- /dev/null
++++ b/fs/epfs/super.c
+@@ -0,0 +1,127 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * fs/epfs/super.c
++ *
++ * Copyright (c) 2022 Huawei Technologies Co., Ltd.
++ * Author: weilongping@huawei.com
++ * Create: 2022-06-10
++ */
++#include <linux/file.h>
++#include <linux/fs.h>
++#include <linux/slab.h>
++#include <linux/statfs.h>
++#include <linux/version.h>
++
++#include "internal.h"
++
++static struct inode *epfs_alloc_inode(struct super_block *sb)
++{
++	struct epfs_inode_info *info =
++		kmem_cache_zalloc(epfs_inode_cachep, GFP_KERNEL);
++	if (IS_ENABLED(CONFIG_EPFS_DEBUG))
++		epfs_debug("inode info: %p", info);
++	inode_init_once(&info->vfs_inode);
++	mutex_init(&info->lock);
++	return &info->vfs_inode;
++}
++
++// Free epfs_inode_info
++static void epfs_free_inode(struct inode *inode)
++{
++	if (IS_ENABLED(CONFIG_EPFS_DEBUG))
++		epfs_debug("free_inode: %p", inode);
++	kmem_cache_free(epfs_inode_cachep,
++			epfs_inode_to_private(inode));
++}
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
++static void i_callback(struct rcu_head *head)
++{
++	struct inode *inode = container_of(head, struct inode, i_rcu);
++
++	epfs_free_inode(inode);
++}
++#endif
++
++// Destroy epfs_range
++static void epfs_destroy_inode(struct inode *inode)
++{
++	struct epfs_inode_info *info = epfs_inode_to_private(inode);
++
++	mutex_lock(&info->lock);
++	kfree(info->range);
++	info->range = NULL;
++	mutex_unlock(&info->lock);
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
++	call_rcu(&inode->i_rcu, i_callback);
++#endif
++}
++
++// Clear vfs_inode
++static void epfs_evict_inode(struct inode *inode)
++{
++	struct epfs_inode_info *info = epfs_inode_to_private(inode);
++
++	clear_inode(inode);
++	mutex_lock(&info->lock);
++	if (info->origin_file) {
++		fput(info->origin_file);
++		info->origin_file = NULL;
++	}
++	mutex_unlock(&info->lock);
++}
++
++static int epfs_statfs(struct dentry *dentry, struct kstatfs *buf)
++{
++	buf->f_type = EPFS_SUPER_MAGIC;
++	return 0;
++}
++struct super_operations epfs_sops = {
++	.alloc_inode = epfs_alloc_inode,
++	.destroy_inode = epfs_destroy_inode,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)
++	.free_inode = epfs_free_inode,
++#endif
++	.evict_inode = epfs_evict_inode,
++	.statfs = epfs_statfs,
++};
++
++static int epfs_fill_super(struct super_block *s, void *data, int silent)
++{
++	struct inode *inode;
++
++	s->s_op = &epfs_sops;
++	s->s_d_op = &epfs_dops;
++	s->s_magic = EPFS_SUPER_MAGIC;
++	inode = epfs_iget(s, true /* dir */);
++	if (!inode) {
++		epfs_err("Failed to get root inode!");
++		return -ENOMEM;
++	}
++
++	s->s_root = d_make_root(inode);
++	if (!s->s_root) {
++		epfs_err("Failed to make root inode");
++		return -ENOMEM;
++	}
++
++	return 0;
++}
++
++struct dentry *epfs_mount(struct file_system_type *fs_type, int flags,
++			       const char *dev_name, void *raw_data)
++{
++	return mount_nodev(fs_type, flags, raw_data, epfs_fill_super);
++}
++
++void epfs_kill_sb(struct super_block *sb)
++{
++	kill_anon_super(sb);
++}
++
++struct file_system_type epfs_fs_type = {
++	.owner = THIS_MODULE,
++	.name = "epfs",
++	.mount = epfs_mount,
++	.kill_sb = epfs_kill_sb,
++};
+diff --git a/fs/sharefs/Kconfig b/fs/sharefs/Kconfig
+new file mode 100644
+index 000000000..588192e26
+--- /dev/null
++++ b/fs/sharefs/Kconfig
+@@ -0,0 +1,24 @@
++config SHARE_FS
++	tristate "SHAREFS filesystem support"
++	help
++	  SHAREFS is an overlay file system.SHAREFS is used for file sharing
++	  between applications. Sharefs manages permissions through different
++	  permissions for reading and writing directories.
++
++config SHAREFS_SUPPORT_OVERRIDE
++	bool "Sharefs: support override "
++	depends on SHARE_FS
++	default n
++	help
++	  This is the switch of override feature on sharefs file system. 
++	  If the device type is 2in1, it shoule be set y.
++
++config SHAREFS_SUPPORT_WRITE
++	bool "Sharefs: support write operations"
++	depends on SHARE_FS
++	depends on SHAREFS_SUPPORT_OVERRIDE
++	default n
++	help
++	  This is the switch of write operation on sharefs file system. 
++	  If the device type is 2in1 and writing files is needed,
++	  it shoule be set y.
+diff --git a/fs/sharefs/Makefile b/fs/sharefs/Makefile
+new file mode 100644
+index 000000000..812f27224
+--- /dev/null
++++ b/fs/sharefs/Makefile
+@@ -0,0 +1,12 @@
++obj-$(CONFIG_SHARE_FS) += sharefs.o
++ccflags-y += -I$(src)
++# Backport shim for kernels older than the 6.6 these sources target.
++# Force-included so it lands ahead of the VFS headers in every unit.
++# ($(srctree)/ spelled out: kbuild only rewrites relative -I paths for O= builds.)
++ccflags-y += -include $(srctree)/$(src)/sharefs_compat.h
++
++sharefs-y := dentry.o file.o inode.o main.o super.o lookup.o authentication.o config.o
++
++# OHOS reference builds are not -Werror; these byte-identical sources
++# carry benign warnings that CONFIG_WERROR would otherwise promote.
++ccflags-remove-y += -Werror
+diff --git a/fs/sharefs/authentication.c b/fs/sharefs/authentication.c
+new file mode 100644
+index 000000000..bf3e5e35e
+--- /dev/null
++++ b/fs/sharefs/authentication.c
+@@ -0,0 +1,103 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * fs/sharefs/authentication.c
++ *
++ * Copyright (c) 2023 Huawei Device Co., Ltd.
++ */
++#include "authentication.h"
++
++static inline __u16 perm_get_next_level(__u16 perm)
++{
++	__u16 level = (perm & SHAREFS_PERM_MASK) + 1;
++
++	if (level <= SHAREFS_PERM_OTHER)
++		return level;
++	else
++		return SHAREFS_PERM_OTHER;
++}
++
++__u16 perm_get_next_level_override(__u16 perm)
++{
++	__u16 level = (perm & SHAREFS_PERM_MASK) + 1;
++
++	return level <= SHAREFS_PERM_OTHER_OVERRIDE ? level : SHAREFS_PERM_OTHER_OVERRIDE;
++}
++
++void fixup_perm_from_level(struct inode *dir, struct dentry *dentry)
++{
++	struct sharefs_inode_info *hii = SHAREFS_I(dir);
++	struct inode *dinode = d_inode(dentry);
++	struct sharefs_inode_info *dinfo = SHAREFS_I(dinode);
++	const unsigned char* cur_name =  dentry->d_name.name;
++	__u16 level = perm_get_next_level(hii->perm);
++	__u16 perm = 0;
++	int bid = 0;
++
++	if (IS_ERR_OR_NULL(dinode))
++		return;
++	dinode->i_uid = dir->i_uid;
++	dinode->i_gid = dir->i_gid;
++	switch (level) {
++	case SHAREFS_PERM_MNT:
++		bid = get_bundle_uid(SHAREFS_SB(dentry->d_sb),
++					 dentry->d_name.name);
++		perm = level;
++		if (bid != 0) {
++			dinode->i_uid = KUIDT_INIT(bid);
++			dinode->i_gid = KGIDT_INIT(bid);
++		} else {
++			dinode->i_uid = ROOT_UID;
++			dinode->i_gid = ROOT_GID;
++		}
++		dinode->i_mode = (dinode->i_mode & S_IFMT) | SHAREFS_PERM_READONLY_DIR;
++		break;
++	case SHAREFS_PERM_DFS:
++		if (!strcmp(cur_name, SHAREFS_READ_DIR)) {
++			perm = SHAREFS_DIR_TYPE_READONLY | level;
++			sharefs_set_read_perm(dinode);
++		} else if (!strcmp(cur_name, SHAREFS_READWRITE_DIR)) {
++			perm = SHAREFS_DIR_TYPE_READWRITE | level;
++			sharefs_set_read_write_perm(dinode);
++		}
++		break;
++	case SHAREFS_PERM_OTHER:
++		if (is_read_only_auth(hii->perm)) {
++			perm = SHAREFS_DIR_TYPE_READONLY | SHAREFS_PERM_DFS;
++			sharefs_set_read_perm(dinode);
++		} else if (is_read_write_auth(hii->perm)) {
++			perm = SHAREFS_DIR_TYPE_READWRITE | SHAREFS_PERM_DFS;
++			sharefs_set_read_write_perm(dinode);
++		}
++		break;
++	default:
++		sharefs_err("sharedfs perm incorrect got default case, level:%u", level);
++		break;
++	}
++	dinfo->perm = perm;
++}
++
++void sharefs_root_inode_perm_init(struct inode *root_inode)
++{
++	struct sharefs_inode_info *hii = SHAREFS_I(root_inode);
++	hii->perm = SHAREFS_PERM_FIX;
++}
++
++const struct cred *sharefs_override_file_fsids(struct inode *dir, __u16 *_perm)
++{
++	struct cred *cred = NULL;
++	cred = prepare_creds();
++	if (!cred)
++		return NULL;
++
++	cred->fsuid = dir->i_uid;
++	cred->fsgid = dir->i_gid;
++	return override_creds(cred);
++}
++
++void sharefs_revert_fsids(const struct cred *old_cred)
++{
++	const struct cred *cur_cred;
++	cur_cred = current->cred;
++	revert_creds(old_cred);
++	put_cred(cur_cred);
++}
+\ No newline at end of file
+diff --git a/fs/sharefs/authentication.h b/fs/sharefs/authentication.h
+new file mode 100644
+index 000000000..349d99d64
+--- /dev/null
++++ b/fs/sharefs/authentication.h
+@@ -0,0 +1,83 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * fs/sharefs/authentication.h
++ *
++ * Copyright (c) 2023 Huawei Device Co., Ltd.
++ */
++#ifndef AUTHENTICATION_H
++#define AUTHENTICATION_H
++
++#include "sharefs.h"
++
++#define OID_ROOT             	0
++
++#define SHAREFS_PERM_MASK     0x000F
++
++#define SHAREFS_PERM_FIX           0
++#define SHAREFS_PERM_MNT           1
++#define SHAREFS_PERM_DFS           2
++#define SHAREFS_PERM_OTHER         3
++#define SHAREFS_PERM_ELX_OVERRIDE  1
++#define SHAREFS_PERM_BASE_OVERRIDE  2
++#define SHAREFS_PERM_PACKAGE_OVERRIDE  3
++#define SHAREFS_PERM_OTHER_OVERRIDE  4
++
++#define SHAREFS_READ_DIR  "r"
++#define SHAREFS_READWRITE_DIR "rw"
++
++#define BASE_USER_RANGE     200000 /* offset for uid ranges for each user */
++
++
++#define SHAREFS_DIR_TYPE_MASK	       0x00F0
++#define SHAREFS_DIR_TYPE_READONLY      0x0010
++#define SHAREFS_DIR_TYPE_READWRITE     0x0020
++
++#define SHAREFS_PERM_READONLY_DIR   00550
++#define SHAREFS_PERM_READONLY_FILE  00440
++#define SHAREFS_PERM_READWRITE_DIR  00550
++#define SHAREFS_PERM_READWRITE_FILE 00660
++
++extern int get_bid_config(const char *bname);
++extern int __init sharefs_init_configfs(void);
++extern void sharefs_exit_configfs(void);
++
++void sharefs_root_inode_perm_init(struct inode *root_inode);
++void fixup_perm_from_level(struct inode *dir, struct dentry *dentry);
++__u16 perm_get_next_level_override(__u16 perm);
++const struct cred *sharefs_override_file_fsids(struct inode *dir,
++				 __u16 *_perm);
++void sharefs_revert_fsids(const struct cred *old_cred);
++
++
++static inline bool is_read_only_auth(__u16 perm)
++{
++	return (perm & SHAREFS_DIR_TYPE_MASK) == SHAREFS_DIR_TYPE_READONLY;
++}
++
++static inline bool is_read_write_auth(__u16 perm)
++{
++	return (perm & SHAREFS_DIR_TYPE_MASK) == SHAREFS_DIR_TYPE_READWRITE;
++}
++
++static inline void sharefs_set_read_perm(struct inode *inode)
++{
++	if (S_ISDIR(inode->i_mode))
++		inode->i_mode = (inode->i_mode & S_IFMT) | SHAREFS_PERM_READONLY_DIR;
++	else
++		inode->i_mode = (inode->i_mode & S_IFMT) | SHAREFS_PERM_READONLY_FILE;
++}
++
++static inline void sharefs_set_read_write_perm(struct inode *inode)
++{
++	if (S_ISDIR(inode->i_mode))
++		inode->i_mode = (inode->i_mode & S_IFMT) | SHAREFS_PERM_READWRITE_DIR;
++	else
++		inode->i_mode = (inode->i_mode & S_IFMT) | SHAREFS_PERM_READWRITE_FILE;
++}
++
++static inline int get_bundle_uid(struct sharefs_sb_info *sbi, const char *bname)
++{
++	return sbi->user_id * BASE_USER_RANGE + get_bid_config(bname);
++}
++
++#endif //_AUTHENTICATION_H_
+\ No newline at end of file
+diff --git a/fs/sharefs/config.c b/fs/sharefs/config.c
+new file mode 100644
+index 000000000..fe30eeeff
+--- /dev/null
++++ b/fs/sharefs/config.c
+@@ -0,0 +1,372 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * fs/sharefs/config.c
++ *
++ * Copyright (c) 2023 Huawei Device Co., Ltd.
++ */
++
++#include <linux/configfs.h>
++#include <linux/ctype.h>
++#include <linux/dcache.h>
++#include <linux/hashtable.h>
++#include <linux/slab.h>
++#include "sharefs.h"
++
++static struct kmem_cache *sharefs_bid_entry_cachep;
++
++struct sharefs_bid_entry {
++	struct hlist_node node;
++	struct qstr str;
++	int id;
++};
++
++struct sharefs_config_bitem {
++	struct config_item item;
++	struct qstr str;
++};
++
++static unsigned int make_hash(const char *name, unsigned int len)
++{
++	unsigned long hash;
++	
++	hash = init_name_hash(0);
++	while (len--)
++		hash = partial_name_hash(tolower(*name++), hash);
++
++	return end_name_hash(hash);
++}
++
++static struct qstr make_qstr(const char *name)
++{
++	struct qstr str;
++	str.name = name;
++	str.len = strlen(name);
++	str.hash = make_hash(str.name, str.len);
++
++	return str;
++}
++
++static struct sharefs_bid_entry *alloc_bid_entry(const char *name, int id)
++{
++	struct sharefs_bid_entry *bid_entry;
++	char *bid_entry_name;
++
++	bid_entry = kmem_cache_alloc(sharefs_bid_entry_cachep, GFP_KERNEL);
++	if (!bid_entry) {
++		bid_entry = ERR_PTR(-ENOMEM);
++		goto out;
++	}
++
++	bid_entry_name = kstrdup(name, GFP_KERNEL);
++	if (!bid_entry_name) {
++		kmem_cache_free(sharefs_bid_entry_cachep, bid_entry);
++		bid_entry = ERR_PTR(-ENOMEM);
++		goto out;
++	}
++
++	INIT_HLIST_NODE(&bid_entry->node);
++	bid_entry->str = make_qstr(bid_entry_name);
++	bid_entry->id = id;
++out:
++	return bid_entry;
++}
++
++static void free_bid_entry(struct sharefs_bid_entry *bid_entry)
++{
++	if (bid_entry == NULL)
++		return;
++
++	kfree(bid_entry->str.name);
++	kmem_cache_free(sharefs_bid_entry_cachep, bid_entry);
++}
++
++static struct sharefs_config_bitem *alloc_bitem(const char *name)
++{
++	struct sharefs_config_bitem *bitem;
++	char *bitem_name;
++
++	bitem = kzalloc(sizeof(*bitem), GFP_KERNEL);
++	if (!bitem) {
++		bitem = ERR_PTR(-ENOMEM);
++		goto out;
++	}
++
++	bitem_name = kstrdup(name, GFP_KERNEL);
++	if (!bitem_name) {
++		kfree(bitem);
++		bitem = ERR_PTR(-ENOMEM);
++		goto out;
++	}
++
++	bitem->str = make_qstr(bitem_name);
++out:
++	return bitem;
++}
++
++static void free_bitem(struct sharefs_config_bitem *bitem)
++{
++	if (bitem == NULL)
++		return;
++
++	kfree(bitem->str.name);
++	kfree(bitem);
++}
++
++#define SHAREFS_BUNDLE_ATTRIBUTE(_attr_)					\
++									\
++static DEFINE_HASHTABLE(sharefs_##_attr_##_hash_table, 4);		\
++									\
++static DEFINE_MUTEX(sharefs_##_attr_##_hash_mutex);			\
++									\
++static int query_##_attr_##_hash_entry(struct qstr *str)		\
++{									\
++	int id = 0;							\
++	struct sharefs_bid_entry *bid_entry;				\
++	struct hlist_node *hash_node;					\
++									\
++	mutex_lock(&sharefs_##_attr_##_hash_mutex);			\
++	hash_for_each_possible_safe(sharefs_##_attr_##_hash_table,	\
++		bid_entry, hash_node, node, str->hash) {		\
++		if (qstr_case_eq(str, &bid_entry->str)) {		\
++			id = bid_entry->id;				\
++			break;						\
++		}							\
++	}								\
++	mutex_unlock(&sharefs_##_attr_##_hash_mutex);			\
++									\
++	return id;							\
++}									\
++									\
++static int insert_##_attr_##_hash_entry(struct qstr *str, int id)	\
++{									\
++	int err = 0;							\
++	struct sharefs_bid_entry *bid_entry;				\
++	struct hlist_node *hash_node;					\
++									\
++	sharefs_info("insert name = %s", str->name);			\
++									\
++	mutex_lock(&sharefs_##_attr_##_hash_mutex);			\
++	hash_for_each_possible_safe(sharefs_##_attr_##_hash_table,	\
++		bid_entry, hash_node, node, str->hash) {		\
++		if (qstr_case_eq(str, &bid_entry->str)) {		\
++			bid_entry->id = id;				\
++			mutex_unlock(&sharefs_##_attr_##_hash_mutex);	\
++			goto out;					\
++		}							\
++	}								\
++	mutex_unlock(&sharefs_##_attr_##_hash_mutex);			\
++									\
++	bid_entry = alloc_bid_entry(str->name, id);			\
++	if (IS_ERR(bid_entry)) {					\
++		err = PTR_ERR(bid_entry);				\
++		goto out;						\
++	} 								\
++									\
++	hash_add_rcu(sharefs_##_attr_##_hash_table, &bid_entry->node,	\
++		 bid_entry->str.hash);					\
++out:									\
++	return err;							\
++}									\
++									\
++static void remove_##_attr_##_hash_entry(struct qstr *str)		\
++{									\
++	struct sharefs_bid_entry *bid_entry;				\
++	struct hlist_node *hash_node;					\
++									\
++	sharefs_info("remove name = %s", str->name);			\
++									\
++	mutex_lock(&sharefs_##_attr_##_hash_mutex);			\
++	hash_for_each_possible_safe(sharefs_##_attr_##_hash_table,	\
++		bid_entry, hash_node, node, str->hash) {		\
++		if (qstr_case_eq(str, &bid_entry->str)) {		\
++			hash_del_rcu(&bid_entry->node);			\
++			free_bid_entry(bid_entry);			\
++			break;						\
++		}							\
++	}								\
++	mutex_unlock(&sharefs_##_attr_##_hash_mutex);			\
++}									\
++									\
++static void clear_##_attr_##_hash_entry(void)				\
++{									\
++	int index;							\
++	struct sharefs_bid_entry *bid_entry;				\
++	struct hlist_node *hash_node;					\
++									\
++	sharefs_info("clear bid entry");					\
++									\
++	mutex_lock(&sharefs_##_attr_##_hash_mutex);			\
++	hash_for_each_safe(sharefs_##_attr_##_hash_table, index,		\
++		hash_node, bid_entry, node) {				\
++		hash_del_rcu(&bid_entry->node);				\
++		kfree(bid_entry->str.name);				\
++		kmem_cache_free(sharefs_bid_entry_cachep, bid_entry);	\
++	}								\
++	mutex_unlock(&sharefs_##_attr_##_hash_mutex);			\
++}									\
++									\
++static int sharefs_##_attr_##_get(const char *bname)			\
++{									\
++	struct qstr str;						\
++									\
++	str = make_qstr(bname);						\
++	return query_##_attr_##_hash_entry(&str);			\
++}									\
++									\
++static ssize_t sharefs_##_attr_##_show(struct config_item *item,		\
++	char *page)							\
++{									\
++	int id;								\
++	struct sharefs_config_bitem *bitem;				\
++									\
++	sharefs_info("show bundle id");					\
++									\
++	bitem = container_of(item, struct sharefs_config_bitem, item);	\
++	id = query_##_attr_##_hash_entry(&bitem->str);			\
++									\
++	return scnprintf(page, PAGE_SIZE, "%u\n", id);			\
++}									\
++									\
++static ssize_t sharefs_##_attr_##_store(struct config_item *item,	\
++	const char *page, size_t count)					\
++{									\
++	int id;								\
++	int err;							\
++	size_t size;							\
++	struct sharefs_config_bitem *bitem;				\
++									\
++	sharefs_info("store bundle id");					\
++									\
++	bitem = container_of(item, struct sharefs_config_bitem, item);	\
++									\
++	if (kstrtouint(page, 10, &id)) {				\
++		size = -EINVAL;						\
++		goto out; 						\
++	}								\
++									\
++	err = insert_##_attr_##_hash_entry(&bitem->str, id);		\
++	if (err) {							\
++		size = err;						\
++		goto out;						\
++	}								\
++									\
++	size = count;							\
++out:									\
++	return size;							\
++}									\
++									\
++static struct configfs_attribute sharefs_##_attr_##_attr = {		\
++	.ca_name	= __stringify(_attr_),				\
++	.ca_mode	= S_IRUGO | S_IWUGO,				\
++	.ca_owner	= THIS_MODULE,					\
++	.show		= sharefs_##_attr_##_show,			\
++	.store		= sharefs_##_attr_##_store,			\
++};					
++
++SHAREFS_BUNDLE_ATTRIBUTE(appid)
++
++static struct configfs_attribute *sharefs_battrs[] = {
++	&sharefs_appid_attr,
++	NULL,
++};
++
++static void sharefs_config_bitem_release(struct config_item *item)
++{
++	struct sharefs_config_bitem *bitem;
++
++	sharefs_info("release bundle item");
++
++	bitem = container_of(item, struct sharefs_config_bitem, item);
++	remove_appid_hash_entry(&bitem->str);
++	remove_appid_hash_entry(&bitem->str);
++	free_bitem(bitem);
++}
++
++static struct configfs_item_operations sharefs_config_bitem_ops = {
++	.release = sharefs_config_bitem_release,
++};
++
++static struct config_item_type sharefs_config_bitem_type = {
++	.ct_item_ops	= &sharefs_config_bitem_ops,
++	.ct_attrs	= sharefs_battrs,
++	.ct_owner	= THIS_MODULE,
++};
++
++static struct config_item *sharefs_make_bitem(struct config_group *group,
++					      const char *name)
++{
++	struct config_item *item;
++	struct sharefs_config_bitem *bitem;
++
++	bitem = alloc_bitem(name);
++	if (IS_ERR(bitem)) {
++		item = ERR_PTR(-ENOMEM);
++		goto out;
++	}
++
++	config_item_init_type_name(&bitem->item, name,
++		&sharefs_config_bitem_type);
++	item = &bitem->item;
++out:
++	return item;
++}
++
++static struct configfs_group_operations sharefs_group_ops = {
++	.make_item = sharefs_make_bitem,
++};
++
++static struct config_item_type sharefs_group_type = {
++	.ct_group_ops     = &sharefs_group_ops,
++	.ct_owner         = THIS_MODULE,
++};
++
++static struct configfs_subsystem sharefs_subsystem = {
++	.su_group = {
++		.cg_item = {
++			.ci_namebuf = "sharefs",
++			.ci_type = &sharefs_group_type,
++		},
++	},
++};
++
++int get_bid_config(const char *bname)
++{
++	return sharefs_appid_get(bname);
++}
++
++int __init sharefs_init_configfs(void)
++{
++	int err;
++	struct configfs_subsystem *subsys;
++
++	sharefs_info("init configfs");
++
++	sharefs_bid_entry_cachep = kmem_cache_create("sharefs_bid_entry_cachep",
++		sizeof(struct sharefs_bid_entry), 0, 0, NULL);
++	if (!sharefs_bid_entry_cachep) {
++		sharefs_err("failed to create bid entry cachep");
++		err = -ENOMEM;
++		goto out;
++	}
++
++	subsys = &sharefs_subsystem;
++	config_group_init(&subsys->su_group);
++	mutex_init(&subsys->su_mutex);
++
++	err = configfs_register_subsystem(subsys);
++	if (err)
++		sharefs_err("failed to register subsystem");
++
++out:
++	return err;
++}
++
++void sharefs_exit_configfs(void)
++{
++	sharefs_info("sharefs exit configfs");
++
++	configfs_unregister_subsystem(&sharefs_subsystem);
++	clear_appid_hash_entry();
++
++	kmem_cache_destroy(sharefs_bid_entry_cachep);
++}
+\ No newline at end of file
+diff --git a/fs/sharefs/dentry.c b/fs/sharefs/dentry.c
+new file mode 100644
+index 000000000..86881c2df
+--- /dev/null
++++ b/fs/sharefs/dentry.c
+@@ -0,0 +1,54 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * fs/sharefs/dentry.c
++ *
++ * Copyright (c) 1998-2022 Erez Zadok
++ * Copyright (c) 2009	   Shrikar Archak
++ * Copyright (c) 2003-2022 Stony Brook University
++ * Copyright (c) 2003-2022 The Research Foundation of SUNY
++ * Copyright (c) 2023 Huawei Device Co., Ltd.
++ */
++
++#include "sharefs.h"
++
++
++static bool is_mountpoint(struct dentry *dentry)
++{
++	if (!dentry || !dentry->d_sb)
++		return false;
++	
++	return d_mountpoint(dentry);
++}
++
++/*
++ * returns: 0: tell VFS to invalidate dentry in share directory
++ */
++static int sharefs_d_revalidate(struct dentry *dentry, unsigned int flags)
++{
++	if (is_mountpoint(dentry)) {
++		return 1;
++	}
++
++	return 0;
++}
++
++static void sharefs_d_release(struct dentry *dentry)
++{
++	/*
++	 * It is possible that the dentry private data is NULL in case we
++	 * ran out of memory while initializing it in
++	 * new_dentry_private_data.  So check for NULL before attempting to
++	 * release resources.
++	 */
++	if (SHAREFS_D(dentry)) {
++		/* release and reset the lower paths */
++		sharefs_put_reset_lower_path(dentry);
++		free_dentry_private_data(dentry);
++	}
++	return;
++}
++
++const struct dentry_operations sharefs_dops = {
++	.d_revalidate	= sharefs_d_revalidate,
++	.d_release	= sharefs_d_release,
++};
+diff --git a/fs/sharefs/file.c b/fs/sharefs/file.c
+new file mode 100644
+index 000000000..9eacbaf9e
+--- /dev/null
++++ b/fs/sharefs/file.c
+@@ -0,0 +1,279 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * fs/sharefs/file.c
++ *
++ * Copyright (c) 1998-2022 Erez Zadok
++ * Copyright (c) 2009	   Shrikar Archak
++ * Copyright (c) 2003-2022 Stony Brook University
++ * Copyright (c) 2003-2022 The Research Foundation of SUNY
++ * Copyright (c) 2023 Huawei Device Co., Ltd.
++ */
++
++#include "sharefs.h"
++#include "authentication.h"
++
++static int sharefs_readdir(struct file *file, struct dir_context *ctx)
++{
++	int err;
++	struct file *lower_file = NULL;
++	struct dentry *dentry = file->f_path.dentry;
++
++	lower_file = sharefs_lower_file(file);
++	err = iterate_dir(lower_file, ctx);
++	file->f_pos = lower_file->f_pos;
++	if (err >= 0)		/* copy the atime */
++		fsstack_copy_attr_atime(d_inode(dentry),
++					file_inode(lower_file));
++	return err;
++}
++
++static int sharefs_open(struct inode *inode, struct file *file)
++{
++	int err = 0;
++	struct file *lower_file = NULL;
++	struct path lower_path;
++	const struct cred *saved_cred = NULL;
++	__u16 perm;
++
++	saved_cred = sharefs_override_file_fsids(inode, &perm);
++	if (!saved_cred) {
++		err = -ENOMEM;
++		return err;
++	}
++
++	/* don't open unhashed/deleted files */
++	if (d_unhashed(file->f_path.dentry)) {
++		err = -ENOENT;
++		goto out_err;
++	}
++
++	file->private_data =
++		kzalloc(sizeof(struct sharefs_file_info), GFP_KERNEL);
++	if (!SHAREFS_F(file)) {
++		err = -ENOMEM;
++		goto out_err;
++	}
++
++	/* open lower object and link sharefs's file struct to lower's */
++	sharefs_get_lower_path(file->f_path.dentry, &lower_path);
++	lower_file = dentry_open(&lower_path, file->f_flags, current_cred());
++	path_put(&lower_path);
++	if (IS_ERR(lower_file)) {
++		err = PTR_ERR(lower_file);
++		lower_file = sharefs_lower_file(file);
++		if (lower_file) {
++			sharefs_set_lower_file(file, NULL);
++			fput(lower_file); /* fput calls dput for lower_dentry */
++		}
++	} else {
++		sharefs_set_lower_file(file, lower_file);
++	}
++
++	if (err) {
++		kfree(SHAREFS_F(file));
++	} else {
++		kuid_t uid = inode->i_uid;
++		kgid_t gid = inode->i_gid;
++		mode_t mode = inode->i_mode;
++		fsstack_copy_attr_all(inode, sharefs_lower_inode(inode));
++		inode->i_uid = uid;
++		inode->i_gid = gid;
++		inode->i_mode = mode;
++	}
++out_err:
++	sharefs_revert_fsids(saved_cred);
++	return err;
++}
++
++static int sharefs_flush(struct file *file, fl_owner_t id)
++{
++	int err = 0;
++	struct file *lower_file = NULL;
++
++	lower_file = sharefs_lower_file(file);
++	if (lower_file && lower_file->f_op && lower_file->f_op->flush) {
++		filemap_write_and_wait_range(file->f_mapping, 0, LLONG_MAX);
++		err = lower_file->f_op->flush(lower_file, id);
++	}
++
++	return err;
++}
++
++/* release all lower object references & free the file info structure */
++static int sharefs_file_release(struct inode *inode, struct file *file)
++{
++	struct file *lower_file;
++
++	lower_file = sharefs_lower_file(file);
++	if (lower_file) {
++		sharefs_set_lower_file(file, NULL);
++		fput(lower_file);
++	}
++
++	kfree(SHAREFS_F(file));
++	return 0;
++}
++
++static int sharefs_fsync(struct file *file, loff_t start, loff_t end,
++			int datasync)
++{
++	int err;
++	struct file *lower_file;
++	struct path lower_path;
++	struct dentry *dentry = file->f_path.dentry;
++
++	err = __generic_file_fsync(file, start, end, datasync);
++	if (err)
++		goto out;
++	lower_file = sharefs_lower_file(file);
++	sharefs_get_lower_path(dentry, &lower_path);
++	err = vfs_fsync_range(lower_file, start, end, datasync);
++	sharefs_put_lower_path(dentry, &lower_path);
++out:
++	return err;
++}
++
++static int sharefs_fasync(int fd, struct file *file, int flag)
++{
++	int err = 0;
++	struct file *lower_file = NULL;
++
++	lower_file = sharefs_lower_file(file);
++	if (lower_file->f_op && lower_file->f_op->fasync)
++		err = lower_file->f_op->fasync(fd, lower_file, flag);
++
++	return err;
++}
++
++/*
++ * Sharefs cannot use generic_file_llseek as ->llseek, because it would
++ * only set the offset of the upper file.  So we have to implement our
++ * own method to set both the upper and lower file offsets
++ * consistently.
++ */
++static loff_t sharefs_file_llseek(struct file *file, loff_t offset, int whence)
++{
++	loff_t err;
++	struct file *lower_file;
++
++	lower_file = sharefs_lower_file(file);
++	lower_file->f_pos = file->f_pos;
++	err = generic_file_llseek(lower_file, offset, whence);
++	file->f_pos = lower_file->f_pos;
++
++	return err;
++}
++
++/*
++ * Sharefs read_iter, redirect modified iocb to lower read_iter
++ */
++ssize_t sharefs_read_iter(struct kiocb *iocb, struct iov_iter *iter)
++{
++	int err;
++	struct file *file = iocb->ki_filp;
++	struct file *lower_file;
++
++	lower_file = sharefs_lower_file(file);
++	if (!lower_file->f_op->read_iter) {
++		err = -EINVAL;
++		goto out;
++	}
++
++	/* prevent lower_file from being released */
++	get_file(lower_file);
++	iocb->ki_filp = lower_file;
++	err = lower_file->f_op->read_iter(iocb, iter);
++	iocb->ki_filp = file;
++	fput(lower_file);
++
++	/* update upper inode atime as needed */
++	if (err >= 0 || err == -EIOCBQUEUED)
++		fsstack_copy_attr_atime(d_inode(file->f_path.dentry),
++					file_inode(lower_file));
++out:
++	return err;
++}
++
++/*
++ * Sharefs write_iter, redirect modified iocb to lower write_iter
++ */
++ssize_t sharefs_write_iter(struct kiocb *iocb, struct iov_iter *iter)
++{
++	int err;
++	struct file *file = iocb->ki_filp;
++	struct file *lower_file;
++
++	lower_file = sharefs_lower_file(file);
++	if (!lower_file->f_op->write_iter) {
++		err = -EINVAL;
++		goto out;
++	}
++
++	get_file(lower_file); /* prevent lower_file from being released */
++	iocb->ki_filp = lower_file;
++	err = lower_file->f_op->write_iter(iocb, iter);
++	iocb->ki_filp = file;
++	fput(lower_file);
++	/* update upper inode times/sizes as needed */
++	if (err >= 0 || err == -EIOCBQUEUED) {
++		fsstack_copy_inode_size(d_inode(file->f_path.dentry),
++					file_inode(lower_file));
++		fsstack_copy_attr_times(d_inode(file->f_path.dentry),
++					file_inode(lower_file));
++	}
++out:
++	return err;
++}
++
++int sharefs_file_mmap(struct file *file, struct vm_area_struct *vma)
++{
++	int err = 0;
++	struct file *lower_file;
++
++	lower_file = sharefs_lower_file(file);
++	if (!lower_file)
++		return -EINVAL;
++
++	if (!lower_file->f_op->mmap)
++		return -ENODEV;
++
++	if (WARN_ON(file != vma->vm_file))
++		return -EIO;
++
++	vma->vm_file = get_file(lower_file);
++	err = call_mmap(vma->vm_file, vma);
++	if (err)
++		fput(lower_file);
++	else
++		fput(file);
++
++	file_accessed(file);
++
++	return err;
++}
++
++const struct file_operations sharefs_main_fops = {
++	.llseek		= sharefs_file_llseek,
++	.open		= sharefs_open,
++	.flush		= sharefs_flush,
++	.release	= sharefs_file_release,
++	.fsync		= sharefs_fsync,
++	.fasync		= sharefs_fasync,
++	.read_iter	= sharefs_read_iter,
++	.write_iter	= sharefs_write_iter,
++	.mmap		= sharefs_file_mmap,
++	.splice_read = NULL,
++	.splice_write = NULL,
++};
++
++/* trimmed directory options */
++const struct file_operations sharefs_dir_fops = {
++	.llseek		= sharefs_file_llseek,
++	.read		= generic_read_dir,
++	.iterate_shared	= sharefs_readdir,
++	.open		= sharefs_open,
++	.release	= sharefs_file_release,
++	.flush		= sharefs_flush,
++	.fsync		= sharefs_fsync,
++	.fasync		= sharefs_fasync,
++};
+diff --git a/fs/sharefs/inode.c b/fs/sharefs/inode.c
+new file mode 100644
+index 000000000..2c996374d
+--- /dev/null
++++ b/fs/sharefs/inode.c
+@@ -0,0 +1,443 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * fs/sharefs/inode.c
++ *
++ * Copyright (c) 1998-2022 Erez Zadok
++ * Copyright (c) 2009	   Shrikar Archak
++ * Copyright (c) 2003-2022 Stony Brook University
++ * Copyright (c) 2003-2022 The Research Foundation of SUNY
++ * Copyright (c) 2023 Huawei Device Co., Ltd.
++ */
++
++#include "sharefs.h"
++#include "authentication.h"
++
++static int sharefs_getattr(struct mnt_idmap *idmap, const struct path *path, struct kstat *stat, 
++                          u32 request_mask, unsigned int flags)
++{
++	struct path lower_path;
++	int ret;
++
++	sharefs_get_lower_path(path->dentry, &lower_path);
++	ret = vfs_getattr_nosec(&lower_path, stat, request_mask, flags);
++	stat->ino = d_inode(path->dentry)->i_ino;
++	stat->uid = d_inode(path->dentry)->i_uid;
++	stat->gid = d_inode(path->dentry)->i_gid;
++	stat->mode = d_inode(path->dentry)->i_mode;
++	stat->dev = 0;
++	stat->rdev = 0;
++	sharefs_put_lower_path(path->dentry, &lower_path);
++
++	return ret;
++}
++
++static ssize_t sharefs_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size)
++{
++	int err;
++	struct dentry *lower_dentry;
++	struct path lower_path;
++
++	sharefs_get_lower_path(dentry, &lower_path);
++	lower_dentry = lower_path.dentry;
++	if (!(d_inode(lower_dentry)->i_opflags & IOP_XATTR)) {
++		err = -EOPNOTSUPP;
++		goto out;
++	}
++	err = vfs_listxattr(lower_dentry, buffer, buffer_size);
++	if (err)
++		goto out;
++	fsstack_copy_attr_atime(d_inode(dentry),
++				d_inode(lower_path.dentry));
++out:
++	sharefs_put_lower_path(dentry, &lower_path);
++	return err;
++}
++
++static int sharefs_permission(struct mnt_idmap *idmap, struct inode *inode, int mask)
++{
++	struct sharefs_sb_info *sbi = SHAREFS_SB(inode->i_sb);
++	if (sbi->override_support_delete) {
++		return 0;
++	}
++	unsigned short mode = sharefs_lower_inode(inode)->i_mode;
++	kuid_t cur_uid = current_fsuid();
++	if (uid_eq(cur_uid, ROOT_UID))
++		return 0;
++	if (uid_eq(cur_uid, inode->i_uid)) {
++		mode >>= 6;
++	} else if (in_group_p(inode->i_gid)) {
++		mode >>= 3;
++	}
++
++	if ((mask & ~mode & (MAY_READ | MAY_WRITE | MAY_EXEC)) == 0)
++		return 0;
++
++	return -EACCES;
++}
++
++static int sharefs_override_permission(struct mnt_idmap *idmap, struct inode *inode, int mask)
++{
++	unsigned short mode = sharefs_lower_inode(inode)->i_mode;
++	mode >>= 6;
++	kuid_t cur_uid = current_fsuid();
++	if (uid_eq(cur_uid, ROOT_UID)) {
++		return 0;
++	}
++
++	if ((mask & ~mode & (MAY_READ | MAY_WRITE | MAY_EXEC)) == 0) {
++		return 0;
++	}
++	return -EACCES;
++}
++
++static int sharefs_create(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry,
++			 umode_t mode, bool want_excl)
++{
++	int err;
++	struct dentry *lower_dentry;
++	struct dentry *lower_parent_dentry = NULL;
++	struct path lower_path;
++	const struct cred *saved_cred = NULL;
++	__u16 child_perm;
++
++	saved_cred = sharefs_override_file_fsids(dir, &child_perm);
++	if (!saved_cred) {
++		err = -ENOMEM;
++		return err;
++	}
++
++	sharefs_get_lower_path(dentry, &lower_path);
++	lower_dentry = lower_path.dentry;
++	lower_parent_dentry = lock_parent(lower_dentry);
++	err = vfs_create(&nop_mnt_idmap, d_inode(lower_parent_dentry), lower_dentry, mode,
++			 want_excl);
++	if (err)
++		goto out;
++	err = sharefs_interpose(dentry, dir->i_sb, &lower_path);
++	if (err)
++		goto out;
++	fsstack_copy_attr_times(dir, sharefs_lower_inode(dir));
++	fsstack_copy_inode_size(dir, d_inode(lower_parent_dentry));
++
++out:
++	unlock_dir(lower_parent_dentry);
++	sharefs_put_lower_path(dentry, &lower_path);
++	sharefs_revert_fsids(saved_cred);
++	return err;
++}
++
++static int sharefs_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode)
++{
++	int err;
++	struct dentry *lower_dentry;
++	struct dentry *lower_parent_dentry = NULL;
++	struct path lower_path;
++	const struct cred *saved_cred = NULL;
++	__u16 child_perm;
++
++	saved_cred = sharefs_override_file_fsids(dir, &child_perm);
++	if (!saved_cred) {
++		err = -ENOMEM;
++		return err;
++	}
++
++	sharefs_get_lower_path(dentry, &lower_path);
++	lower_dentry = lower_path.dentry;
++	lower_parent_dentry = lock_parent(lower_dentry);
++	err = vfs_mkdir(&nop_mnt_idmap, d_inode(lower_parent_dentry), lower_dentry, mode);
++	if (err)
++		goto out;
++
++	err = sharefs_interpose(dentry, dir->i_sb, &lower_path);
++	if (err)
++		goto out;
++
++	fsstack_copy_attr_times(dir, sharefs_lower_inode(dir));
++	fsstack_copy_inode_size(dir, d_inode(lower_parent_dentry));
++	/* update number of links on parent directory */
++	set_nlink(dir, sharefs_lower_inode(dir)->i_nlink);
++
++out:
++	unlock_dir(lower_parent_dentry);
++	sharefs_put_lower_path(dentry, &lower_path);
++	sharefs_revert_fsids(saved_cred);
++	return err;
++}
++
++static int sharefs_unlink(struct inode *dir, struct dentry *dentry)
++{
++	int err;
++	struct dentry *lower_dentry = NULL;
++	struct inode *lower_dir_inode = sharefs_lower_inode(dir);
++	struct dentry *lower_dir_dentry = NULL;
++	struct path lower_path;
++	const struct cred *saved_cred = NULL;
++	__u16 child_perm;
++
++	saved_cred = sharefs_override_file_fsids(dir, &child_perm);
++	if (!saved_cred) {
++			err = -ENOMEM;
++			return err;
++	}
++
++	sharefs_get_lower_path(dentry, &lower_path);
++	lower_dentry = lower_path.dentry;
++	dget(lower_dentry);
++	lower_dir_dentry = lock_parent(lower_dentry);
++	err = vfs_unlink(&nop_mnt_idmap, lower_dir_inode, lower_dentry, NULL);
++	if (err)
++		goto out;
++	fsstack_copy_attr_times(dir, lower_dir_inode);
++	fsstack_copy_inode_size(dir, lower_dir_inode);
++	set_nlink(dentry->d_inode,
++		  sharefs_lower_inode(dentry->d_inode)->i_nlink);
++	dentry->d_inode->__i_ctime = dir->__i_ctime;
++	d_drop(dentry);
++
++out:
++	unlock_dir(lower_dir_dentry);
++	dput(lower_dentry);
++	sharefs_put_lower_path(dentry, &lower_path);
++	sharefs_revert_fsids(saved_cred);
++	return err;
++}
++
++static int sharefs_rmdir(struct inode *dir, struct dentry *dentry)
++{
++	int err;
++	struct dentry *lower_dentry;
++	struct dentry *lower_dir_dentry;
++	struct path lower_path;
++	const struct cred *saved_cred = NULL;
++	__u16 child_perm;
++	
++	saved_cred = sharefs_override_file_fsids(dir, &child_perm);
++	if (!saved_cred) {
++		err = -ENOMEM;
++		return err;
++	}
++
++	sharefs_get_lower_path(dentry, &lower_path);
++	lower_dentry = lower_path.dentry;
++	lower_dir_dentry = lock_parent(lower_dentry);
++	err = vfs_rmdir(&nop_mnt_idmap, lower_dir_dentry->d_inode, lower_dentry);
++	if (err)
++		goto out;
++
++	d_drop(dentry);
++	if (dentry->d_inode)
++		clear_nlink(dentry->d_inode);
++	fsstack_copy_attr_times(dir, lower_dir_dentry->d_inode);
++	fsstack_copy_inode_size(dir, lower_dir_dentry->d_inode);
++	set_nlink(dir, lower_dir_dentry->d_inode->i_nlink);
++
++out:
++	unlock_dir(lower_dir_dentry);
++	sharefs_put_lower_path(dentry, &lower_path);
++	sharefs_revert_fsids(saved_cred);
++	return err;
++}
++
++static int sharefs_check_lower_rename(struct super_block *old_sb, struct super_block *new_sb)
++{
++	if (old_sb->s_id != new_sb->s_id) {
++		return -EXDEV;
++	} 
++
++	return 0;
++}
++static int sharefs_rename(struct mnt_idmap *idmap, struct inode *old_dir, struct dentry *old_dentry,
++				struct inode *new_dir, struct dentry *new_dentry,
++				unsigned int flags)
++{
++	int err;
++	struct dentry *lower_old_dentry = NULL;
++	struct dentry *lower_new_dentry = NULL;
++	struct dentry *lower_old_dir_dentry = NULL;
++	struct dentry *lower_new_dir_dentry = NULL;
++	struct dentry *trap = NULL;
++	struct path lower_old_path, lower_new_path;
++	struct renamedata rename_data;
++	const struct cred *saved_cred = NULL;
++	__u16 child_perm;
++
++	if (flags)
++		return -EINVAL;
++
++	saved_cred = sharefs_override_file_fsids(old_dir, &child_perm);
++	if (!saved_cred) {
++		err = -ENOMEM;
++		return err;
++	}
++
++	sharefs_get_lower_path(old_dentry, &lower_old_path);
++	sharefs_get_lower_path(new_dentry, &lower_new_path);
++	lower_old_dentry = lower_old_path.dentry;
++	lower_new_dentry = lower_new_path.dentry;
++	lower_old_dir_dentry = dget_parent(lower_old_dentry);
++	lower_new_dir_dentry = dget_parent(lower_new_dentry);
++	trap = lock_rename(lower_old_dir_dentry, lower_new_dir_dentry);
++	/* source should not be ancestor of target */
++	if (trap == lower_old_dentry) {
++		err = -EINVAL;
++		goto out;
++	}
++	/* target should not be ancestor of source */
++	if (trap == lower_new_dentry) {
++		err = -ENOTEMPTY;
++		goto out;
++	}
++
++	rename_data.old_mnt_idmap  = &nop_mnt_idmap;
++	rename_data.old_dir = lower_old_dir_dentry->d_inode;
++	rename_data.old_dentry = lower_old_dentry;
++	rename_data.new_mnt_idmap = &nop_mnt_idmap;
++	rename_data.new_dir = lower_new_dir_dentry->d_inode;
++	rename_data.new_dentry = lower_new_dentry;
++	rename_data.flags = flags;
++
++	err = sharefs_check_lower_rename(lower_old_path.mnt->mnt_sb, lower_new_path.mnt->mnt_sb);
++	if (err != 0) {
++		goto out;
++	}
++	err = vfs_rename(&rename_data);
++	if (err)
++		goto out;
++
++	fsstack_copy_attr_all(new_dir, lower_new_dir_dentry->d_inode);
++	fsstack_copy_inode_size(new_dir, lower_new_dir_dentry->d_inode);
++	if (new_dir != old_dir) {
++		fsstack_copy_attr_all(old_dir,
++				    lower_old_dir_dentry->d_inode);
++		fsstack_copy_inode_size(old_dir,
++					lower_old_dir_dentry->d_inode);
++	}
++
++out:
++	unlock_rename(lower_old_dir_dentry, lower_new_dir_dentry);
++	dput(lower_old_dir_dentry);
++	dput(lower_new_dir_dentry);
++	sharefs_put_lower_path(old_dentry, &lower_old_path);
++	sharefs_put_lower_path(new_dentry, &lower_new_path);
++	sharefs_revert_fsids(saved_cred);
++	return err;
++}
++
++static int sharefs_setattr(struct mnt_idmap *idmap, struct dentry *dentry, struct iattr *ia)
++{
++	int err;
++	struct dentry *lower_dentry;
++	struct inode *inode;
++	struct inode *lower_inode;
++	struct path lower_path;
++	struct iattr lower_ia;
++	
++	inode = dentry->d_inode;
++	/*
++	 * Check if user has permission to change inode.  We don't check if
++	 * this user can change the lower inode: that should happen when
++	 * calling notify_change on the lower inode.
++	 */
++ 	const struct cred *saved_cred = NULL;
++ 	__u16 child_perm;
++ 	 
++	saved_cred = sharefs_override_file_fsids(inode, &child_perm);
++	if (!saved_cred) {
++		err = -ENOMEM;
++		goto out_err;
++	}
++
++	err = setattr_prepare(&nop_mnt_idmap, dentry, ia);
++	if (err)
++		goto out_err;
++
++	sharefs_get_lower_path(dentry, &lower_path);
++	lower_dentry = lower_path.dentry;
++	lower_inode = sharefs_lower_inode(inode);
++
++	/* prepare our own lower struct iattr (with the lower file) */
++	memcpy(&lower_ia, ia, sizeof(lower_ia));
++	if (ia->ia_valid & ATTR_FILE)
++		lower_ia.ia_file = sharefs_lower_file(ia->ia_file);
++
++	/*
++	 * If shrinking, first truncate upper level to cancel writing dirty
++	 * pages beyond the new eof; and also if its' maxbytes is more
++	 * limiting (fail with -EFBIG before making any change to the lower
++	 * level).  There is no need to vmtruncate the upper level
++	 * afterwards in the other cases: we fsstack_copy_inode_size from
++	 * the lower level.
++	 */
++	if (ia->ia_valid & ATTR_SIZE) {
++		err = inode_newsize_ok(inode, ia->ia_size);
++		if (err)
++			goto out;
++		truncate_setsize(inode, ia->ia_size);
++	}
++
++	lower_ia.ia_valid &= ~(ATTR_MODE|ATTR_UID|ATTR_GID);
++
++	/* notify the (possibly copied-up) lower inode */
++	/*
++	 * Note: we use lower_dentry->d_inode, because lower_inode may be
++	 * unlinked (no inode->i_sb and i_ino==0.  This happens if someone
++	 * tries to open(), unlink(), then ftruncate() a file.
++	 */
++
++	inode_lock(d_inode(lower_dentry));
++	err = notify_change(&nop_mnt_idmap, lower_dentry, &lower_ia, /* note: lower_ia */
++			    NULL);
++	inode_unlock(d_inode(lower_dentry));
++
++	if (err)
++		goto out;
++
++	/* get attributes from the lower inode */
++	fsstack_copy_attr_all(inode, lower_inode);
++	/*
++	 * Not running fsstack_copy_inode_size(inode, lower_inode), because
++	 * VFS should update our inode size, and notify_change on
++	 * lower_inode should update its size.
++	 */
++
++out:
++	sharefs_put_lower_path(dentry, &lower_path);
++	sharefs_revert_fsids(saved_cred);
++out_err:
++	return err;
++}
++
++const struct inode_operations sharefs_symlink_iops = {
++	.permission	= sharefs_permission,
++	.getattr	= sharefs_getattr,
++	.get_link	= NULL,
++	.listxattr	= sharefs_listxattr,
++};
++
++const struct inode_operations sharefs_dir_iops = {
++	.lookup		= sharefs_lookup,
++	.permission	= sharefs_permission,
++	.getattr	= sharefs_getattr,
++	.listxattr	= sharefs_listxattr,
++	.setattr	= sharefs_setattr,
++};
++
++const struct inode_operations sharefs_dir_override_iops = {
++	.lookup		= sharefs_override_lookup,
++	.permission	= sharefs_override_permission,
++	.getattr	= sharefs_getattr,
++	.listxattr	= sharefs_listxattr,
++	.setattr	= sharefs_setattr,
++	.unlink		= sharefs_unlink,
++	.rmdir		= sharefs_rmdir,
++	.rename		= sharefs_rename,
++	.create		= sharefs_create,
++	.mkdir		= sharefs_mkdir,
++};
++
++const struct inode_operations sharefs_main_iops = {
++	.permission	= sharefs_permission,
++	.getattr	= sharefs_getattr,
++	.listxattr	= sharefs_listxattr,
++	.setattr        = sharefs_setattr,
++};
+diff --git a/fs/sharefs/lookup.c b/fs/sharefs/lookup.c
+new file mode 100644
+index 000000000..5c7a26f51
+--- /dev/null
++++ b/fs/sharefs/lookup.c
+@@ -0,0 +1,366 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * fs/sharefs/lookup.c
++ *
++ * Copyright (c) 1998-2022 Erez Zadok
++ * Copyright (c) 2009	   Shrikar Archak
++ * Copyright (c) 2003-2022 Stony Brook University
++ * Copyright (c) 2003-2022 The Research Foundation of SUNY
++ * Copyright (c) 2023 Huawei Device Co., Ltd.
++ */
++
++#include "sharefs.h"
++#include "authentication.h"
++
++/* The dentry cache is just so we have properly sized dentries */
++static struct kmem_cache *sharefs_dentry_cachep;
++
++int sharefs_init_dentry_cache(void)
++{
++	sharefs_dentry_cachep =
++		kmem_cache_create("sharefs_dentry",
++				  sizeof(struct sharefs_dentry_info),
++				  0, SLAB_RECLAIM_ACCOUNT, NULL);
++
++	return sharefs_dentry_cachep ? 0 : -ENOMEM;
++}
++
++void sharefs_destroy_dentry_cache(void)
++{
++	if (sharefs_dentry_cachep)
++		kmem_cache_destroy(sharefs_dentry_cachep);
++}
++
++void free_dentry_private_data(struct dentry *dentry)
++{
++	if (!dentry || !dentry->d_fsdata)
++		return;
++	kmem_cache_free(sharefs_dentry_cachep, dentry->d_fsdata);
++	dentry->d_fsdata = NULL;
++}
++
++/* allocate new dentry private data */
++int new_dentry_private_data(struct dentry *dentry)
++{
++	struct sharefs_dentry_info *info = SHAREFS_D(dentry);
++
++	/* use zalloc to init dentry_info.lower_path */
++	info = kmem_cache_zalloc(sharefs_dentry_cachep, GFP_ATOMIC);
++	if (!info)
++		return -ENOMEM;
++
++	spin_lock_init(&info->lock);
++	dentry->d_fsdata = info;
++
++	return 0;
++}
++
++static int sharefs_inode_test(struct inode *inode, void *candidate_lower_inode)
++{
++	struct inode *current_lower_inode = sharefs_lower_inode(inode);
++	if (current_lower_inode == (struct inode *)candidate_lower_inode)
++		return 1; /* found a match */
++	else
++		return 0; /* no match */
++}
++
++static int sharefs_inode_set(struct inode *inode, void *lower_inode)
++{
++	/* we do actual inode initialization in sharefs_iget */
++	return 0;
++}
++
++struct inode *sharefs_iget(struct super_block *sb, struct inode *lower_inode)
++{
++	struct inode *inode; /* the new inode to return */
++
++	if (!igrab(lower_inode))
++		return ERR_PTR(-ESTALE);
++	inode = iget5_locked(sb, /* our superblock */
++			     /*
++			      * hashval: we use inode number, but we can
++			      * also use "(unsigned long)lower_inode"
++			      * instead.
++			      */
++			     lower_inode->i_ino, /* hashval */
++			     sharefs_inode_test, /* inode comparison function */
++			     sharefs_inode_set, /* inode init function */
++			     lower_inode); /* data passed to test+set fxns */
++	if (!inode) {
++		iput(lower_inode);
++		return ERR_PTR(-ENOMEM);
++	}
++
++	if (lower_inode->i_nlink == 0) {
++		iput(lower_inode);
++		iput(inode);
++		return ERR_PTR(-ENOENT);
++	}
++
++	/* if found a cached inode, then just return it (after iput) */
++	if (!(inode->i_state & I_NEW)) {
++		iput(lower_inode);
++		return inode;
++	}
++
++	/* initialize new inode */
++	inode->i_ino = lower_inode->i_ino;
++	sharefs_set_lower_inode(inode, lower_inode);
++
++	atomic64_inc(&inode->i_version);
++
++	struct sharefs_sb_info *sbi = SHAREFS_SB(sb);
++
++	/* use different set of inode ops for symlinks & directories */
++	if (sbi && S_ISDIR(lower_inode->i_mode))
++		if (sbi->override_support_delete) {
++			inode->i_op = &sharefs_dir_override_iops;
++		} else {
++			inode->i_op = &sharefs_dir_iops;
++		}
++	else if (S_ISLNK(lower_inode->i_mode))
++		inode->i_op = &sharefs_symlink_iops;
++	else
++		inode->i_op = &sharefs_main_iops;
++
++	/* use different set of file ops for directories */
++	if (S_ISDIR(lower_inode->i_mode))
++		inode->i_fop = &sharefs_dir_fops;
++	else
++		inode->i_fop = &sharefs_main_fops;
++
++	inode->i_atime.tv_sec = 0;
++	inode->i_atime.tv_nsec = 0;
++	inode->i_mtime.tv_sec = 0;
++	inode->i_mtime.tv_nsec = 0;
++	inode->__i_ctime.tv_sec = 0;
++	inode->__i_ctime.tv_nsec = 0;
++
++	/* properly initialize special inodes */
++	if (S_ISBLK(lower_inode->i_mode) || S_ISCHR(lower_inode->i_mode) ||
++	    S_ISFIFO(lower_inode->i_mode) || S_ISSOCK(lower_inode->i_mode))
++		init_special_inode(inode, lower_inode->i_mode,
++				   lower_inode->i_rdev);
++
++	/* all well, copy inode attributes */
++	fsstack_copy_attr_all(inode, lower_inode);
++	fsstack_copy_inode_size(inode, lower_inode);
++
++	unlock_new_inode(inode);
++	return inode;
++}
++
++/*
++ * Helper interpose routine, called directly by ->lookup to handle
++ * spliced dentries.
++ */
++static struct dentry *__sharefs_interpose(struct dentry *dentry,
++					 struct super_block *sb,
++					 struct path *lower_path)
++{
++	struct inode *inode;
++	struct inode *lower_inode = d_inode(lower_path->dentry);
++	struct dentry *ret_dentry;
++
++	/*
++	 * We allocate our new inode below by calling sharefs_iget,
++	 * which will initialize some of the new inode's fields
++	 */
++
++	/* inherit lower inode number for sharefs's inode */
++	inode = sharefs_iget(sb, lower_inode);
++	if (IS_ERR(inode)) {
++		ret_dentry = ERR_PTR(PTR_ERR(inode));
++		goto out;
++	}
++
++	ret_dentry = d_splice_alias(inode, dentry);
++
++out:
++	return ret_dentry;
++}
++
++/*
++ * Connect a sharefs inode dentry/inode with several lower ones.  This is
++ * the classic stackable file system "vnode interposition" action.
++ *
++ * @dentry: sharefs's dentry which interposes on lower one
++ * @sb: sharefs's super_block
++ * @lower_path: the lower path (caller does path_get/put)
++ */
++int sharefs_interpose(struct dentry *dentry, struct super_block *sb,
++		     struct path *lower_path)
++{
++	struct dentry *ret_dentry;
++
++	ret_dentry = __sharefs_interpose(dentry, sb, lower_path);
++	return PTR_ERR(ret_dentry);
++}
++
++/*
++ * Main driver function for sharefs's lookup.
++ *
++ * Returns: NULL (ok), ERR_PTR if an error occurred.
++ * Fills in lower_parent_path with <dentry,mnt> on success.
++ */
++static struct dentry *__sharefs_lookup(struct dentry *dentry,
++				      unsigned int flags,
++				      struct path *lower_parent_path)
++{
++	int err = 0;
++	struct vfsmount *lower_dir_mnt;
++	struct dentry *lower_dir_dentry = NULL;
++	struct dentry *lower_dentry;
++	const char *name;
++	struct path lower_path;
++	struct dentry *ret_dentry = NULL;
++
++	/* must initialize dentry operations */
++	d_set_d_op(dentry, &sharefs_dops);
++
++	if (IS_ROOT(dentry))
++		goto out;
++
++	name = dentry->d_name.name;
++
++	/* now start the actual lookup procedure */
++	lower_dir_dentry = lower_parent_path->dentry;
++	lower_dir_mnt = lower_parent_path->mnt;
++
++	/* Use vfs_path_lookup to check if the dentry exists or not */
++	err = vfs_path_lookup(lower_dir_dentry, lower_dir_mnt, name, 0,
++			      &lower_path);
++	/* no error: handle positive dentries */
++	if (!err) {
++		sharefs_set_lower_path(dentry, &lower_path);
++		ret_dentry =
++			__sharefs_interpose(dentry, dentry->d_sb, &lower_path);
++		if (IS_ERR(ret_dentry)) {
++			err = PTR_ERR(ret_dentry);
++			 /* path_put underlying path on error */
++			sharefs_put_reset_lower_path(dentry);
++		}
++		goto out;
++	}
++	/*
++	 * We don't consider ENOENT an error, and we want to return a
++	 * negative dentry.
++	 */
++	if (err && err != -ENOENT)
++		goto out;
++
++	lower_dentry = lookup_one_len_unlocked(name, lower_dir_dentry, dentry->d_name.len);
++	if (IS_ERR(lower_dentry)) {
++		err = PTR_ERR(lower_dentry);
++		sharefs_err("lookup_one_len_unlocked error:%d", err);
++		ret_dentry = lower_dentry;
++		goto out;
++	}
++
++	lower_path.dentry = lower_dentry;
++	lower_path.mnt = mntget(lower_dir_mnt);
++	sharefs_set_lower_path(dentry, &lower_path);
++
++	/*
++	 * If the intent is to create a file, then don't return an error, so
++	 * the VFS will continue the process of making this negative dentry
++	 * into a positive one.
++	 */
++	if (err == -ENOENT || (flags & (LOOKUP_CREATE|LOOKUP_RENAME_TARGET)))
++		err = 0;
++
++out:
++	if (err)
++		return ERR_PTR(err);
++	return ret_dentry;
++}
++
++struct dentry *sharefs_lookup(struct inode *dir, struct dentry *dentry,
++			     unsigned int flags)
++{
++	int err;
++	struct dentry *ret, *parent;
++	struct path lower_parent_path;
++	parent = dget_parent(dentry);
++	sharefs_get_lower_path(parent, &lower_parent_path);
++
++	/* allocate dentry private data.  We free it in ->d_release */
++	err = new_dentry_private_data(dentry);
++	if (err) {
++		ret = ERR_PTR(err);
++		goto out;
++	}
++	ret = __sharefs_lookup(dentry, flags, &lower_parent_path);
++	if (IS_ERR(ret)) {
++		sharefs_err("sharefs_lookup error!");
++		goto out;
++	}
++
++	if (ret)
++		dentry = ret;
++	if (d_inode(dentry))
++		fsstack_copy_attr_times(d_inode(dentry),
++					sharefs_lower_inode(d_inode(dentry)));
++	/* update parent directory's atime */
++	fsstack_copy_attr_atime(d_inode(parent),
++				sharefs_lower_inode(d_inode(parent)));
++	fixup_perm_from_level(d_inode(parent), dentry);
++out:
++	sharefs_put_lower_path(parent, &lower_parent_path);
++	dput(parent);
++	return ret;
++}
++
++struct dentry *sharefs_override_lookup(struct inode *dir, struct dentry *dentry,
++			     unsigned int flags)
++{
++	int err;
++	struct dentry *ret, *parent;
++	struct path lower_parent_path;
++	const struct cred *saved_cred = NULL;
++	__u16 permission;
++	__u16 next_permission;
++
++	parent = dget_parent(dentry);
++	sharefs_get_lower_path(parent, &lower_parent_path);
++	
++	next_permission = perm_get_next_level_override(SHAREFS_I(dir)->perm);
++	if (next_permission == SHAREFS_PERM_PACKAGE_OVERRIDE && SHAREFS_SB(dir->i_sb)->sniffer) {
++		printk("sharefs: package override enable\n");
++	}
++
++	saved_cred = sharefs_override_file_fsids(dir, &permission);
++	if (!saved_cred) {
++		ret = ERR_PTR(-ENOMEM);
++		goto out_err;
++	}
++
++	/* allocate dentry private data.  We free it in ->d_release */
++	err = new_dentry_private_data(dentry);
++	if (err) {
++		ret = ERR_PTR(err);
++		goto out;
++	}
++	ret = __sharefs_lookup(dentry, flags, &lower_parent_path);
++	if (IS_ERR(ret)) {
++		sharefs_err("sharefs_lookup error!");
++		goto out;
++	}
++
++	if (ret)
++		dentry = ret;
++	if (d_inode(dentry)) {
++		fsstack_copy_attr_times(d_inode(dentry),
++					sharefs_lower_inode(d_inode(dentry)));
++		SHAREFS_I(d_inode(dentry))->perm = next_permission;
++	}
++	/* update parent directory's atime */
++	fsstack_copy_attr_atime(d_inode(parent),
++				sharefs_lower_inode(d_inode(parent)));
++out:
++	sharefs_revert_fsids(saved_cred);
++out_err:
++	sharefs_put_lower_path(parent, &lower_parent_path);
++	dput(parent);
++	return ret;
++}
+\ No newline at end of file
+diff --git a/fs/sharefs/main.c b/fs/sharefs/main.c
+new file mode 100644
+index 000000000..86553381f
+--- /dev/null
++++ b/fs/sharefs/main.c
+@@ -0,0 +1,219 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * fs/sharefs/main.c
++ *
++ * Copyright (c) 1998-2022 Erez Zadok
++ * Copyright (c) 2009	   Shrikar Archak
++ * Copyright (c) 2003-2022 Stony Brook University
++ * Copyright (c) 2003-2022 The Research Foundation of SUNY
++ * Copyright (c) 2023 Huawei Device Co., Ltd.
++ */
++
++#include <linux/module.h>
++#include <linux/xattr.h>
++#include "sharefs.h"
++#include "authentication.h"
++
++
++struct sharefs_mount_priv {
++	const char *dev_name;
++	const char *raw_data;
++};
++
++static int sharefs_xattr_get(const struct xattr_handler *handler,
++							 struct dentry *dentry, struct inode *inode,
++							 const char *name, void *value, size_t size)
++{
++	struct path lower_path;
++	ssize_t res = 0;
++
++	sharefs_get_lower_path(dentry, &lower_path);
++	res = vfs_getxattr(&nop_mnt_idmap, lower_path.dentry, name, value, size);
++	sharefs_put_lower_path(dentry, &lower_path);
++	return res;
++}
++
++const struct xattr_handler sharefs_xattr_handler = {
++	.prefix = "",
++	.get = sharefs_xattr_get,
++};
++
++const struct xattr_handler* sharefs_xattr_handlers[] = {
++	&sharefs_xattr_handler,
++};
++
++/*
++ * There is no need to lock the sharefs_super_info's rwsem as there is no
++ * way anyone can have a reference to the superblock at this point in time.
++ */
++static int sharefs_fill_super(struct super_block *sb, void *data, int silent)
++{
++
++	struct sharefs_mount_priv *priv = (struct sharefs_mount_priv *)data;
++	const char *dev_name = priv->dev_name;
++	const char *raw_data = priv->raw_data;
++
++	int err = 0;
++	struct super_block *lower_sb;
++	struct path lower_path;
++	struct inode *inode;
++
++	/* parse lower path */
++	err = kern_path(dev_name, LOOKUP_FOLLOW | LOOKUP_DIRECTORY,
++			&lower_path);
++	if (err) {
++		printk(KERN_ERR	"sharefs: error accessing "
++		       "lower directory '%s'\n", dev_name);
++		goto out;
++	}
++
++	/* allocate superblock private data */
++	sb->s_fs_info = kzalloc(sizeof(struct sharefs_sb_info), GFP_KERNEL);
++	if (!SHAREFS_SB(sb)) {
++		printk(KERN_CRIT "sharefs: fill_super: out of memory\n");
++		err = -ENOMEM;
++		goto out_pput;
++	}
++
++	/* set the lower superblock field of upper superblock */
++	lower_sb = lower_path.dentry->d_sb;
++	atomic_inc(&lower_sb->s_active);
++	sharefs_set_lower_super(sb, lower_sb);
++
++	/* inherit maxbytes from lower file system */
++	sb->s_maxbytes = lower_sb->s_maxbytes;
++
++	/*
++	 * Our c/m/atime granularity is 1 ns because we may stack on file
++	 * systems whose granularity is as good.
++	 */
++	sb->s_time_gran = 1;
++
++	sb->s_xattr = sharefs_xattr_handlers;
++
++	sb->s_op = &sharefs_sops;
++	sb->s_magic = SHAREFS_SUPER_MAGIC;
++
++	err = sharefs_parse_options(sb->s_fs_info, raw_data);
++	if (err)
++		goto out_pput;
++
++	/* get a new inode and allocate our root dentry */
++	inode = sharefs_iget(sb, d_inode(lower_path.dentry));
++	if (IS_ERR(inode)) {
++		err = PTR_ERR(inode);
++		goto out_pput;
++	}
++	sharefs_root_inode_perm_init(inode);
++	sb->s_root = d_make_root(inode);
++	if (!sb->s_root) {
++		err = -ENOMEM;
++		goto out_pput;
++	}
++	d_set_d_op(sb->s_root, &sharefs_dops);
++
++	/* link the upper and lower dentries */
++	sb->s_root->d_fsdata = NULL;
++	err = new_dentry_private_data(sb->s_root);
++	if (err)
++		goto out_pput;
++
++	/* if get here: cannot have error */
++
++	/* set the lower dentries for s_root */
++	sharefs_set_lower_path(sb->s_root, &lower_path);
++
++	/*
++	 * No need to call interpose because we already have a positive
++	 * dentry, which was instantiated by d_make_root.  Just need to
++	 * d_rehash it.
++	 */
++	d_rehash(sb->s_root);
++	if (!silent)
++		printk(KERN_INFO
++		       "sharefs: mounted on top of %s type %s\n",
++		       dev_name, lower_sb->s_type->name);
++	goto out; /* all is well */
++
++	/*
++	 * path_put is the only resource we need to free if an error occurred
++	 * because returning an error from this function will cause
++	 * generic_shutdown_super to be called, which will call
++	 * sharefs_put_super, and that function will release any other
++	 * resources we took.
++	 */
++out_pput:
++	path_put(&lower_path);
++out:
++	return err;
++}
++
++struct dentry *sharefs_mount(struct file_system_type *fs_type, int flags,
++			    const char *dev_name, void *raw_data)
++{
++	struct sharefs_mount_priv priv = {
++		.dev_name = dev_name,
++		.raw_data = raw_data,
++	};
++
++	/* sharefs needs a valid dev_name to get the lower_sb's metadata */
++	if (!dev_name || !*dev_name)
++		return ERR_PTR(-EINVAL);
++
++	return mount_nodev(fs_type, flags, &priv,
++			   sharefs_fill_super);
++}
++
++static struct file_system_type sharefs_fs_type = {
++	.owner		= THIS_MODULE,
++	.name		= SHAREFS_NAME,
++	.mount		= sharefs_mount,
++	.kill_sb	= generic_shutdown_super,
++	.fs_flags	= 0,
++};
++
++static int __init init_sharefs_fs(void)
++{
++	int err;
++
++	pr_info("Registering sharefs");
++
++	err = sharefs_init_inode_cache();
++	if (err)
++		goto out_err;
++	err = sharefs_init_dentry_cache();
++	if (err)
++		goto out_err;
++	err = register_filesystem(&sharefs_fs_type);
++	if (err) {
++		sharefs_err("share register failed!");
++		goto out_err;
++	}
++
++	err = sharefs_init_configfs();
++	if (err)
++		goto out_err;
++	return 0;
++out_err:
++	sharefs_exit_configfs();
++	sharefs_destroy_inode_cache();
++	sharefs_destroy_dentry_cache();
++	sharefs_err("sharefs init failed!");
++	return err;
++}
++
++static void __exit exit_sharefs_fs(void)
++{
++	sharefs_destroy_inode_cache();
++	sharefs_destroy_dentry_cache();
++	unregister_filesystem(&sharefs_fs_type);
++	sharefs_exit_configfs();
++	pr_info("Completed sharefs module unload\n");
++}
++
++module_init(init_sharefs_fs);
++module_exit(exit_sharefs_fs);
++
++MODULE_LICENSE("GPL V2");
++MODULE_DESCRIPTION("Share File System");
++MODULE_ALIAS_FS("sharefs");
+\ No newline at end of file
+diff --git a/fs/sharefs/sharefs.h b/fs/sharefs/sharefs.h
+new file mode 100644
+index 000000000..6395a6b99
+--- /dev/null
++++ b/fs/sharefs/sharefs.h
+@@ -0,0 +1,249 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 1998-2022 Erez Zadok
++ * Copyright (c) 2009	   Shrikar Archak
++ * Copyright (c) 2003-2022 Stony Brook University
++ * Copyright (c) 2003-2022 The Research Foundation of SUNY
++ * Copyright (c) 2023 Huawei Device Co., Ltd.
++ */
++
++#ifndef _SHAREFS_H_
++#define _SHAREFS_H_
++
++#include <linux/dcache.h>
++#include <linux/file.h>
++#include <linux/fs.h>
++#include <linux/mm.h>
++#include <linux/mount.h>
++#include <linux/namei.h>
++#include <linux/seq_file.h>
++#include <linux/statfs.h>
++#include <linux/fs_stack.h>
++#include <linux/magic.h>
++#include <linux/uaccess.h>
++#include <linux/slab.h>
++#include <linux/sched.h>
++#include <linux/xattr.h>
++#include <linux/exportfs.h>
++#include <linux/pagemap.h>
++
++/* the file system name */
++#define SHAREFS_NAME "sharefs"
++
++/* sharefs root inode number */
++#define SHAREFS_ROOT_INO        1
++#define OID_ROOT             	0
++#define ROOT_UID 		KUIDT_INIT(OID_ROOT)
++#define ROOT_GID 		KGIDT_INIT(OID_ROOT)
++#define SHAREFS_SUPER_MAGIC 0x20230212
++
++/* useful for tracking code reachability */
++#define UDBG printk(KERN_DEFAULT "DBG:%s:%s:%d\n", __FILE__, __func__, __LINE__)
++
++/* file private data */
++struct sharefs_file_info {
++	struct file *lower_file;
++	const struct vm_operations_struct *lower_vm_ops;
++};
++
++/* sharefs inode data in memory */
++struct sharefs_inode_info {
++	struct inode *lower_inode;
++	struct inode vfs_inode;
++	__u16 perm;
++};
++
++/* sharefs dentry data in memory */
++struct sharefs_dentry_info {
++	spinlock_t lock; /* protects lower_path */
++	struct path lower_path;
++};
++
++/* sharefs super-block data in memory */
++struct sharefs_sb_info {
++	struct super_block *lower_sb;
++	/* multi user */
++	unsigned int user_id;
++	bool override;
++	bool override_support_delete;
++	bool sniffer;
++};
++
++/* operations vectors defined in specific files */
++extern const struct file_operations sharefs_main_fops;
++extern const struct file_operations sharefs_dir_fops;
++extern const struct inode_operations sharefs_main_iops;
++extern const struct inode_operations sharefs_dir_iops;
++extern const struct inode_operations sharefs_dir_override_iops;
++extern const struct inode_operations sharefs_symlink_iops;
++extern const struct super_operations sharefs_sops;
++extern const struct dentry_operations sharefs_dops;
++
++extern int sharefs_init_inode_cache(void);
++extern void sharefs_destroy_inode_cache(void);
++extern int sharefs_init_dentry_cache(void);
++extern void sharefs_destroy_dentry_cache(void);
++extern int new_dentry_private_data(struct dentry *dentry);
++extern void free_dentry_private_data(struct dentry *dentry);
++extern struct dentry *sharefs_lookup(struct inode *dir, struct dentry *dentry,
++				     unsigned int flags);
++extern struct dentry *sharefs_override_lookup(struct inode *dir, struct dentry *dentry,
++				     unsigned int flags);
++extern struct inode *sharefs_iget(struct super_block *sb,
++				  struct inode *lower_inode);
++extern int sharefs_interpose(struct dentry *dentry, struct super_block *sb,
++			     struct path *lower_path);
++extern int vfs_path_lookup(struct dentry *dentry, struct vfsmount *mnt,
++			   const char *name, unsigned int flags,
++			   struct path *path);
++extern int sharefs_parse_options(struct sharefs_sb_info *sbi,
++				 const char *data);
++
++/*
++ * inode to private data
++ *
++ * Since we use containers and the struct inode is _inside_ the
++ * sharefs_inode_info structure, SHAREFS_I will always (given a non-NULL
++ * inode pointer), return a valid non-NULL pointer.
++ */
++static inline struct sharefs_inode_info *SHAREFS_I(const struct inode *inode)
++{
++	return container_of(inode, struct sharefs_inode_info, vfs_inode);
++}
++
++/* dentry to private data */
++#define SHAREFS_D(dent) ((struct sharefs_dentry_info *)(dent)->d_fsdata)
++
++/* superblock to private data */
++#define SHAREFS_SB(super) ((struct sharefs_sb_info *)(super)->s_fs_info)
++
++/* file to private Data */
++#define SHAREFS_F(file) ((struct sharefs_file_info *)((file)->private_data))
++
++/* file to lower file */
++static inline struct file *sharefs_lower_file(const struct file *f)
++{
++	return SHAREFS_F(f)->lower_file;
++}
++
++static inline void sharefs_set_lower_file(struct file *f, struct file *val)
++{
++	SHAREFS_F(f)->lower_file = val;
++}
++
++/* inode to lower inode. */
++static inline struct inode *sharefs_lower_inode(const struct inode *i)
++{
++	return SHAREFS_I(i)->lower_inode;
++}
++
++static inline void sharefs_set_lower_inode(struct inode *i, struct inode *val)
++{
++	SHAREFS_I(i)->lower_inode = val;
++}
++
++/* superblock to lower superblock */
++static inline struct super_block *sharefs_lower_super(
++	const struct super_block *sb)
++{
++	return SHAREFS_SB(sb)->lower_sb;
++}
++
++static inline void sharefs_set_lower_super(struct super_block *sb,
++					   struct super_block *val)
++{
++	SHAREFS_SB(sb)->lower_sb = val;
++}
++
++/* path based (dentry/mnt) macros */
++static inline void pathcpy(struct path *dst, const struct path *src)
++{
++	dst->dentry = src->dentry;
++	dst->mnt = src->mnt;
++}
++/* Returns struct path.  Caller must path_put it. */
++static inline void sharefs_get_lower_path(const struct dentry *dent,
++					  struct path *lower_path)
++{
++	spin_lock(&SHAREFS_D(dent)->lock);
++	pathcpy(lower_path, &SHAREFS_D(dent)->lower_path);
++	path_get(lower_path);
++	spin_unlock(&SHAREFS_D(dent)->lock);
++	return;
++}
++static inline void sharefs_put_lower_path(const struct dentry *dent,
++					  struct path *lower_path)
++{
++	path_put(lower_path);
++	return;
++}
++static inline void sharefs_set_lower_path(const struct dentry *dent,
++					  struct path *lower_path)
++{
++	spin_lock(&SHAREFS_D(dent)->lock);
++	pathcpy(&SHAREFS_D(dent)->lower_path, lower_path);
++	spin_unlock(&SHAREFS_D(dent)->lock);
++	return;
++}
++static inline void sharefs_reset_lower_path(const struct dentry *dent)
++{
++	spin_lock(&SHAREFS_D(dent)->lock);
++	SHAREFS_D(dent)->lower_path.dentry = NULL;
++	SHAREFS_D(dent)->lower_path.mnt = NULL;
++	spin_unlock(&SHAREFS_D(dent)->lock);
++	return;
++}
++static inline void sharefs_put_reset_lower_path(const struct dentry *dent)
++{
++	struct path lower_path;
++	spin_lock(&SHAREFS_D(dent)->lock);
++	pathcpy(&lower_path, &SHAREFS_D(dent)->lower_path);
++	SHAREFS_D(dent)->lower_path.dentry = NULL;
++	SHAREFS_D(dent)->lower_path.mnt = NULL;
++	spin_unlock(&SHAREFS_D(dent)->lock);
++	path_put(&lower_path);
++	return;
++}
++
++/* locking helpers */
++static inline struct dentry *lock_parent(struct dentry *dentry)
++{
++	struct dentry *dir = dget_parent(dentry);
++	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
++	return dir;
++}
++
++static inline void unlock_dir(struct dentry *dir)
++{
++	inode_unlock(d_inode(dir));
++	dput(dir);
++}
++
++static inline bool str_n_case_eq(const char *s1, const char *s2, size_t len)
++{
++	return !strncasecmp(s1, s2, len);
++}
++
++static inline bool qstr_case_eq(const struct qstr *q1, const struct qstr *q2)
++{
++	return q1->len == q2->len && str_n_case_eq(q1->name, q2->name, q2->len);
++}
++/*****************************************************************************
++ * log print helpers
++ *****************************************************************************/
++__printf(4, 5) void __sharefs_log(const char *level, const bool ratelimited,
++				const char *function, const char *fmt, ...);
++#define sharefs_err(fmt, ...)	\
++	__sharefs_log(KERN_ERR, false, __func__, fmt, ##__VA_ARGS__)
++#define sharefs_warning(fmt, ...) \
++	__sharefs_log(KERN_WARNING, false, __func__, fmt, ##__VA_ARGS__)
++#define sharefs_info(fmt, ...) \
++	__sharefs_log(KERN_INFO, false, __func__, fmt, ##__VA_ARGS__)
++#define sharefs_err_ratelimited(fmt, ...)	\
++	__sharefs_log(KERN_ERR, true, __func__, fmt, ##__VA_ARGS__)
++#define sharefs_warning_ratelimited(fmt, ...) \
++	__sharefs_log(KERN_WARNING, true, __func__, fmt, ##__VA_ARGS__)
++#define sharefs_info_ratelimited(fmt, ...) \
++	__sharefs_log(KERN_INFO, true, __func__, fmt, ##__VA_ARGS__)
++
++#endif /* not _SHAREFS_H_ */
+diff --git a/fs/sharefs/sharefs_compat.h b/fs/sharefs/sharefs_compat.h
+new file mode 100644
+index 000000000..d541dd1ec
+--- /dev/null
++++ b/fs/sharefs/sharefs_compat.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Backport shim for kernels older than the 6.6 these sources target.
++ * Force-included from the Makefile so it lands ahead of the VFS headers
++ * in every unit; each entry is a version-guarded token rename, keeping
++ * fs/sharefs/ byte-identical to the OHOS kernel_linux_6.6 tree.
++ *
++ * Safe only because every 6.6 spelling below is wholly absent from the
++ * 6.1 headers (verified by grep over include/ — same rule as
++ * fs/hmdfs/hmdfs_compat.h).
++ */
++#ifndef SHAREFS_COMPAT_H
++#define SHAREFS_COMPAT_H
++
++#include <linux/version.h>
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
++/* idmapped-mount API: 6.3 replaced struct user_namespace * with
++ * struct mnt_idmap * in the inode ops / vfs_* helpers. */
++#define mnt_idmap	user_namespace
++#define nop_mnt_idmap	init_user_ns
++#define old_mnt_idmap	old_mnt_userns
++#define new_mnt_idmap	new_mnt_userns
++#endif
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
++/* 6.6 renamed inode.i_ctime to __i_ctime (accessor enforcement). */
++#define __i_ctime	i_ctime
++#endif
++
++#endif /* SHAREFS_COMPAT_H */
+diff --git a/fs/sharefs/super.c b/fs/sharefs/super.c
+new file mode 100644
+index 000000000..ccf7ea73c
+--- /dev/null
++++ b/fs/sharefs/super.c
+@@ -0,0 +1,219 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright (c) 1998-2022 Erez Zadok
++ * Copyright (c) 2009	   Shrikar Archak
++ * Copyright (c) 2003-2022 Stony Brook University
++ * Copyright (c) 2003-2022 The Research Foundation of SUNY
++ */
++#include <linux/backing-dev-defs.h>
++#include <linux/ratelimit.h>
++#include <linux/slab.h>
++#include <linux/parser.h>
++#include "sharefs.h"
++
++enum {
++	OPT_USER_ID,
++	OPT_OVERRIDE,
++	OPT_OVERRIDE_SUPPORT_DELETE,
++	OPT_SNIFFER,
++	OPT_ERR,
++};
++
++static match_table_t sharefs_tokens = {
++	{ OPT_USER_ID, "user_id=%s" },
++	{ OPT_OVERRIDE, "override" },
++	{ OPT_OVERRIDE_SUPPORT_DELETE, "override_support_delete" },
++	{ OPT_SNIFFER, "sniffer" },
++	{ OPT_ERR, NULL }
++};
++
++int sharefs_parse_options(struct sharefs_sb_info *sbi, const char *data)
++{
++	char *p = NULL;
++	char *name = NULL;
++	char *options = NULL;
++	char *options_src = NULL;
++	substring_t args[MAX_OPT_ARGS];
++	unsigned int user_id = 0;
++	int err = 0;
++
++	options = kstrdup(data, GFP_KERNEL);
++	if (data && !options) {
++		err = -ENOMEM;
++		goto out;
++	}
++	options_src = options;
++
++	while ((p = strsep(&options_src, ",")) != NULL) {
++		int token;
++
++		if (!*p)
++			continue;
++		args[0].to = args[0].from = NULL;
++		token = match_token(p, sharefs_tokens, args);
++
++		switch (token) {
++		case OPT_USER_ID:
++			name = match_strdup(&args[0]);
++			if (name) {
++				err = kstrtouint(name, 10, &user_id);
++				kfree(name);
++				name = NULL;
++				if (err)
++					goto out;
++				sbi->user_id = user_id;
++			}
++			break;
++		case OPT_OVERRIDE:
++			sbi->override = true;
++			break;
++		case OPT_OVERRIDE_SUPPORT_DELETE:
++			sbi->override_support_delete = true;
++			break;
++		case OPT_SNIFFER:
++			sbi->sniffer = true;
++			break;
++		default:
++			err = -EINVAL;
++			goto out;
++		}
++	}
++out:
++	kfree(options);
++
++	return err;
++}
++
++/*
++ * The inode cache is used with alloc_inode for both our inode info and the
++ * vfs inode.
++ */
++static struct kmem_cache *sharefs_inode_cachep;
++
++/* final actions when unmounting a file system */
++static void sharefs_put_super(struct super_block *sb)
++{
++	struct sharefs_sb_info *spd;
++	struct super_block *s;
++
++	spd = SHAREFS_SB(sb);
++	if (!spd)
++		return;
++
++	/* decrement lower super references */
++	s = sharefs_lower_super(sb);
++	sharefs_set_lower_super(sb, NULL);
++	atomic_dec(&s->s_active);
++
++	kfree(spd);
++	sb->s_fs_info = NULL;
++}
++
++static int sharefs_statfs(struct dentry *dentry, struct kstatfs *buf)
++{
++	int err;
++	struct path lower_path;
++
++	sharefs_get_lower_path(dentry, &lower_path);
++	err = vfs_statfs(&lower_path, buf);
++	sharefs_put_lower_path(dentry, &lower_path);
++
++	/* set return buf to our f/s to avoid confusing user-level utils */
++	buf->f_type = SHAREFS_SUPER_MAGIC;
++
++	return err;
++}
++
++/*
++ * Called by iput() when the inode reference count reached zero
++ * and the inode is not hashed anywhere.  Used to clear anything
++ * that needs to be, before the inode is completely destroyed and put
++ * on the inode free list.
++ */
++static void sharefs_evict_inode(struct inode *inode)
++{
++	struct inode *lower_inode;
++
++	truncate_inode_pages(&inode->i_data, 0);
++	clear_inode(inode);
++	/*
++	 * Decrement a reference to a lower_inode, which was incremented
++	 * by our read_inode when it was created initially.
++	 */
++	lower_inode = sharefs_lower_inode(inode);
++	sharefs_set_lower_inode(inode, NULL);
++	iput(lower_inode);
++}
++
++void __sharefs_log(const char *level, const bool ratelimited,
++		 const char *function, const char *fmt, ...)
++{
++	struct va_format vaf;
++	va_list args;
++
++	va_start(args, fmt);
++	vaf.fmt = fmt;
++	vaf.va = &args;
++	if (ratelimited)
++		printk_ratelimited("%s sharefs: %s() %pV\n", level,
++				   function, &vaf);
++	else
++		printk("%s sharefs: %s() %pV\n", level, function, &vaf);
++	va_end(args);
++}
++
++static struct inode *sharefs_alloc_inode(struct super_block *sb)
++{
++	struct sharefs_inode_info *i;
++
++	i = kmem_cache_alloc(sharefs_inode_cachep, GFP_KERNEL);
++	if (!i)
++		return NULL;
++
++	/* memset everything up to the inode to 0 */
++	memset(i, 0, offsetof(struct sharefs_inode_info, vfs_inode));
++
++	atomic64_set(&i->vfs_inode.i_version, 1);
++	return &i->vfs_inode;
++}
++
++static void sharefs_destroy_inode(struct inode *inode)
++{
++	kmem_cache_free(sharefs_inode_cachep, SHAREFS_I(inode));
++}
++
++/* sharefs inode cache constructor */
++static void init_once(void *obj)
++{
++	struct sharefs_inode_info *i = obj;
++
++	inode_init_once(&i->vfs_inode);
++}
++
++int sharefs_init_inode_cache(void)
++{
++	int err = 0;
++
++	sharefs_inode_cachep =
++		kmem_cache_create("sharefs_inode_cache",
++				  sizeof(struct sharefs_inode_info), 0,
++				  SLAB_RECLAIM_ACCOUNT, init_once);
++	if (!sharefs_inode_cachep)
++		err = -ENOMEM;
++	return err;
++}
++
++/* sharefs inode cache destructor */
++void sharefs_destroy_inode_cache(void)
++{
++	if (sharefs_inode_cachep)
++		kmem_cache_destroy(sharefs_inode_cachep);
++}
++
++const struct super_operations sharefs_sops = {
++	.put_super	= sharefs_put_super,
++	.statfs		= sharefs_statfs,
++	.evict_inode	= sharefs_evict_inode,
++	.alloc_inode	= sharefs_alloc_inode,
++	.destroy_inode	= sharefs_destroy_inode,
++};
+diff --git a/security/selinux/hooks.c b/security/selinux/hooks.c
+index e7ad39d6a..ab9a90273 100644
+--- a/security/selinux/hooks.c
++++ b/security/selinux/hooks.c
+@@ -703,6 +703,7 @@ static int selinux_set_mnt_opts(struct super_block *sb,
+ 	    !strcmp(sb->s_type->name, "binder") ||
+ 	    !strcmp(sb->s_type->name, "bpf") ||
+ 	    !strcmp(sb->s_type->name, "pstore") ||
++	    !strcmp(sb->s_type->name, "sharefs") ||
+ 	    !strcmp(sb->s_type->name, "securityfs"))
+ 		sbsec->flags |= SE_SBGENFS;
+ 

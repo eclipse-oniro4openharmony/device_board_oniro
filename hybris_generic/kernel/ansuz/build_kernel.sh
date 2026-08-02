@@ -77,8 +77,14 @@ git -C "$KERNEL_TREE" checkout -- deviceinfo
 if [ "$MODE" != "--baseline" ]; then
     # ohos-adaptation.patch owns drivers/ + include/; hmdfs.patch owns
     # fs/hmdfs/ and two anchor hunks in fs/Kconfig + fs/Makefile.  The two
-    # never touch the same file, so order does not matter.
-    for p in ohos-adaptation hmdfs; do
+    # never touch the same file, so order does not matter.  The staged
+    # patches (2026-08-02) were diffed against a tree with the first two
+    # applied, so they must come AFTER them: ohos-fs-staged owns
+    # fs/{sharefs,epfs,dec} + anchors + one selinux SE_SBGENFS line;
+    # ohos-dfx-staged owns drivers/staging/{hisysevent,zerohung,hungtask,
+    # blackbox,ucollection} + anchors + include/dfx + blackbox headers +
+    # the kernel/hung_task.c handoff hunks.
+    for p in ohos-adaptation hmdfs ohos-fs-staged ohos-dfx-staged; do
         echo "Applying $p.patch..."
         git -C "$KERNEL_SRC" apply --whitespace=nowarn "$HERE/patches/kernel-source/$p.patch"
     done

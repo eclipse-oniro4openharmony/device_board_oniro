@@ -12,13 +12,15 @@ applied as one additive patch. See
 
 | File | Purpose |
 |---|---|
-| `build_kernel.sh` | clone (pinned SHAs) → reset tree → apply `ohos-adaptation.patch` + `hmdfs.patch` + `config/openharmony.config` → Halium build (`./build.sh -b workdir -k`) → **KMI guard** → artifacts in `kernel/linux/volla-ansuz/out/` |
+| `build_kernel.sh` | clone (pinned SHAs) → reset tree → apply `ohos-adaptation.patch` + `hmdfs.patch` + `ohos-fs-staged.patch` + `ohos-dfx-staged.patch` + `config/openharmony.config` → Halium build (`./build.sh -b workdir -k`) → **KMI guard** → artifacts in `kernel/linux/volla-ansuz/out/` |
 | `build_kernel.sh --baseline` | pristine (no-OHOS) build; records `workdir/baseline-Module.symvers`; its images are the UT-compatible set used for the P2 gates |
 | `build_init_boot_chainload.sh` | splices `launcher/init-chainload.sh` (`@HYBRIS_DEVICE@`→`ansuz`, halium init kept as `/init.halium`) into init_boot; repacks vendor_boot with the OHOS cmdline (`ohos.boot.hardware=ansuz lsm=selinux`) |
 | `build_super_img.sh` | lpmake super: OHOS system/vendor/sys_prod/chip_prod + halium system/vendor/**vendor_dlkm/system_dlkm** (EROFS) from `halium-blobs/ansuz/` |
 | `config/openharmony.config` | stage-1 fragment: ACCESS_TOKENID, HILOG, HIEVENT, BINDER_SENDER_INFO, HMDFS |
 | `patches/kernel-source/ohos-adaptation.patch` | all kernel changes (new drivers + binder token ioctls + wiring); regenerate with `git diff` from the kernel tree |
 | `patches/kernel-source/hmdfs.patch` | `fs/hmdfs/` + two anchor hunks in `fs/Kconfig` / `fs/Makefile`; disjoint from `ohos-adaptation.patch`, which owns only `drivers/` + `include/` |
+| `patches/kernel-source/ohos-fs-staged.patch` | stage 2 (2026-08-02): `fs/sharefs` (+compat header), `fs/epfs`, `fs/dec` (DEC MAC, from `common_modules/dec`) + `fs/Kconfig`/`fs/Makefile` anchors + one `security/selinux/hooks.c` SE_SBGENFS line for sharefs.  Diffed against a tree with the first two patches applied — must apply after them |
+| `patches/kernel-source/ohos-dfx-staged.patch` | stage 2 (2026-08-02): `drivers/staging/{hisysevent,zerohung,hungtask,blackbox,ucollection}` (+compat headers), `include/dfx/`, `include/linux/blackbox*.h`, staging anchors, and the `kernel/hung_task.c` handoff hunks (which the X23 never carried — its hungtask is dead code) |
 
 ## KMI discipline (the one hard rule)
 
@@ -94,6 +96,44 @@ files:
 covers the cross-device socket transport, which a single-device port
 never uses.
 
+## Stage 2 (2026-08-02) — sharefs/epfs/DEC + the DFX set
+
+Same recipe, notable deltas:
+
+* **sharefs** — `sharefs_compat.h` is a strict subset of the hmdfs one
+  (idmap renames + `__i_ctime`).  Upstream's Makefile carried `-Werror`
+  and standalone out-of-tree targets — stripped.  One core line:
+  `sharefs` added to the SE_SBGENFS list in `security/selinux/hooks.c`
+  (mirrors the OHOS 6.6 tree) so genfscon labeling applies.
+* **epfs** — zero edits; already `LINUX_VERSION_CODE`-guarded upstream.
+* **DEC** (`fs/dec`, from `common_modules/dec`) — three real edits:
+  `get_tokenid()` reads `ohos_access_token_get(current)` instead of the
+  KMI-forbidden `task_struct::token`; the OHOS-added `path_access` LSM
+  hook is compiled out (`CONFIG_SECURITY_DEC_PATH_ACCESS_HOOK`, never
+  set — taking it would mean core edits to lsm_hook_defs.h/security.c/
+  fs/open.c; file_open+file_permission still gate all real I/O); flask.h
+  genheaders rules dropped from the Makefile (vestigial, racy).  DEC
+  registers via `security_add_hooks()` at device_initcall — it does
+  **not** need an `lsm=` cmdline entry.  Needs `CONFIG_SECURITY_PATH=y`
+  (off in gki_defconfig; enabling it changed no stock-expected CRC).
+* **hungtask** — the only real core-file surgery: 9 guarded hunks in
+  `kernel/hung_task.c` hand khungtaskd's checking loop to
+  `htbase_check_tasks()` (all static functions, no export changes).
+  `PF_FROZEN` died in the v6.1 freezer rewrite; OHOS 6.6 re-adds it as
+  hole bit `PF__HOLE__00800000` and never sets it — `hungtask_compat.h`
+  defines it identically.
+* **blackbox** — X23-parity inert config: no storage backend (pstore
+  backends would grow `ramoops_platform_data` + `enum pstore_type_id`
+  → KMI break in the ramoops module), but real log paths so the
+  `save_error_log` kthread parks instead of polling.  Two in-place
+  `DEFINE_SEMAPHORE` arity guards (6.4 added the count arg).
+* **ucollection** — Kconfig rewritten to a plain bool (upstream's
+  `def_bool $(success,ohos-check-dir.sh …)` + `tristate` is malformed
+  here and the sources use unexported symbols, so `=m` can never link).
+* All component dirs get `ccflags-remove-y += -Werror`: the OHOS
+  reference builds are not -Werror and the byte-identical sources carry
+  benign warnings that `CONFIG_WERROR` would promote.
+
 Staged later (same 6.6 source, port when the OHOS userspace needs
-them): sharefs, hyperhold/zswapd, HDF, hisysevent, blackbox,
-hungtask, zerohung, HCK.
+them): hyperhold/zswapd, HDF, HCK.  RTG/qos_auth stay out for good —
+they grow task_struct, which the KMI rule forbids.
