@@ -1,0 +1,37 @@
+From 3dde8f561b2e7610c30fc0b0ceb51fb8465d4778 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 3 Aug 2026 14:17:30 +0000
+Subject: [PATCH] khdf: only pass -mno-outline-atomics on arm64 kernels
+
+-mno-outline-atomics is an aarch64-only flag; passing it unconditionally
+breaks x86_64 kernel builds (x86_general emulator) where clang raises
+-Werror,-Woption-ignored. Gate it on ARCH/SRCARCH; cc-option is not
+usable here because KBUILD_CFLAGS is a recursive variable in this
+inclusion context and the probe self-references it.
+
+Change-Id: Iee810f6f6d55663d5ca4253fdfb4789ab40cf6d6
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ adapter/khdf/linux/manager/Makefile | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/adapter/khdf/linux/manager/Makefile b/adapter/khdf/linux/manager/Makefile
+index 7b09661e..73bff206 100644
+--- a/adapter/khdf/linux/manager/Makefile
++++ b/adapter/khdf/linux/manager/Makefile
+@@ -69,7 +69,12 @@ obj-y += \
+         $(SEC_FUNCTION_OBJECTS)
+ 
+ CFLAGS_REMOVE_$(HDF_FRAMEWORK_SRC_DIR)/framework/utils/src/hdf_sbuf.o += -mgeneral-regs-only
++# -mno-outline-atomics exists only on aarch64; clang on other arches
++# rejects it under -Werror,-Woption-ignored (and cc-option cannot be
++# used here: KBUILD_CFLAGS is recursive in this inclusion context).
++ifneq ($(filter arm64,$(ARCH) $(SRCARCH)),)
+ KBUILD_CFLAGS += -mno-outline-atomics
++endif
+ 
+ ccflags-y += \
+        -I$(srctree)/drivers/hdf/framework/include \
+-- 
+2.50.1
+
