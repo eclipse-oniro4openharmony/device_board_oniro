@@ -1,7 +1,7 @@
 From 002709eca3f7ab374f53551d51a57db41a3bf7cb Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:17 +0200
-Subject: [PATCH 3/4] deps_guard: alias ld-musl-{arm,aarch64,x86_64,riscv64}
+Subject: [PATCH 3/5] deps_guard: alias ld-musl-{arm,aarch64,x86_64,riscv64}
  loader names
 
 The ld-musl loader GN target is historically named 'ld-musl-arm.so.1' but produces an arch-specific file (ld-musl-x86_64.so.1, ld-musl-aarch64.so.1, ld-musl-riscv64.so.1). Whitelist entries refer to the historical name only, so on non-arm builds every system whitelist row missed the actual loader and 300+ false-positive deps_guard errors fired. Aliasing the four arches lets one entry cover all four.

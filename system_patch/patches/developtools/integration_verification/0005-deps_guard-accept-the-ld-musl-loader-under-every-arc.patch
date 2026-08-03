@@ -1,0 +1,34 @@
+From f96222097de6f1b277ae7ef3d63156682ade043b Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 3 Aug 2026 17:30:35 +0000
+Subject: [PATCH 5/5] deps_guard: accept the ld-musl loader under every arch
+ name
+
+base_innerapi_rule exempts base libraries by exact so name but only
+listed ld-musl-aarch64.so.1; the loader file is arch-specific, so
+x86_64 builds flagged vendor modules (e.g. libaudio_primary_impl_vdi)
+for depending on ld-musl-x86_64.so.1. List all four arch spellings,
+matching the whitelist aliasing already done in base_rule.py.
+
+Change-Id: I7e15d04d4e8228081c51e72fb113f16e213eb8ba
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ tools/deps_guard/rules_checker/base_innerapi_rule.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/deps_guard/rules_checker/base_innerapi_rule.py b/tools/deps_guard/rules_checker/base_innerapi_rule.py
+index 978697b..325cb78 100644
+--- a/tools/deps_guard/rules_checker/base_innerapi_rule.py
++++ b/tools/deps_guard/rules_checker/base_innerapi_rule.py
+@@ -32,7 +32,7 @@ class BaseInnerapiRule(BaseRule):
+                                     "chipsetsdk_sp_indirect", "passthrough"] + self.__ignored_tags
+         self.__valid_vendor_tags = ["llndk", "chipsetsdk", "chipsetsdk_sp", "llndk", "passthrough",
+                                    "passthrough_indirect"] + self.__ignored_tags
+-        self.__base_sofiles = ["libc.so", "libutils.z.so", "ld-musl-aarch64.so.1", "libconfiguration.z.so", "libusbmanager.z.so", 
++        self.__base_sofiles = ["libc.so", "libutils.z.so", "ld-musl-arm.so.1", "ld-musl-aarch64.so.1", "ld-musl-x86_64.so.1", "ld-musl-riscv64.so.1", "libconfiguration.z.so", "libusbmanager.z.so", 
+                                "libsms.z.so"]
+ 
+     def check(self):
+-- 
+2.50.1
+

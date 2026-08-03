@@ -1,7 +1,7 @@
 From e8360968a0075a82714f7485bfacaf35b363fe1b Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:37:43 +0000
-Subject: [PATCH 1/4] integration_verification: register hybris_generic VDI
+Subject: [PATCH 1/5] integration_verification: register hybris_generic VDI
  libs in deps guard rules
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

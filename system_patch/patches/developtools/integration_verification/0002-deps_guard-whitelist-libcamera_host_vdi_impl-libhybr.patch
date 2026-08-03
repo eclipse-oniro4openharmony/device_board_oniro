@@ -1,7 +1,7 @@
 From 596f4a96b1be78fe08459758d6c5e63c7857023d Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 21 May 2026 14:00:28 +0000
-Subject: [PATCH 2/4] =?UTF-8?q?deps=5Fguard:=20whitelist=20libcamera=5Fhos?=
+Subject: [PATCH 2/5] =?UTF-8?q?deps=5Fguard:=20whitelist=20libcamera=5Fhos?=
  =?UTF-8?q?t=5Fvdi=5Fimpl=E2=86=92libhybris-common?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
