@@ -1,0 +1,105 @@
+From 8ac642c8439287bbde11ef1709c5031625c716f8 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 24 Jul 2026 21:23:58 +0000
+Subject: [PATCH] ipc: open the binderfs binder node, falling back to
+ /dev/binder
+
+On Halium-14 hybris devices (ansuz) /dev/binder must point at the
+CONTAINER's framework binder (android-binder) for bionic libbinder
+inside OHOS-side hybris processes - if OHOS IPC also opened /dev/binder,
+OHOS samgr would claim the context manager slot on the container's
+binder and Android servicemanager dies with "Could not become context
+manager", taking the whole container down. So OHOS IPC opens the
+binderfs node /dev/binderfs/binder directly (same target stock init
+symlinks /dev/binder to).
+
+Kernels without CONFIG_ANDROID_BINDERFS (the x86_general emulator) only
+expose the classic /dev/binder char device, so probe the binderfs node
+and fall back - on hybris devices the node always exists and behaviour
+is unchanged.
+
+Change-Id: Iea5bcf6aa0d80ddadfc65a55cc3f907639ab93c4
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ ipc/native/c/ipc/include/ipc_types.h            |  6 +++++-
+ ipc/native/c/ipc/src/linux/ipc_invoker.c        |  3 +++
+ .../core/invoker/source/binder_connector.cpp    | 17 +++++++++++++++--
+ 3 files changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/ipc/native/c/ipc/include/ipc_types.h b/ipc/native/c/ipc/include/ipc_types.h
+index ca6ee76f..05fc0550 100644
+--- a/ipc/native/c/ipc/include/ipc_types.h
++++ b/ipc/native/c/ipc/include/ipc_types.h
+@@ -20,7 +20,11 @@
+ #ifdef __LITEOS_A__
+ #define LITEIPC_DRIVER "/dev/lite_ipc"
+ #else
+-#define BINDER_DRIVER "/dev/binder"
++/* hybris_generic: binderfs node, not the /dev/binder symlink — see
++ * binder_connector.cpp DRIVER_NAME for rationale. */
++#define BINDER_DRIVER "/dev/binderfs/binder"
++/* Fallback for kernels without CONFIG_ANDROID_BINDERFS (x86_general). */
++#define BINDER_DRIVER_FALLBACK "/dev/binder"
+ #endif
+ 
+ #endif /* OHOS_BINDER_TYPES_H */
+\ No newline at end of file
+diff --git a/ipc/native/c/ipc/src/linux/ipc_invoker.c b/ipc/native/c/ipc/src/linux/ipc_invoker.c
+index bd97e64c..69cfed13 100644
+--- a/ipc/native/c/ipc/src/linux/ipc_invoker.c
++++ b/ipc/native/c/ipc/src/linux/ipc_invoker.c
+@@ -68,6 +68,9 @@ static BinderConnector *OpenDriver(void)
+         return NULL;
+     }
+     connector->fd = open(BINDER_DRIVER, O_RDWR);
++    if (connector->fd < 0) {
++        connector->fd = open(BINDER_DRIVER_FALLBACK, O_RDWR);
++    }
+     if (connector->fd < 0) {
+         RPC_LOG_ERROR("Open liteipc driver failed error %d.", errno);
+         goto OPEN_ERR;
+diff --git a/ipc/native/src/core/invoker/source/binder_connector.cpp b/ipc/native/src/core/invoker/source/binder_connector.cpp
+index 86c698ef..bc7a5c47 100644
+--- a/ipc/native/src/core/invoker/source/binder_connector.cpp
++++ b/ipc/native/src/core/invoker/source/binder_connector.cpp
+@@ -21,6 +21,7 @@
+ #include <fcntl.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
++#include <unistd.h>
+ #include <cstdio>
+ 
+ #include "__mutex_base"
+@@ -42,7 +43,18 @@ std::mutex BinderConnector::skeletonMutex;
+ constexpr int SZ_1_M = 1048576;
+ constexpr int DOUBLE = 2;
+ static const int IPC_MMAP_SIZE = (SZ_1_M - sysconf(_SC_PAGE_SIZE) * DOUBLE);
+-static constexpr const char *DRIVER_NAME = "/dev/binder";
++/* hybris_generic: open the binderfs node directly instead of the /dev/binder
++ * symlink.  Identical target on stock OHOS devices (init cfg symlinks
++ * /dev/binder -> /dev/binderfs/binder), but on Halium-14 hybris devices
++ * (ansuz) /dev/binder must point at the CONTAINER's framework binder
++ * (android-binder) for bionic libbinder inside OHOS-side hybris processes —
++ * if OHOS IPC also opened /dev/binder, OHOS samgr would claim the context
++ * manager slot on the container's binder and Android servicemanager dies
++ * with "Could not become context manager", taking the whole container down. */
++static constexpr const char *DRIVER_NAME = "/dev/binderfs/binder";
++/* Kernels without CONFIG_ANDROID_BINDERFS (e.g. the x86_general emulator)
++ * only expose the classic char device. */
++static constexpr const char *DRIVER_NAME_FALLBACK = "/dev/binder";
+ static constexpr const char *TOKENID_DEVNODE = "/dev/access_token_id";
+ BinderConnector *BinderConnector::instance_ = nullptr;
+ 
+@@ -232,7 +244,8 @@ BinderConnector *BinderConnector::GetInstance()
+     if (instance_ == nullptr) {
+         std::lock_guard<std::mutex> lockGuard(skeletonMutex);
+         if (instance_ == nullptr) {
+-            auto temp = new (std::nothrow) BinderConnector(std::string(DRIVER_NAME));
++            const char *driverName = (access(DRIVER_NAME, F_OK) == 0) ? DRIVER_NAME : DRIVER_NAME_FALLBACK;
++            auto temp = new (std::nothrow) BinderConnector(std::string(driverName));
+             if (temp == nullptr) {
+                 ZLOGE(LABEL, "create BinderConnector object failed");
+                 return nullptr;
+-- 
+2.50.1
+
