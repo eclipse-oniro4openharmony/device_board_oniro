@@ -41,7 +41,7 @@ product with the build system, so without it the build stops immediately
 with an unknown-product error:
 
 ```bash
-bash device/board/oniro/hybris_generic/system_patch/do_patch.sh
+bash device/board/oniro/system_patch/do_patch.sh
 # (undo_patch.sh in the same directory rolls the series back)
 ```
 

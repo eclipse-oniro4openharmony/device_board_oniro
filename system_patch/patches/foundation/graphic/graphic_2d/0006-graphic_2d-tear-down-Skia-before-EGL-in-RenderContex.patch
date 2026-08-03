@@ -1,0 +1,83 @@
+From 5108cfe087868649846809c65e217699768bc1ab Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 27 Jul 2026 10:43:29 +0000
+Subject: [PATCH 06/10] graphic_2d: tear down Skia before EGL in
+ ~RenderContextGL
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The destructor destroyed the EGL context, unbound it and called
+eglTerminate/eglReleaseThread *before* dropping surface_ and
+drGPUContext_.  Releasing those runs the Skia destructors, and
+~GrDirectContext submits to the GPU — GL calls with no current
+context.  Desktop GL stacks shrug this off, but the Mali blob
+dereferences its (absent) per-thread context in the very first
+glGetError and SIGSEGVs.  This is the once-per-boot bootanimation
+cppcrash seen on both the X23 and the Plinius: bootanimation renders
+on its event thread, exits it, then destroys the render context from
+the main thread where nothing is current.
+
+Reorder the teardown: bind our context (pbuffer, or surfaceless when
+no pbuffer was needed) on the destructing thread, release the Skia
+surface and GPU context while GL calls are still legal, then destroy
+the EGL objects.  If the context cannot be made current, abandon the
+GrDirectContext instead so its destructor performs no GL calls at
+all — eglDestroyContext reclaims the driver-side resources anyway.
+
+Change-Id: Iceb41ba22a681f95602530ba6addc29a2aa27590
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../new_render_context/render_context_gl.cpp  | 29 +++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp b/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp
+index e700a0f99a..0b0b33f101 100644
+--- a/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp
++++ b/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp
+@@ -18,6 +18,7 @@
+ #include "memory/rs_tag_tracker.h"
+ #include "render_context/render_context_log.h"
+ #include "rs_trace.h"
++#include "skia_adapter/skia_gpu_context.h"
+ #include "window.h"
+ 
+ #ifdef RS_ENABLE_GL
+@@ -120,6 +121,34 @@ RenderContextGL::~RenderContextGL()
+         return;
+     }
+ 
++    /*
++     * Dropping surface_/drGPUContext_ below runs the Skia destructors, which
++     * issue GL calls (GrDirectContext dtor submits to the GPU).  Those calls
++     * are only valid while our EGL context is current on THIS thread — but
++     * the context was typically made current on a since-exited render thread
++     * (e.g. bootanimation's event thread), and some GL blobs (Mali) crash on
++     * the very first GL call with no current context instead of returning an
++     * error.  Bind the context here for teardown; if that fails, abandon the
++     * GrDirectContext so its destructor performs no GL calls at all — the
++     * eglDestroyContext below reclaims the driver-side resources anyway.
++     */
++    if (eglGetCurrentContext() != eglContext_) {
++        /* pbufferSurface_ is EGL_NO_SURFACE exactly when surfaceless-context
++         * is supported, so passing it is correct in both cases. */
++        EGLSurface surf = pbufferSurface_;
++        if (!eglMakeCurrent(eglDisplay_, surf, surf, eglContext_) && drGPUContext_ != nullptr) {
++            LOGW("~RenderContextGL: cannot make context current (0x%{public}x), abandoning GrContext",
++                eglGetError());
++            auto skiaCtx = drGPUContext_->GetImpl<Drawing::SkiaGPUContext>();
++            if (skiaCtx != nullptr && skiaCtx->GetGrContext() != nullptr) {
++                skiaCtx->GetGrContext()->abandonContext();
++            }
++        }
++    }
++    surface_ = nullptr;
++    drGPUContext_ = nullptr;
++    eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++
+     eglDestroyContext(eglDisplay_, eglContext_);
+     if (pbufferSurface_ != EGL_NO_SURFACE) {
+         eglDestroySurface(eglDisplay_, pbufferSurface_);
+-- 
+2.50.1
+

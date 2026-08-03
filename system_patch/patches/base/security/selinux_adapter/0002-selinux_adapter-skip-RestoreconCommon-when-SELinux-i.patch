@@ -1,0 +1,32 @@
+From 77fc443ed6cdfcafd501cefdff1d7d0e27c36c82 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 11:59:12 +0200
+Subject: [PATCH 2/2] selinux_adapter: skip RestoreconCommon when SELinux is
+ disabled
+
+On builds where SELinux is not enforced (dev/emulator), is_selinux_enabled() returns < 1. Treat that as a successful no-op rather than continuing into the disabled subsystem and logging spurious errors.
+
+Change-Id: I8a1fb4780fdadbe7e0c4545f687968bbd7a1ff7d
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ framework/policycoreutils/src/selinux_restorecon.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/framework/policycoreutils/src/selinux_restorecon.c b/framework/policycoreutils/src/selinux_restorecon.c
+index 3b1dada1b..e4dc3164f 100644
+--- a/framework/policycoreutils/src/selinux_restorecon.c
++++ b/framework/policycoreutils/src/selinux_restorecon.c
+@@ -72,6 +72,10 @@ static void SetFileContextsHandle(void)
+ 
+ int RestoreconCommon(const char *path, unsigned int flag, unsigned int nthreads)
+ {
++    // check selinux state, less than 1 is disabled
++    if (is_selinux_enabled() < 1) {
++        return 0;
++    }
+     __selinux_once(g_fcOnce, SetFileContextsHandle);
+     if (g_fcHandle == NULL) {
+         selinux_log(SELINUX_ERROR, "File_contexts handle is null\n");
+-- 
+2.50.1
+

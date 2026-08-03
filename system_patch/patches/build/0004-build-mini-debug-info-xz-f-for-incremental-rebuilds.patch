@@ -1,0 +1,29 @@
+From 95ab53c76daacb31e1a8a9a4b01d1cee9e8bd17d Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 12:01:28 +0200
+Subject: [PATCH 4/5] build: mini-debug-info xz -f for incremental rebuilds
+
+xz refuses to overwrite an existing output file by default, so create_mini_debug_info failed on the second incremental link of any binary. Pass -f so xz overwrites the previous mini-debug archive.
+
+Change-Id: I97cc5a5230bcf6a4656a2f5c26ffabef5005f55d
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ toolchain/mini_debug_info.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/toolchain/mini_debug_info.py b/toolchain/mini_debug_info.py
+index 964ab1f1..9eafdd53 100755
+--- a/toolchain/mini_debug_info.py
++++ b/toolchain/mini_debug_info.py
+@@ -88,7 +88,7 @@ def create_mini_debug_info(binary_path, stripped_binary_path, root_path, clang_b
+         " --only-keep-debug " + binary_path + " " + debug_path
+     gen_mini_debug_cmd = llvm_objcopy_path + " -S --remove-section .gdb_index --remove-section .comment --keep-symbols=" + \
+         keep_path + " " + debug_path + " " + mini_debug_path
+-    compress_debuginfo = "xz " + mini_debug_path
++    compress_debuginfo = "xz -f " + mini_debug_path
+     gen_stripped_binary = llvm_objcopy_path + " --add-section .gnu_debugdata=" + \
+         mini_debug_path + ".xz " + stripped_binary_path
+ 
+-- 
+2.50.1
+

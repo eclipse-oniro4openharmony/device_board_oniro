@@ -1,0 +1,32 @@
+From f84e42ce5da00b63b67d903d5d2779465ff783f8 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 12:01:30 +0200
+Subject: [PATCH 5/5] build: whitelist asmjit libs for compile_standard
+ external_deps rules
+
+third_party/asmjit:libasmjit and libasmjit_frontend_static are referenced as external_deps by arkcompiler/runtime_core's arkencoder. Add them to the external_deps_added_self_part_module allow-list so compile_standard does not flag the cross-part dep.
+
+Change-Id: Ief0bf465cb6cb0234ebf8fe6b97182b95a1414d5
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ compile_standard_whitelist.json | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/compile_standard_whitelist.json b/compile_standard_whitelist.json
+index 008ad010..521d86ae 100644
+--- a/compile_standard_whitelist.json
++++ b/compile_standard_whitelist.json
+@@ -311,7 +311,9 @@
+         "//third_party/flutter/build/skia:skia_shared",
+         "//third_party/vk-gl-cts/framework/platform/ohos/rosen_context:rosen_context",
+         "//third_party/vk-gl-cts/framework/platform:libdeqp_ohos_platform",
+-        "//ide/tools/previewer:lite_previewer"
++        "//ide/tools/previewer:lite_previewer",
++        "//third_party/asmjit:libasmjit",
++        "//third_party/asmjit:libasmjit_frontend_static"
+     ],
+     "external_deps_added_self_part_module": [
+         "//build/rust/tests/test_bin_crate:test_bin_crate",
+-- 
+2.50.1
+

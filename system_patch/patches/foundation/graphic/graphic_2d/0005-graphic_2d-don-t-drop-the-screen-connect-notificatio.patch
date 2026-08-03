@@ -1,0 +1,98 @@
+From e2b10101bf22466fcab7d67c68c3083083be1a14 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Sat, 25 Jul 2026 21:50:11 +0000
+Subject: [PATCH 05/10] graphic_2d: don't drop the screen-connect notification
+
+RSScreenManager::RegisterScreenNodeListener replayed the already-connected
+screens before publishing the listener, leaving a window in which a hotplug
+landing in between was dropped by NotifyScreenNodeChange (the listener was
+still null) and never retried.  No screen render node was created, so the
+screen was absent from the render tree and nothing was composited, even
+though RSScreenManager itself knew about it.
+
+Publish the listener first, and make OnScreenConnect ignore a screen that
+already has a node so a screen observed by both paths is still connected
+exactly once.
+
+Change-Id: I69819c28926f98cef805fad80bbe5bbb3ee994d8
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../pipeline/main_thread/rs_main_thread.cpp   | 20 +++++++++++++++++--
+ .../core/screen_manager/rs_screen_manager.cpp | 18 ++++++++++++++---
+ 2 files changed, 33 insertions(+), 5 deletions(-)
+
+diff --git a/rosen/modules/render_service/core/pipeline/main_thread/rs_main_thread.cpp b/rosen/modules/render_service/core/pipeline/main_thread/rs_main_thread.cpp
+index 6064ead237..6d9cd10b2c 100644
+--- a/rosen/modules/render_service/core/pipeline/main_thread/rs_main_thread.cpp
++++ b/rosen/modules/render_service/core/pipeline/main_thread/rs_main_thread.cpp
+@@ -5100,8 +5100,24 @@ void RSMainThread::RSScreenNodeListener::OnScreenConnect(ScreenId id, const sptr
+         RS_TRACE_NAME_FMT("OnScreenConnect execute task ScreenId[%" PRIu64 "]", id);
+         RS_LOGI("OnScreenConnect execute task ScreenId[%{public}" PRIu64 "]", id);
+         auto& nodeMap = context->GetMutableNodeMap();
+-        auto node = std::shared_ptr<RSScreenRenderNode>(new RSScreenRenderNode(GenerateUniqueNodeIdForRS(),
+-            id, context->weak_from_this()), RSRenderNodeGC::NodeDestructor);
++        /*
++         * A screen can be reported by both the hotplug notification and the
++         * replay done when the listener registers; connecting it twice would
++         * leave two screen render nodes fighting over one screen.
++         */
++        bool alreadyConnected = false;
++        nodeMap.TraverseScreenNodes([&alreadyConnected, id](auto& screenNode) {
++            if (screenNode != nullptr && screenNode->GetScreenId() == id) {
++                alreadyConnected = true;
++            }
++        });
++        if (alreadyConnected) {
++            RS_LOGI("OnScreenConnect ScreenId[%{public}" PRIu64 "] already connected", id);
++            return;
++        }
++        auto node = std::shared_ptr<RSScreenRenderNode>(
++            new RSScreenRenderNode(GenerateUniqueNodeIdForRS(), id, context->weak_from_this()),
++            RSRenderNodeGC::NodeDestructor);
+         node->SetScreenProperty(*property);
+         nodeMap.RegisterRenderNode(node);
+         context->GetGlobalRootRenderNode()->AddChild(node);
+diff --git a/rosen/modules/render_service/core/screen_manager/rs_screen_manager.cpp b/rosen/modules/render_service/core/screen_manager/rs_screen_manager.cpp
+index 9c6dd7d393..3e602fa88b 100644
+--- a/rosen/modules/render_service/core/screen_manager/rs_screen_manager.cpp
++++ b/rosen/modules/render_service/core/screen_manager/rs_screen_manager.cpp
+@@ -2159,11 +2159,26 @@ void RSScreenManager::RegisterScreenNodeListener(std::shared_ptr<RSIScreenNodeLi
+         return;
+     }
+ 
++    /*
++     * Publish the listener before replaying the screens that are already
++     * connected.  Doing it the other way round leaves a window between the
++     * snapshot below and this assignment in which a hotplug is dropped by
++     * NotifyScreenNodeChange (the listener is still null) and never retried,
++     * so no screen render node is ever created and nothing is drawn.
++     * OnScreenConnect ignores a screen that already has a node, so a screen
++     * observed by both paths is still connected exactly once.
++     */
++    {
++        std::lock_guard<std::shared_mutex> lock(screenChangeCallbackMutex_);
++        screenNodeListener_ = listener;
++    }
++
+     std::map<ScreenId, std::shared_ptr<OHOS::Rosen::RSScreen>> screens;
+     {
+         std::lock_guard<std::mutex> lock(screenMapMutex_);
+         screens = screens_;
+     }
++    RS_LOGI("%{public}s: replaying %{public}zu already-connected screen(s)", __func__, screens.size());
+     for (const auto& [id, screen] : screens) {
+         if (screen == nullptr) {
+             RS_LOGW("%{public}s: screen %{public}" PRIu64 " not found", __func__, id);
+@@ -2171,9 +2186,6 @@ void RSScreenManager::RegisterScreenNodeListener(std::shared_ptr<RSIScreenNodeLi
+         }
+         listener->OnScreenConnect(id, screen->GetProperty());
+     }
+-
+-    std::lock_guard<std::shared_mutex> lock(screenChangeCallbackMutex_);
+-    screenNodeListener_ = listener;
+ }
+ 
+ void RSScreenManager::DisplayDump(std::string& dumpString)
+-- 
+2.50.1
+

@@ -1,0 +1,146 @@
+From dff13b08d9c6a40d485fdad6c21cc8134c61df1b Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 27 Jul 2026 12:56:27 +0000
+Subject: [PATCH 07/10] bootanimation: hold the final frame until the
+ lockscreen is ready
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The picture sequence is only ~3 s of frames, but the UI shell takes far
+longer to appear on hybris_generic — playing once and exiting leaves a
+long black screen, and restarting the loop replays the logo assembly
+over and over, which reads as flicker and a rushed animation.  Instead,
+play the sequence once and keep re-drawing the final frame; once
+bootevent.lockscreen.ready fires, hold for a further grace period (the
+lockscreen's first ArkUI frame lands a few seconds after its service
+reports ready) and then stop.  Gating on bootevent.boot.completed would
+deadlock: it aggregates bootevent.bootanimation.finished.
+
+Also letterbox with the frames' own background color instead of black:
+the boot pictures need not have a black background (ours are
+rgb(5,0,21)), and a mismatched border shows as a hard-edged band around
+the scaled image rect on the panel.  Frames are released after their
+single draw, except the held final frame.
+
+Change-Id: If39a95a3a2cd69fc58904c904b8532b242e61896
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../include/boot_picture_player.h             |  3 +
+ .../bootanimation/src/boot_picture_player.cpp | 60 +++++++++++++++++--
+ 2 files changed, 57 insertions(+), 6 deletions(-)
+
+diff --git a/frameworks/bootanimation/include/boot_picture_player.h b/frameworks/bootanimation/include/boot_picture_player.h
+index da52e5407c..60a10efc5f 100644
+--- a/frameworks/bootanimation/include/boot_picture_player.h
++++ b/frameworks/bootanimation/include/boot_picture_player.h
+@@ -51,6 +51,9 @@ private:
+     int32_t pointY_ = 0;
+     int32_t imgVecSize_ = 0;
+     int32_t freq_ = 30;
++    int32_t holdFramesLeft_ = -1;
++    bool bgColorSampled_ = false;
++    Rosen::Drawing::ColorQuad bgColor_ = Rosen::Drawing::Color::COLOR_BLACK;
+     ImageStructVec imageVector_;
+ 
+     std::shared_ptr<OHOS::Rosen::RSSurface> rsSurface_;
+diff --git a/frameworks/bootanimation/src/boot_picture_player.cpp b/frameworks/bootanimation/src/boot_picture_player.cpp
+index e3c5550aaf..b987777084 100644
+--- a/frameworks/bootanimation/src/boot_picture_player.cpp
++++ b/frameworks/bootanimation/src/boot_picture_player.cpp
+@@ -22,6 +22,12 @@
+ namespace OHOS {
+ namespace {
+     const std::string BOOT_PIC_ZIP = "/system/etc/graphic/bootpic.zip";
++    /* How long to keep showing the final frame after bootevent.lockscreen.ready
++     * fires: the lockscreen's first ArkUI frame lands a few seconds after its
++     * service reports ready, and dropping the animation window before that
++     * exposes a black screen. */
++    constexpr int32_t LOCKSCREEN_RENDER_GRACE_SECONDS = 5;
++    constexpr size_t BG_PIXEL_BYTES = 4;
+ }
+ 
+ BootPicturePlayer::BootPicturePlayer(const PlayerParams& params)
+@@ -142,11 +148,32 @@ void BootPicturePlayer::OnVsync()
+ bool BootPicturePlayer::Draw()
+ {
+     if (picCurNo_ >= (imgVecSize_ - 1)) {
+-        LOGI("play sequence frames end");
+-        Stop();
+-        return false;
++        /*
++         * The sequence is only ~3 s of frames, but on slow boots the UI
++         * takes far longer to appear — playing once and exiting leaves a
++         * long black screen, while restarting the loop replays the logo
++         * assembly over and over.  Instead, hold the final frame until the
++         * lockscreen has had time to render its first frame, then stop.
++         * Do NOT gate on bootevent.boot.completed: that aggregates
++         * bootevent.bootanimation.finished, so waiting for it here
++         * deadlocks until the duration timeout.  If the lockscreen event
++         * never comes, StopBootAnimation's duration timeout (60 s
++         * default) still ends the show.
++         */
++        if (holdFramesLeft_ < 0) {
++            if (system::GetBoolParameter("bootevent.lockscreen.ready", false)) {
++                holdFramesLeft_ = freq_ * LOCKSCREEN_RENDER_GRACE_SECONDS;
++            }
++        } else if (holdFramesLeft_ == 0) {
++            LOGI("play sequence frames end");
++            Stop();
++            return false;
++        } else {
++            holdFramesLeft_--;
++        }
++    } else {
++        picCurNo_ = picCurNo_ + 1;
+     }
+-    picCurNo_ = picCurNo_ + 1;
+     ROSEN_TRACE_BEGIN(HITRACE_TAG_GRAPHIC_AGP, "BootAnimation::Draw RequestFrame");
+     auto frame = rsSurface_->RequestFrame(windowWidth_, windowHeight_);
+     ROSEN_TRACE_END(HITRACE_TAG_GRAPHIC_AGP);
+@@ -176,11 +203,28 @@ bool BootPicturePlayer::OnDraw(Rosen::Drawing::CoreCanvas* canvas, int32_t curNo
+         return false;
+     }
+     std::shared_ptr<ImageStruct> imgstruct = imageVector_[curNo];
++    if (imgstruct == nullptr || imgstruct->imageData == nullptr) {
++        LOGE("OnDraw image %{public}d already released", curNo);
++        return false;
++    }
+     std::shared_ptr<Rosen::Drawing::Image> image = imgstruct->imageData;
+ 
+     ROSEN_TRACE_BEGIN(HITRACE_TAG_GRAPHIC_AGP, "BootAnimation::OnDraw in drawRect");
++    /* Letterbox with the frames' own background color, not black — the
++     * sequence background need not be black, and a mismatched border shows
++     * as a hard-edged band around the scaled image rect. */
++    if (!bgColorSampled_) {
++        bgColorSampled_ = true;
++        uint8_t pixel[BG_PIXEL_BYTES] = {0};
++        Rosen::Drawing::ImageInfo info(1, 1, Rosen::Drawing::ColorType::COLORTYPE_RGBA_8888,
++            Rosen::Drawing::AlphaType::ALPHATYPE_OPAQUE);
++        if (image->ReadPixels(info, pixel, BG_PIXEL_BYTES, 0, 0)) {
++            bgColor_ = Rosen::Drawing::Color::ColorQuadSetARGB(
++                Rosen::Drawing::Color::RGB_MAX, pixel[0], pixel[1], pixel[2]);
++        }
++    }
+     Rosen::Drawing::Brush brush;
+-    brush.SetColor(Rosen::Drawing::Color::COLOR_BLACK);
++    brush.SetColor(bgColor_);
+     Rosen::Drawing::Rect bgRect(0.0, 0.0, windowWidth_, windowHeight_);
+     canvas->AttachBrush(brush);
+     canvas->DrawRect(bgRect);
+@@ -190,7 +234,11 @@ bool BootPicturePlayer::OnDraw(Rosen::Drawing::CoreCanvas* canvas, int32_t curNo
+     Rosen::Drawing::Rect rect(pointX_, pointY_, pointX_ + realWidth_, pointY_ + realHeight_);
+     Rosen::Drawing::SamplingOptions samplingOptions;
+     canvas->DrawImageRect(*image, rect, samplingOptions);
+-    imageVector_[curNo].reset();
++    /* Each frame is drawn once, except the final one, which is re-drawn
++     * while holding for the lockscreen (see Draw) — keep it alive. */
++    if (curNo < imgVecSize_ - 1) {
++        imageVector_[curNo].reset();
++    }
+     ROSEN_TRACE_END(HITRACE_TAG_GRAPHIC_AGP);
+     return true;
+ }
+-- 
+2.50.1
+

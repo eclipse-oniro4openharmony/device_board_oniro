@@ -1,0 +1,65 @@
+From bd97e8007735336e69680e4ee8b9474c9d586593 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 11:59:42 +0200
+Subject: [PATCH] profiler: x86_64 support for native_daemon unwind and
+ native_hook regs
+
+native_daemon CallStack picks DfxRegsX86_64 on x86_64 builds (was always DfxRegsArm64); native_hook source set adds the x86_64 getcontext assembly; socket_context.h declares the FULL_PATH constants the x86_64 build path expects.
+
+Change-Id: I058c2953056b4af937adb6ce85b940d0cf4cc6e4
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ device/plugins/native_daemon/src/call_stack.cpp | 4 ++++
+ device/plugins/native_hook/BUILD.gn             | 5 +++++
+ device/services/ipc/include/socket_context.h    | 2 ++
+ 3 files changed, 11 insertions(+)
+
+diff --git a/device/plugins/native_daemon/src/call_stack.cpp b/device/plugins/native_daemon/src/call_stack.cpp
+index d10868e88..e1940a651 100644
+--- a/device/plugins/native_daemon/src/call_stack.cpp
++++ b/device/plugins/native_daemon/src/call_stack.cpp
+@@ -519,8 +519,12 @@ bool CallStack::DoUnwind2(const VirtualThread &thread, std::vector<CallFrame> &c
+         tempRegs.push_back((uintptr_t)regs_[i]);
+     }
+     regs->SetRegsData(tempRegs);
++#else
++#ifdef target_cpu_x86_64
++    std::shared_ptr<DfxRegs> regs = std::make_shared<DfxRegsX86_64>();
+ #else
+     std::shared_ptr<DfxRegs> regs = std::make_shared<DfxRegsArm64>();
++#endif
+     regs->SetRegsData(reinterpret_cast<uintptr_t*>(regs_), regsNum_);
+ #endif
+ 
+diff --git a/device/plugins/native_hook/BUILD.gn b/device/plugins/native_hook/BUILD.gn
+index aea4baa6d..e9724967f 100644
+--- a/device/plugins/native_hook/BUILD.gn
++++ b/device/plugins/native_hook/BUILD.gn
+@@ -48,6 +48,11 @@ ohos_source_set("native_hook_source") {
+     "src/sampling.cpp",
+     "src/stack_writer.cpp",
+   ]
++
++  if (target_cpu == "x86_64") {
++    sources += ["//base/hiviewdfx/faultloggerd/interfaces/innerkits/unwinder/src/registers/getcontext_x86_64.S"]
++  }
++
+   include_dirs = [
+     "./include",
+     "../api/include",
+diff --git a/device/services/ipc/include/socket_context.h b/device/services/ipc/include/socket_context.h
+index d16cd4ae6..4e68548a1 100644
+--- a/device/services/ipc/include/socket_context.h
++++ b/device/services/ipc/include/socket_context.h
+@@ -25,6 +25,8 @@
+ #if defined(__i386__) || defined(__x86_64__)
+ const static char DEFAULT_UNIX_SOCKET_PATH[] = "hiprofiler_unix_socket";
+ const static char DEFAULT_UNIX_SOCKET_HOOK_PATH[] = "hook_unix_socket";
++const static char DEFAULT_UNIX_SOCKET_FULL_PATH[] = "/dev/unix/socket/hiprofiler_unix_socket";
++const static char DEFAULT_UNIX_SOCKET_HOOK_FULL_PATH[] = "/dev/unix/socket/hook_unix_socket";
+ const static char FFRT_PROFILER_UNIX_SOCKET_PATH[] = "ffrt_profiler_unix_socket";
+ const static char FFRT_PROFILER_UNIX_SOCKET_FULL_PATH[] = "/dev/unix/socket/ffrt_profiler_unix_socket";
+ const static char NETWORK_PROFILER_UNIX_SOCKET_PATH[] = "network_profiler_unix_socket";
+-- 
+2.50.1
+

@@ -87,7 +87,7 @@ Halium ramdisk reused by `build_boot_img_chainload.sh`.
 
 ```
 # Apply the hybris_generic patch series (once per fresh tree, host-side)
-bash device/board/oniro/hybris_generic/system_patch/do_patch.sh
+bash device/board/oniro/system_patch/do_patch.sh
 
 # Build the Oniro distribution HAPs the product depends on (host-side)
 bash vendor/oniro/oniro-haps/build-oniro-haps.sh

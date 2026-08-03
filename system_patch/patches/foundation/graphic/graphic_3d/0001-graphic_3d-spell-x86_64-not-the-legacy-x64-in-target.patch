@@ -1,0 +1,67 @@
+From 30186a1dac47a55f6498d5b84900b926d7aa90db Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 11:59:33 +0200
+Subject: [PATCH] graphic_3d: spell x86_64 (not the legacy x64) in target_cpu
+ checks
+
+target_cpu in this tree is 'x86_64' not 'x64'; the existing 'x64' branches never fired. Update the four sites in scene/widget adapter and camera preview plugin so x86_64 builds pick the lib64 platform paths.
+
+Change-Id: If7dedb7d58d858c4d4687478ba63bac3ae9b8d45
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ 3d_scene_adapter/BUILD.gn      | 2 +-
+ 3d_widget_adapter/BUILD.gn     | 2 +-
+ camera_preview_plugin/BUILD.gn | 4 ++--
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/3d_scene_adapter/BUILD.gn b/3d_scene_adapter/BUILD.gn
+index 8e3aac3e..a115cb62 100644
+--- a/3d_scene_adapter/BUILD.gn
++++ b/3d_scene_adapter/BUILD.gn
+@@ -161,7 +161,7 @@ ohos_source_set("scene_adapter_source") {
+     ]
+   }
+ 
+-  if (target_cpu == "arm64" || target_cpu == "x64") {
++  if (target_cpu == "arm64" || target_cpu == "x86_64") {
+     defines += [
+       "PLATFORM_CORE_ROOT_PATH=/system/lib64/",
+       "PLATFORM_CORE_PLUGIN_PATH=/system/lib64/graphics3d/",
+diff --git a/3d_widget_adapter/BUILD.gn b/3d_widget_adapter/BUILD.gn
+index 17ddb8fd..50128162 100644
+--- a/3d_widget_adapter/BUILD.gn
++++ b/3d_widget_adapter/BUILD.gn
+@@ -206,7 +206,7 @@ ohos_source_set("widget_adapter_source") {
+       ]
+     }
+ 
+-    if (target_cpu == "arm64" || target_cpu == "x64") {
++    if (target_cpu == "arm64" || target_cpu == "x86_64") {
+       defines += [
+         "PLATFORM_CORE_ROOT_PATH=/system/lib64/",
+         "PLATFORM_CORE_PLUGIN_PATH=/system/lib64/graphics3d/",
+diff --git a/camera_preview_plugin/BUILD.gn b/camera_preview_plugin/BUILD.gn
+index d8d9d2c2..76a8b89d 100644
+--- a/camera_preview_plugin/BUILD.gn
++++ b/camera_preview_plugin/BUILD.gn
+@@ -102,7 +102,7 @@ lume_rofs("CAM_PREVIEW_ROFS") {
+     output_obj = "${CAM_PREVIEW_ROFS}_x32.o"
+   }
+ 
+-  if (target_cpu == "x64") {
++  if (target_cpu == "x86_64") {
+     output_obj = "${CAM_PREVIEW_ROFS}_x64.o"
+   }
+ 
+@@ -142,7 +142,7 @@ source_set("campreview_rofs_obj") {
+     output_obj = "${CAM_PREVIEW_ROFS}_x32.o"
+   }
+ 
+-  if (target_cpu == "x64") {
++  if (target_cpu == "x86_64") {
+     output_obj = "${CAM_PREVIEW_ROFS}_x64.o"
+   }
+   
+-- 
+2.50.1
+

@@ -1,0 +1,194 @@
+From c63afcbb121f784ad945fff0bbae03d80c837f4e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 27 Jul 2026 15:54:21 +0000
+Subject: [PATCH] input: cache knuckle library load failure
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+libmmi_knuckle.z.so is an optional component that this product does not
+ship.  KnuckleHandlerComponent::Load() retried the dlopen on every input
+event that consults the handler, costing a failed dlopen (two linker
+namespace searches) plus error logging per event on the touch hot path —
+~170 failed loads/s during interaction.  Cache the failure after the
+first attempt and demote the per-event 'impl is null' logs to debug.
+
+Change-Id: I8fa1afbc690dfc11fc6c1c00f9a930b1257ab206
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../include/knuckle_handler_component.h       |  1 +
+ .../knuckle/src/knuckle_handler_component.cpp | 39 +++++++++++--------
+ 2 files changed, 24 insertions(+), 16 deletions(-)
+
+diff --git a/service/knuckle/include/knuckle_handler_component.h b/service/knuckle/include/knuckle_handler_component.h
+index 3687e2bc3..a7a9364a5 100644
+--- a/service/knuckle/include/knuckle_handler_component.h
++++ b/service/knuckle/include/knuckle_handler_component.h
+@@ -54,6 +54,7 @@ private:
+     using DestroyKnuckleHandlerFunc = void(*)(IKnuckleHandler*);
+ 
+     void *handle_ { nullptr };
++    bool loadFailed_ { false };
+     GetKnuckleHandlerFunc create_ { nullptr };
+     DestroyKnuckleHandlerFunc destroy_ { nullptr };
+     IKnuckleHandler *impl_ { nullptr };
+diff --git a/service/knuckle/src/knuckle_handler_component.cpp b/service/knuckle/src/knuckle_handler_component.cpp
+index 1d471e264..21ee335bf 100644
+--- a/service/knuckle/src/knuckle_handler_component.cpp
++++ b/service/knuckle/src/knuckle_handler_component.cpp
+@@ -49,7 +49,7 @@ void KnuckleHandlerComponent::SetCurrentToolType(const struct TouchType &touchTy
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->SetCurrentToolType(touchType, toolType);
+@@ -59,7 +59,7 @@ void KnuckleHandlerComponent::NotifyTouchUp(struct TouchType *rawTouch)
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->NotifyTouchUp(rawTouch);
+@@ -69,7 +69,7 @@ void KnuckleHandlerComponent::EnableFingersense(void)
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->EnableFingersense();
+@@ -79,7 +79,7 @@ void KnuckleHandlerComponent::DisableFingersense(void)
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->DisableFingersense();
+@@ -89,7 +89,7 @@ void KnuckleHandlerComponent::UpdateDisplayMode(int32_t displayMode)
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->UpdateDisplayMode(displayMode);
+@@ -99,7 +99,7 @@ void KnuckleHandlerComponent::SaveTouchInfo(float pointX, float pointY, int32_t
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->SaveTouchInfo(pointX, pointY, toolType);
+@@ -109,7 +109,7 @@ int32_t KnuckleHandlerComponent::CheckKnuckleEvent(float pointX, float pointY, b
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return RET_ERR;
+     }
+     return impl->CheckKnuckleEvent(pointX, pointY, isKnuckleType);
+@@ -119,7 +119,7 @@ void KnuckleHandlerComponent::SetMultiWindowScreenId(uint64_t screenId, uint64_t
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->SetMultiWindowScreenId(screenId, displayModeScreenId);
+@@ -129,7 +129,7 @@ void KnuckleHandlerComponent::HandleKnuckleEvent(std::shared_ptr<PointerEvent> t
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->HandleKnuckleEvent(touchEvent);
+@@ -139,7 +139,7 @@ void KnuckleHandlerComponent::RegisterSwitchObserver()
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->RegisterSwitchObserver();
+@@ -149,7 +149,7 @@ int32_t KnuckleHandlerComponent::RegisterKnuckleSwitchByUserId(int32_t userId)
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return RET_ERR;
+     }
+     return impl->RegisterKnuckleSwitchByUserId(userId);
+@@ -159,7 +159,7 @@ int32_t KnuckleHandlerComponent::SetKnucklePermissions(uint32_t permissions, boo
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return RET_ERR;
+     }
+     return impl->SetKnucklePermissions(permissions, enable);
+@@ -169,7 +169,7 @@ bool KnuckleHandlerComponent::SkipKnuckleDetect()
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return RET_ERR;
+     }
+     return impl->SkipKnuckleDetect();
+@@ -179,7 +179,7 @@ int32_t KnuckleHandlerComponent::SetKnuckleSwitch(bool knuckleSwitch)
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return RET_ERR;
+     }
+     return impl->SetKnuckleSwitch(knuckleSwitch);
+@@ -189,7 +189,7 @@ void KnuckleHandlerComponent::Dump(int32_t fd)
+ {
+     IKnuckleHandler *impl = Load();
+     if (impl == nullptr) {
+-        MMI_HILOGE("impl is null");
++        MMI_HILOGD("impl is null");
+         return;
+     }
+     impl->Dump(fd);
+@@ -200,9 +200,16 @@ IKnuckleHandler *KnuckleHandlerComponent::Load()
+     if (impl_ != nullptr) {
+         return impl_;
+     }
++    /* The knuckle library is optional; without this cache a missing library
++     * costs a failed dlopen (two namespace searches) plus error logging on
++     * every input event that consults the handler. */
++    if (loadFailed_) {
++        return nullptr;
++    }
+ 
+     if (!LoadKnuckleSharedLibrary()) {
+-        MMI_HILOGE("load knuckle shared library fail");
++        loadFailed_ = true;
++        MMI_HILOGE("load knuckle shared library fail, knuckle handler disabled");
+         return nullptr;
+     }
+ 
+-- 
+2.50.1
+

@@ -1,0 +1,375 @@
+From 6ecdffaad19c13f2273ade92f2302b8ff1997ada Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 12:00:37 +0200
+Subject: [PATCH 1/2] asmjit: integrate panda ArenaAllocator and broaden
+ warning suppression
+
+Route asmjit allocations through the parent compiler's ark::ArenaAllocator instead of plain malloc/free so codegen memory follows the encoder's lifetime (the old ::free in static destructors leaked when the encoder was reused).
+
+Also drop -Wunused-parameter / -Wnested-anon-types / -Wgnu-anonymous-struct / -Wpedantic via the begin/end-namespace pragma macros (clang, gcc>=8, and gcc7 branches) so upstream sources compile under the OH compile-standard, and fix ASMJIT_NONCOPYABLE on template classes (drop the angle-bracketed template args from the macro argument).
+
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ src/asmjit/core/api-config.h   | 18 ++++++++++++++++--
+ src/asmjit/core/codeholder.cpp | 23 ++++++++++++++---------
+ src/asmjit/core/codeholder.h   |  6 +++++-
+ src/asmjit/core/radefs_p.h     |  2 +-
+ src/asmjit/core/string.h       |  2 +-
+ src/asmjit/core/zone.cpp       | 29 ++++++++++-------------------
+ src/asmjit/core/zone.h         | 12 +++++++++---
+ src/asmjit/core/zonehash.h     |  2 +-
+ src/asmjit/core/zonestack.h    |  2 +-
+ src/asmjit/core/zonevector.h   |  2 +-
+ src/asmjit/x86/x86internal.cpp |  8 ++++----
+ 11 files changed, 63 insertions(+), 43 deletions(-)
+
+diff --git a/src/asmjit/core/api-config.h b/src/asmjit/core/api-config.h
+index 3b896e9..4c36124 100644
+--- a/src/asmjit/core/api-config.h
++++ b/src/asmjit/core/api-config.h
+@@ -484,7 +484,10 @@ namespace asmjit {
+     namespace asmjit {                                                        \
+       _Pragma("clang diagnostic push")                                        \
+       _Pragma("clang diagnostic ignored \"-Wconstant-logical-operand\"")      \
+-      _Pragma("clang diagnostic ignored \"-Wunnamed-type-template-args\"")
++      _Pragma("clang diagnostic ignored \"-Wunnamed-type-template-args\"")    \
++      _Pragma("clang diagnostic ignored \"-Wunused-parameter\"")              \
++      _Pragma("clang diagnostic ignored \"-Wnested-anon-types\"")             \
++      _Pragma("clang diagnostic ignored \"-Wgnu-anonymous-struct\"")
+   #define ASMJIT_END_NAMESPACE                                                \
+       _Pragma("clang diagnostic pop")                                         \
+     }
+@@ -496,11 +499,22 @@ namespace asmjit {
+   #define ASMJIT_END_NAMESPACE                                                \
+       _Pragma("GCC diagnostic pop")                                           \
+     }
++#elif defined(__GNUC__) && __GNUC__ >= 7 && __GNUC__ < 8
++  #define ASMJIT_BEGIN_NAMESPACE                                              \
++    namespace asmjit {                                                        \
++      _Pragma("GCC diagnostic push")                                          \
++      _Pragma("GCC diagnostic ignored \"-Wunused-parameter\"")                \
++      _Pragma("GCC diagnostic ignored \"-Wpedantic\"")
++  #define ASMJIT_END_NAMESPACE                                                \
++      _Pragma("GCC diagnostic pop")                                           \
++    }
+ #elif defined(__GNUC__) && __GNUC__ >= 8
+   #define ASMJIT_BEGIN_NAMESPACE                                              \
+     namespace asmjit {                                                        \
+       _Pragma("GCC diagnostic push")                                          \
+-      _Pragma("GCC diagnostic ignored \"-Wclass-memaccess\"")
++      _Pragma("GCC diagnostic ignored \"-Wclass-memaccess\"")                 \
++      _Pragma("GCC diagnostic ignored \"-Wunused-parameter\"")                \
++      _Pragma("GCC diagnostic ignored \"-Wpedantic\"")
+   #define ASMJIT_END_NAMESPACE                                                \
+       _Pragma("GCC diagnostic pop")                                           \
+     }
+diff --git a/src/asmjit/core/codeholder.cpp b/src/asmjit/core/codeholder.cpp
+index 69032e8..8115b46 100644
+--- a/src/asmjit/core/codeholder.cpp
++++ b/src/asmjit/core/codeholder.cpp
+@@ -95,12 +95,12 @@ static void CodeHolder_resetInternal(CodeHolder* self, uint32_t resetPolicy) noe
+   self->_logger = nullptr;
+   self->_errorHandler = nullptr;
+ 
++  ASSERT(self->_pandaAllocator != nullptr);
++
+   // Reset all sections.
+   uint32_t numSections = self->_sections.size();
+   for (i = 0; i < numSections; i++) {
+     Section* section = self->_sections[i];
+-    if (section->_buffer.data() && !section->_buffer.isExternal())
+-      ::free(section->_buffer._data);
+     section->_buffer._data = nullptr;
+     section->_buffer._capacity = 0;
+   }
+@@ -133,12 +133,13 @@ static void CodeHolder_onSettingsUpdated(CodeHolder* self) noexcept {
+ // [asmjit::CodeHolder - Construction / Destruction]
+ // ============================================================================
+ 
+-CodeHolder::CodeHolder() noexcept
+-  : _environment(),
++CodeHolder::CodeHolder(ark::ArenaAllocator* pandaAllocator) noexcept
++  : _pandaAllocator(pandaAllocator),
++    _environment(),
+     _baseAddress(Globals::kNoBaseAddress),
+     _logger(nullptr),
+     _errorHandler(nullptr),
+-    _zone(16384 - Zone::kBlockOverhead),
++    _zone(16384 - Zone::kBlockOverhead, /*blockAlignment=*/1, pandaAllocator),
+     _allocator(&_zone),
+     _unresolvedLinkCount(0),
+     _addressTableSection(nullptr) {}
+@@ -284,10 +285,14 @@ static Error CodeHolder_reserveInternal(CodeHolder* self, CodeBuffer* cb, size_t
+   uint8_t* oldData = cb->_data;
+   uint8_t* newData;
+ 
+-  if (oldData && !cb->isExternal())
+-    newData = static_cast<uint8_t*>(::realloc(oldData, n));
+-  else
+-    newData = static_cast<uint8_t*>(::malloc(n));
++  ASSERT(self->_pandaAllocator != nullptr);
++
++  newData = static_cast<uint8_t*>(self->_pandaAllocator->Alloc(n));
++
++  if (oldData && !cb->isExternal()) {
++    ASSERT(cb->_capacity < n);
++    memcpy(newData, oldData, cb->_capacity);
++  }
+ 
+   if (ASMJIT_UNLIKELY(!newData))
+     return DebugUtils::errored(kErrorOutOfMemory);
+diff --git a/src/asmjit/core/codeholder.h b/src/asmjit/core/codeholder.h
+index 9b3466d..77d7ee4 100644
+--- a/src/asmjit/core/codeholder.h
++++ b/src/asmjit/core/codeholder.h
+@@ -38,6 +38,8 @@
+ #include "../core/zonetree.h"
+ #include "../core/zonevector.h"
+ 
++#include "libarkbase/mem/arena_allocator.h"
++
+ ASMJIT_BEGIN_NAMESPACE
+ 
+ //! \addtogroup asmjit_core
+@@ -498,6 +500,8 @@ class CodeHolder {
+ public:
+   ASMJIT_NONCOPYABLE(CodeHolder)
+ 
++  ark::ArenaAllocator* _pandaAllocator{nullptr};
++
+   //! Environment information.
+   Environment _environment;
+   //! Base address or \ref Globals::kNoBaseAddress.
+@@ -554,7 +558,7 @@ public:
+   //! \{
+ 
+   //! Creates an uninitialized CodeHolder (you must init() it before it can be used).
+-  ASMJIT_API CodeHolder() noexcept;
++  ASMJIT_API CodeHolder(ark::ArenaAllocator* pandaAllocator = nullptr) noexcept;
+   //! Destroys the CodeHolder.
+   ASMJIT_API ~CodeHolder() noexcept;
+ 
+diff --git a/src/asmjit/core/radefs_p.h b/src/asmjit/core/radefs_p.h
+index b77ed1b..ae758db 100644
+--- a/src/asmjit/core/radefs_p.h
++++ b/src/asmjit/core/radefs_p.h
+@@ -494,7 +494,7 @@ public:
+ template<typename T>
+ class RALiveSpans {
+ public:
+-  ASMJIT_NONCOPYABLE(RALiveSpans<T>)
++  ASMJIT_NONCOPYABLE(RALiveSpans)
+ 
+   typedef typename T::DataType DataType;
+   ZoneVector<T> _data;
+diff --git a/src/asmjit/core/string.h b/src/asmjit/core/string.h
+index 4c490d8..b58725e 100644
+--- a/src/asmjit/core/string.h
++++ b/src/asmjit/core/string.h
+@@ -371,7 +371,7 @@ public:
+ template<size_t N>
+ class StringTmp : public String {
+ public:
+-  ASMJIT_NONCOPYABLE(StringTmp<N>)
++  ASMJIT_NONCOPYABLE(StringTmp)
+ 
+   //! Embedded data.
+   char _embeddedData[Support::alignUp(N + 1, sizeof(size_t))];
+diff --git a/src/asmjit/core/zone.cpp b/src/asmjit/core/zone.cpp
+index 61f7cec..4c29769 100644
+--- a/src/asmjit/core/zone.cpp
++++ b/src/asmjit/core/zone.cpp
+@@ -79,9 +79,10 @@ void Zone::reset(uint32_t resetPolicy) noexcept {
+     _end = initial->data();
+     _block = initial;
+ 
++    ASSERT(_pandaAllocator != nullptr);
++
+     // Since cur can be in the middle of the double-linked list, we have to
+     // traverse both directions (`prev` and `next`) separately to visit all.
+-    Block* next = cur->next;
+     do {
+       Block* prev = cur->prev;
+ 
+@@ -95,16 +96,8 @@ void Zone::reset(uint32_t resetPolicy) noexcept {
+         break;
+       }
+ 
+-      ::free(cur);
+       cur = prev;
+     } while (cur);
+-
+-    cur = next;
+-    while (cur) {
+-      next = cur->next;
+-      ::free(cur);
+-      cur = next;
+-    }
+   }
+   else {
+     while (cur->prev)
+@@ -147,11 +140,13 @@ void* Zone::_alloc(size_t size, size_t alignment) noexcept {
+   if (ASMJIT_UNLIKELY(newSize > SIZE_MAX - kBlockSize - blockAlignmentOverhead))
+     return nullptr;
+ 
++  ASSERT(_pandaAllocator != nullptr);
++
+   // Allocate new block - we add alignment overhead to `newSize`, which becomes the
+   // new block size, and we also add `kBlockOverhead` to the allocator as it includes
+   // members of `Zone::Block` structure.
+   newSize += blockAlignmentOverhead;
+-  Block* newBlock = static_cast<Block*>(::malloc(newSize + kBlockSize));
++  Block* newBlock = static_cast<Block*>(_pandaAllocator->Alloc(newSize + kBlockSize));
+ 
+   if (ASMJIT_UNLIKELY(!newBlock))
+     return nullptr;
+@@ -247,13 +242,7 @@ static bool ZoneAllocator_hasDynamicBlock(ZoneAllocator* self, ZoneAllocator::Dy
+ // ============================================================================
+ 
+ void ZoneAllocator::reset(Zone* zone) noexcept {
+-  // Free dynamic blocks.
+-  DynamicBlock* block = _dynamicBlocks;
+-  while (block) {
+-    DynamicBlock* next = block->next;
+-    ::free(block);
+-    block = next;
+-  }
++  ASSERT(_zone->_pandaAllocator != nullptr);
+ 
+   // Zero the entire class and initialize to the given `zone`.
+   memset(this, 0, sizeof(*this));
+@@ -321,7 +310,9 @@ void* ZoneAllocator::_alloc(size_t size, size_t& allocatedSize) noexcept {
+     if (ASMJIT_UNLIKELY(kBlockOverhead >= SIZE_MAX - size))
+       return nullptr;
+ 
+-    void* p = ::malloc(size + kBlockOverhead);
++    ASSERT(_zone->_pandaAllocator != nullptr);
++
++    void* p = _zone->_pandaAllocator->Alloc(size + kBlockOverhead);
+     if (ASMJIT_UNLIKELY(!p)) {
+       allocatedSize = 0;
+       return nullptr;
+@@ -376,7 +367,7 @@ void ZoneAllocator::_releaseDynamic(void* p, size_t size) noexcept {
+   if (next)
+     next->prev = prev;
+ 
+-  ::free(block);
++  ASSERT(_zone->_pandaAllocator != nullptr);
+ }
+ 
+ ASMJIT_END_NAMESPACE
+diff --git a/src/asmjit/core/zone.h b/src/asmjit/core/zone.h
+index 52e9f12..613f9f7 100644
+--- a/src/asmjit/core/zone.h
++++ b/src/asmjit/core/zone.h
+@@ -26,6 +26,8 @@
+ 
+ #include "../core/support.h"
+ 
++#include "libarkbase/mem/arena_allocator.h"
++
+ ASMJIT_BEGIN_NAMESPACE
+ 
+ //! \addtogroup asmjit_zone
+@@ -75,6 +77,8 @@ public:
+     kMaxAlignment = 64
+   };
+ 
++  ark::ArenaAllocator* _pandaAllocator{nullptr};
++
+   //! Pointer in the current block.
+   uint8_t* _ptr;
+   //! End of the current block.
+@@ -111,11 +115,13 @@ public:
+   //! It's not required, but it's good practice to set `blockSize` to a
+   //! reasonable value that depends on the usage of `Zone`. Greater block sizes
+   //! are generally safer and perform better than unreasonably low block sizes.
+-  ASMJIT_INLINE explicit Zone(size_t blockSize, size_t blockAlignment = 1) noexcept {
++  ASMJIT_INLINE explicit Zone(size_t blockSize, size_t blockAlignment = 1, ark::ArenaAllocator* pandaAllocator = nullptr) noexcept
++    : _pandaAllocator(pandaAllocator) {
+     _init(blockSize, blockAlignment, nullptr);
+   }
+ 
+-  ASMJIT_INLINE Zone(size_t blockSize, size_t blockAlignment, const Support::Temporary& temporary) noexcept {
++  ASMJIT_INLINE Zone(size_t blockSize, size_t blockAlignment, const Support::Temporary& temporary, ark::ArenaAllocator* pandaAllocator = nullptr) noexcept
++    : _pandaAllocator(pandaAllocator) {
+     _init(blockSize, blockAlignment, &temporary);
+   }
+ 
+@@ -391,7 +397,7 @@ public:
+ template<size_t N>
+ class ZoneTmp : public Zone {
+ public:
+-  ASMJIT_NONCOPYABLE(ZoneTmp<N>)
++  ASMJIT_NONCOPYABLE(ZoneTmp)
+ 
+   //! Temporary storage, embedded after \ref Zone.
+   struct Storage {
+diff --git a/src/asmjit/core/zonehash.h b/src/asmjit/core/zonehash.h
+index 0f1f21f..dbad427 100644
+--- a/src/asmjit/core/zonehash.h
++++ b/src/asmjit/core/zonehash.h
+@@ -175,7 +175,7 @@ public:
+ template<typename NodeT>
+ class ZoneHash : public ZoneHashBase {
+ public:
+-  ASMJIT_NONCOPYABLE(ZoneHash<NodeT>)
++  ASMJIT_NONCOPYABLE(ZoneHash)
+ 
+   typedef NodeT Node;
+ 
+diff --git a/src/asmjit/core/zonestack.h b/src/asmjit/core/zonestack.h
+index 2de6cdc..e2aaa6f 100644
+--- a/src/asmjit/core/zonestack.h
++++ b/src/asmjit/core/zonestack.h
+@@ -133,7 +133,7 @@ public:
+ template<typename T>
+ class ZoneStack : public ZoneStackBase {
+ public:
+-  ASMJIT_NONCOPYABLE(ZoneStack<T>)
++  ASMJIT_NONCOPYABLE(ZoneStack)
+ 
+   enum : uint32_t {
+     kNumBlockItems   = uint32_t((kBlockSize - sizeof(Block)) / sizeof(T)),
+diff --git a/src/asmjit/core/zonevector.h b/src/asmjit/core/zonevector.h
+index 770543b..b7f7187 100644
+--- a/src/asmjit/core/zonevector.h
++++ b/src/asmjit/core/zonevector.h
+@@ -146,7 +146,7 @@ public:
+ template <typename T>
+ class ZoneVector : public ZoneVectorBase {
+ public:
+-  ASMJIT_NONCOPYABLE(ZoneVector<T>)
++  ASMJIT_NONCOPYABLE(ZoneVector)
+ 
+   // STL compatibility;
+   typedef T value_type;
+diff --git a/src/asmjit/x86/x86internal.cpp b/src/asmjit/x86/x86internal.cpp
+index 062525f..21f48a7 100644
+--- a/src/asmjit/x86/x86internal.cpp
++++ b/src/asmjit/x86/x86internal.cpp
+@@ -1313,8 +1313,8 @@ ASMJIT_FAVOR_SIZE Error X86Internal::emitProlog(Emitter* emitter, const FuncFram
+     Reg xReg;
+     Mem xBase = ptr(zsp, int32_t(frame.nonGpSaveOffset()));
+ 
+-    uint32_t xInst;
+-    uint32_t xSize;
++    uint32_t xInst = 0;
++    uint32_t xSize = 0;
+ 
+     for (uint32_t group = 1; group < BaseReg::kGroupVirt; group++) {
+       Support::BitWordIterator<uint32_t> it(frame.savedRegs(group));
+@@ -1352,8 +1352,8 @@ ASMJIT_FAVOR_SIZE Error X86Internal::emitEpilog(Emitter* emitter, const FuncFram
+     Reg xReg;
+     Mem xBase = ptr(zsp, int32_t(frame.nonGpSaveOffset()));
+ 
+-    uint32_t xInst;
+-    uint32_t xSize;
++    uint32_t xInst = 0;
++    uint32_t xSize = 0;
+ 
+     for (uint32_t group = 1; group < BaseReg::kGroupVirt; group++) {
+       Support::BitWordIterator<uint32_t> it(frame.savedRegs(group));
+-- 
+2.50.1
+

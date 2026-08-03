@@ -1,0 +1,99 @@
+From 515407b6a9db9104839ff032b5190c80b6c43053 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 13 Apr 2026 22:36:01 +0000
+Subject: [PATCH] appspawn: /android+/apex sandbox mounts, SELinux build guards
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two changes for hybris_generic support:
+
+1. appdata-sandbox.json: bind-mount /android and /apex into the app sandbox
+   so hybris can dlopen Android vendor libraries. Also adds /data/log/sanitizer.
+
+2. appspawn_adapter.cpp: guard CheckSpecialSpawnMode and LoadSeLinuxConfig
+   with #ifdef WITH_SELINUX to allow building without SELinux support.
+
+The hybris env vars previously injected via appspawn.cfg (LIBEGL,
+LIBGLESV2, HYBRIS_LD_LIBRARY_PATH, LD_LIBRARY_PATH, HYBRIS_EGLPLATFORM)
+are gone: libhybris now carries equivalent compiled-in defaults
+(third_party/libhybris libhybris_args.gni), which are also broader —
+the env value here lacked /android/vendor/lib64/hw and the VNDK apex,
+breaking in-app media (VLC video rendering).
+
+Change-Id: I1f4110344495ec61a018b314f63b58bffb4a8a4a
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ appdata-sandbox.json                | 15 +++++++++++++++
+ modules/common/appspawn_adapter.cpp |  8 ++++++++
+ 2 files changed, 23 insertions(+)
+
+diff --git a/appdata-sandbox.json b/appdata-sandbox.json
+index b0df2499..72c9ae64 100644
+--- a/appdata-sandbox.json
++++ b/appdata-sandbox.json
+@@ -213,6 +213,21 @@
+                     "sandbox-path" : "/data/storage/el2/media",
+                     "sandbox-flags" : [ "bind", "rec" ],
+                     "check-action-status": "false"
++                }, {
++                    "src-path" : "/android",
++                    "sandbox-path" : "/android",
++                    "sandbox-flags" : [ "bind", "rec" ],
++                    "check-action-status": "false"
++                }, {
++                    "src-path" : "/apex",
++                    "sandbox-path" : "/apex",
++                    "sandbox-flags" : [ "bind", "rec" ],
++                    "check-action-status": "false"
++                }, {
++                    "src-path" : "/data/log/sanitizer",
++                    "sandbox-path" : "/data/log/sanitizer",
++                    "sandbox-flags" : [ "bind", "rec" ],
++                    "check-action-status": "false"
+                 }, {
+                     "src-path" : "/vendor/etc/passthrough",
+                     "sandbox-path" : "/vendor/etc/passthrough",
+diff --git a/modules/common/appspawn_adapter.cpp b/modules/common/appspawn_adapter.cpp
+index aa5504c8..f602d7f5 100644
+--- a/modules/common/appspawn_adapter.cpp
++++ b/modules/common/appspawn_adapter.cpp
+@@ -44,8 +44,10 @@ using GetPermissionFunc = int32_t (*)(void *, const char *);
+ using namespace OHOS::Security::AccessToken;
+ 
+ static const uint64_t TOKEN_ID_LOWMASK = 0xffffffff;
++#ifdef WITH_SELINUX
+ void CheckSpecialSpawnMode(const AppSpawnMgr *content, const AppSpawningCtx *property,
+     HapDomainInfo *hapDomainInfo);
++#endif
+ 
+ int SetAppAccessToken(const AppSpawnMgr *content, const AppSpawningCtx *property)
+ {
+@@ -278,7 +280,11 @@ int32_t SetEnvInfo(const AppSpawnMgr *content, const AppSpawningCtx *property)
+ 
+ int LoadSeLinuxConfig(void)
+ {
++#ifdef WITH_SELINUX
+     return HapContextLoadConfig();
++#else
++    return 0;
++#endif
+ }
+ 
+ uint32_t GetHostId(const AppSpawningCtx *property)
+@@ -299,6 +305,7 @@ uint32_t GetHostId(const AppSpawningCtx *property)
+     return hostId;
+ }
+ 
++#ifdef WITH_SELINUX
+ void CheckSpecialSpawnMode(const AppSpawnMgr *content, const AppSpawningCtx *property,
+     HapDomainInfo *hapDomainInfo)
+ {
+@@ -318,3 +325,4 @@ void CheckSpecialSpawnMode(const AppSpawnMgr *content, const AppSpawningCtx *pro
+         hapDomainInfo->hapFlags |= SELINUX_HAP_ISOLATED_RENDER;
+     }
+ }
++#endif
+-- 
+2.50.1
+

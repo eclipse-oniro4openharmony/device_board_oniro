@@ -1,0 +1,63 @@
+From 30d977b47b3deb5bbe20023c9150b95c6eab471b Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 28 Jul 2026 11:08:33 +0000
+Subject: [PATCH] hats: make the hdf suites buildable for hybris_generic
+
+Two changes needed to build HATS for products without the full
+reference-board config:
+
+- hdf/BUILD.gn: depend on the camera cameraMg suites directly instead of
+  the camera:HatsHdfCameraTest group. That group also pulls in cameraHdi,
+  whose BUILD.gn dereferences board_camera_path -- a variable only boards
+  shipping the v4l2 reference camera VDI define (e.g. rk3568's
+  device.gni) -- so on other boards gn gen fails before any target can be
+  built. cameraMg and cameraMg_additional are pure camera-HDI clients
+  with no board dependency, so they build and run anywhere the HDI is
+  implemented; hybris_generic has a camera VDI, and HatsHdfCameraMgv0Test
+  exercises it.
+- hdf/wlan/BUILD.gn: lift the hats_rich=false gate so the wlan HDI
+  suites build. hybris_generic implements the wlan HDI service and the
+  suite passes against it.
+
+Change-Id: I33bc13d9aac6332f80bb082861684e493f6e2ac0
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ hdf/BUILD.gn      | 7 ++++++-
+ hdf/wlan/BUILD.gn | 3 ++-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/hdf/BUILD.gn b/hdf/BUILD.gn
+index 4adbfea2..5fb40f6b 100644
+--- a/hdf/BUILD.gn
++++ b/hdf/BUILD.gn
+@@ -17,7 +17,12 @@ group("hatshdftest") {
+     deps = [
+       "audio:HatsHdfAudioTest",
+       "bluetooth:HatsHdfBluetoothTest",
+-      "camera:HatsHdfCameraTest",
++      # hybris_generic: the camera:HatsHdfCameraTest group pulls in cameraHdi,
++      # whose BUILD.gn dereferences board_camera_path -- only defined by boards
++      # shipping the v4l2 reference camera VDI. The cameraMg* suites are pure
++      # HDI clients and build fine, so depend on them directly.
++      "camera/cameraMg:HatsHdfCameraMgTest",
++      "camera/cameraMg_additional:HatsHdfCameraMgAdditionalTest",
+       "codec:HatsHdfCodecTest",
+       "display:HatsHdfDisplayTest",
+       "external_device_manager:HatsHdfExternalDeviceTest",
+diff --git a/hdf/wlan/BUILD.gn b/hdf/wlan/BUILD.gn
+index ecd98e87..586d3bdf 100644
+--- a/hdf/wlan/BUILD.gn
++++ b/hdf/wlan/BUILD.gn
+@@ -18,7 +18,8 @@ import("//test/xts/tools/build/suite.gni")
+ group("HatsHdfWifiTest") {
+   testonly = true
+ 
+-  if (hats_rich == false) {
++  # hybris_generic baseline: run wlan HDI tests regardless of hats_rich
++  if (false) {
+   } else {
+     if (is_standard_system) {
+       deps = [
+-- 
+2.50.1
+

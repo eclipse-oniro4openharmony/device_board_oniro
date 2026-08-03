@@ -1,0 +1,72 @@
+From 44461dd4e5945c5cd63dd108e91051ae5c01f6cf Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 12:01:09 +0200
+Subject: [PATCH 3/5] build: x86_64 product support (drop is_emulator default,
+ link unwind, image dirs)
+
+Three x86_64-specific build fixes:
+- BUILDCONFIG.gn no longer auto-sets is_emulator when target_cpu == x86_64. x86_general is a real product, not an emulator profile; the auto-set was forcing emulator-only branches across the tree.
+- config/ohos/BUILD.gn links libunwind on x86_64 (same as arm/arm64/riscv64); without it C++ exception unwinding fails to link.
+- build_image.py creates /run, /var, /opt, /usr top-level dirs and adds /system/lib64 -> /lib64 symlink for x86_64 root layouts.
+
+Change-Id: I1c893fc9dc1ba60c187f67817f5cc552ef6601b7
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ config/BUILDCONFIG.gn      | 3 +--
+ config/ohos/BUILD.gn       | 2 +-
+ ohos/images/build_image.py | 5 +++--
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/config/BUILDCONFIG.gn b/config/BUILDCONFIG.gn
+index ec1ca1a1..4f7e446b 100755
+--- a/config/BUILDCONFIG.gn
++++ b/config/BUILDCONFIG.gn
+@@ -397,8 +397,7 @@ is_wearable_product = "${target_platform}" == "wearable"
+ 
+ is_intellitv_product = "${target_platform}" == "intellitv"
+ 
+-if ((target_os == "ohos" && target_cpu == "x86_64") ||
+-    device_company == "emulator") {
++if (device_company == "emulator") {
+   is_emulator = true
+ }
+ 
+diff --git a/config/ohos/BUILD.gn b/config/ohos/BUILD.gn
+index 26b10a17..e59de7c2 100755
+--- a/config/ohos/BUILD.gn
++++ b/config/ohos/BUILD.gn
+@@ -77,7 +77,7 @@ config("runtime_library") {
+ 
+   # arm builds of libc++ starting in NDK r12 depend on unwind.
+   if (current_cpu == "arm" || current_cpu == "arm64" ||
+-      current_cpu == "riscv64") {
++      current_cpu == "riscv64" || current_cpu == "x86_64") {
+     libs += [ "unwind" ]
+   }
+ 
+diff --git a/ohos/images/build_image.py b/ohos/images/build_image.py
+index d0ebca52..c2f16962 100755
+--- a/ohos/images/build_image.py
++++ b/ohos/images/build_image.py
+@@ -40,7 +40,8 @@ def _prepare_root(system_path: str, target_cpu: str):
+     os.makedirs(root_dir, exist_ok=True)
+     _dir_list = [
+         'config', 'dev', 'proc', 'sys', 'updater', 'system', 'vendor', 'data', 'chip_ckm',
+-        'storage', 'mnt', 'tmp', 'sys_prod', 'chip_prod', 'module_update', 'eng_system', 'eng_chipset'
++        'storage', 'mnt', 'tmp', 'sys_prod', 'chip_prod', 'module_update', 'eng_system', 'eng_chipset',
++        'run', 'var', 'opt', 'usr'
+     ]
+     for _dir_name in _dir_list:
+         os.makedirs(os.path.join(root_dir, _dir_name), exist_ok=True)
+@@ -48,7 +49,7 @@ def _prepare_root(system_path: str, target_cpu: str):
+     os.symlink('/system/bin/init', os.path.join(root_dir, 'init'))
+     os.symlink('/system/etc', os.path.join(root_dir, 'etc'))
+     os.symlink('/vendor', os.path.join(root_dir, 'chipset'))
+-    if target_cpu == 'arm64' or target_cpu == 'riscv64':
++    if target_cpu == 'arm64' or target_cpu == 'riscv64' or target_cpu == 'x86_64':
+         os.symlink('/system/lib64', os.path.join(root_dir, 'lib64'))
+     os.symlink('/system/lib', os.path.join(root_dir, 'lib'))
+ 
+-- 
+2.50.1
+

@@ -1,0 +1,37 @@
+From 9be8775519bf0ec5190084af027ba6f95f74bcc9 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 27 Jul 2026 15:54:21 +0000
+Subject: [PATCH 08/10] render_service: demote no-watermark log to debug
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DrawCommSurfaceWatermark logged at error level whenever a surface has no
+watermark — the normal case for every surface on every frame — flooding
+hilog from the render thread (37k lines in one buffer window) during
+interaction.
+
+Change-Id: Iada288fc0609baef964b0730f7d74b193d90728e
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../core/drawable/rs_surface_render_node_drawable.cpp         | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/rosen/modules/render_service/core/drawable/rs_surface_render_node_drawable.cpp b/rosen/modules/render_service/core/drawable/rs_surface_render_node_drawable.cpp
+index a4962eb15a..7470367178 100755
+--- a/rosen/modules/render_service/core/drawable/rs_surface_render_node_drawable.cpp
++++ b/rosen/modules/render_service/core/drawable/rs_surface_render_node_drawable.cpp
+@@ -279,7 +279,9 @@ void RSSurfaceRenderNodeDrawable::DrawCommSurfaceWatermark(RSPaintFilterCanvas&
+     const RSSurfaceRenderParams& params)
+ {
+     if (params.IsSystemWatermarkEmpty() && params.IsCustomWatermarkEmpty()) {
+-        RS_LOGE("SurfaceNodeDrawable DrawCommSurfaceWatermark Name:%{public}s Id:%{public}" PRIu64
++        /* No watermark is the normal case for every surface: logging it at
++         * error level floods hilog from the render thread on every frame. */
++        RS_LOGD("SurfaceNodeDrawable DrawCommSurfaceWatermark Name:%{public}s Id:%{public}" PRIu64
+             " water mark count is zero", GetName().c_str(), params.GetId());
+         return;
+     }
+-- 
+2.50.1
+

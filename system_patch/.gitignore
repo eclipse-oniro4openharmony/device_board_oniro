@@ -1,0 +1,2 @@
+# Local record of the applied patch series (do_patch.sh / undo_patch.sh).
+.patch_state

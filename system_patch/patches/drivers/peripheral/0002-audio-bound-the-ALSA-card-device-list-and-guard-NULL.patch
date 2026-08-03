@@ -1,0 +1,62 @@
+From 953e9d8d9bf05b5821d66750fe32b566a0cb5646 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Sat, 25 Jul 2026 11:14:39 +0000
+Subject: [PATCH 2/7] audio: bound the ALSA card device list and guard NULL
+ pcm/card ids
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DevSaveCardPcmInfo wrote into g_alsaCardsDevList.alsaDevIns[num] with no
+bounds check.  MediaTek AFE sound cards (Volla Plinius / ansuz:
+mt6878-mt6369) expose more PCM devices than MAX_CARD_NUM total slots, so
+the enumeration ran off the array and audio_host SIGSEGV'd inside
+AudioGetAllCardInfo on every start — a ~1 s respawn loop that left every
+audio SA client hanging.  The visible symptom was a frozen sceneboard:
+its sound component synchronously calls loadAudioManager from
+aboutToAppear, the audio HDI never answers, the UI thread blocks, and
+the freeze-detector churn follows.
+
+Stop enumerating once the list is full (keep what fits) and skip PCM
+entries whose card/pcm id strings come back NULL.
+
+Change-Id: I251a5eb9dc6df36a6c636cef48b12e9a96b57d47
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../alsa_adapter/src/alsa_soundcard.c           | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
+index ebc5de406..093905613 100644
+--- a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
++++ b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
+@@ -350,9 +350,26 @@ static int32_t DevSaveCardPcmInfo(snd_ctl_t *handle, snd_pcm_stream_t stream,
+                 AUDIO_FUNC_LOGE("control digital audio info (%{public}d)", pcmDev);
+             }
+         } else {
++            /* MTK AFE cards (mt6878: "mt6878-mt6369") expose far more PCM
++             * devices than MAX_CARD_NUM total slots; without this bound the
++             * write below runs off g_alsaCardsDevList and audio_host
++             * SIGSEGVs in a respawn loop, hanging every audio SA client
++             * (sceneboard freezes in loadAudioManager). Keep what fits. */
++            if (g_alsaCardsDevList.num >= MAX_CARD_NUM) {
++                AUDIO_FUNC_LOGW("alsa device list full (%{public}d), ignoring remaining pcm devices", MAX_CARD_NUM);
++                return HDF_SUCCESS;
++            }
+             struct AlsaDevInfo *devInfo = &g_alsaCardsDevList.alsaDevIns[g_alsaCardsDevList.num];
+             const char *cardId = snd_ctl_card_info_get_id(info);
+             const char *pcmInfoId = snd_pcm_info_get_id(pcminfo);
++            if (cardId == NULL || pcmInfoId == NULL) {
++                AUDIO_FUNC_LOGW("card %{public}d pcm %{public}d has no id, skipping", card, pcmDev);
++                if (snd_ctl_pcm_next_device(handle, &pcmDev) < 0) {
++                    AUDIO_FUNC_LOGE("snd_ctl_pcm_next_device error!");
++                    return HDF_FAILURE;
++                }
++                continue;
++            }
+             AUDIO_FUNC_LOGD("alsa cardName: %{public}s, pcmInfoId %{public}s", cardId, pcmInfoId);
+             devInfo->card = card;
+             devInfo->device = pcmDev;
+-- 
+2.50.1
+

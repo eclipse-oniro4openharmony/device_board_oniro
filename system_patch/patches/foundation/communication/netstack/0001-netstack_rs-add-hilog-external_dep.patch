@@ -1,0 +1,28 @@
+From c8ae3a779801f83bf6cbb4a6e66bd05733ad73a4 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 11:58:21 +0200
+Subject: [PATCH] netstack_rs: add hilog external_dep
+
+netstack_rs_cxx logs through libhilog; declare the dep so the link succeeds.
+
+Change-Id: Iae1305f053f23dd0a7d4529f1bfc00fa981b7321
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ interfaces/innerkits/rust/netstack_rs/BUILD.gn | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/interfaces/innerkits/rust/netstack_rs/BUILD.gn b/interfaces/innerkits/rust/netstack_rs/BUILD.gn
+index 74cc9999..237554a3 100644
+--- a/interfaces/innerkits/rust/netstack_rs/BUILD.gn
++++ b/interfaces/innerkits/rust/netstack_rs/BUILD.gn
+@@ -49,6 +49,7 @@ ohos_static_library("netstack_rs_cxx") {
+   external_deps = [
+     "rust_cxx:cxx_cppdeps",
+     "cJSON:cjson",
++    "hilog:libhilog",
+   ]
+ 
+   part_name = "netstack"
+-- 
+2.50.1
+

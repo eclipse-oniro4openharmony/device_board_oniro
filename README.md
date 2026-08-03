@@ -63,12 +63,13 @@ sudo docker run -d -it --name oniro-build \
 
 ### 🩹 Apply source patches
 
-The `x86_general` build requires patches to several subsystems (build,
-powermgr, selinux_adapter, mindspore, storage_service, bms, …). Apply them
-before building:
+The build requires the shared Oniro patch series applied to several
+subsystems (build, selinux_adapter, mindspore, storage_service, bms, …).
+The same series also carries the `hybris_generic` adaptations, so one
+patched tree builds every Oniro product. Apply it once per fresh tree:
 
 ```bash
-bash vendor/oniro/x86_general/hook/do_patch.sh
+bash device/board/oniro/system_patch/do_patch.sh
 ```
 
 ### 🛠️ Build the images
@@ -89,7 +90,7 @@ kernel, `ramdisk.img`, and the `run.sh` / `run.bat` launchers.)
 ### 🔄 (Optional) Revert patches
 
 ```bash
-bash vendor/oniro/x86_general/hook/undo_patch.sh
+bash device/board/oniro/system_patch/undo_patch.sh
 ```
 
 ### ▶️ Run the emulator
