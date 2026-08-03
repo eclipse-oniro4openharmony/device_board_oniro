@@ -1,7 +1,7 @@
 From 314d0dc806a1416fe2a0a94c658fa806d9432521 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:22 +0200
-Subject: [PATCH 4/4] deps_guard: whitelist Oniro x86 GPU vendor libs and EGL
+Subject: [PATCH 4/5] deps_guard: whitelist Oniro x86 GPU vendor libs and EGL
  bridges
 
 Add 10 chipsetsdk_dep_whitelist entries:
