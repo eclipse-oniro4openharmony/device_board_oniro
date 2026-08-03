@@ -1,0 +1,28 @@
+From 595d7a64c7586954fbadef3dab134bc90fe91086 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 11:59:06 +0200
+Subject: [PATCH 2/2] toybox: suppress -Wmisleading-indentation
+
+Recent clang treats some toybox source as -Wmisleading-indentation, which the OH compile-standard escalates to error. Silence the warning to keep upstream sources unmodified.
+
+Change-Id: I2af6ac52159271331e45a4497cbe467fb5ef74d2
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index ffa8c5d..ed98d99 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -730,6 +730,7 @@ if (defined(ohos_lite)) {
+       "-Wno-tautological-constant-compare",
+       "-Wno-string-conversion",
+       "-Wno-unused-but-set-variable",
++      "-Wno-misleading-indentation",
+     ]
+ 
+     ldflags = [
+-- 
+2.50.1
+

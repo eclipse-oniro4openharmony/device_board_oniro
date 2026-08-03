@@ -1,0 +1,117 @@
+From 684f4bcc6eace2a69660cc9d56cdc6f45130e44d Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 30 Jul 2026 12:19:45 +0000
+Subject: [PATCH] camera_service: map the photo buffer through its own
+ allocator
+
+CameraServerPhotoProxy::GetFileDataAddr reaches the still's bytes by
+mmap'ing BufferHandle::fd directly.  That only works when the gralloc
+implementation hands out a plain DMA-BUF as the handle's first fd.
+MediaTek's does not: fd[0] is an unmappable anon_inode gralloc_extra
+metadata descriptor and the real memory sits in the reserve fds, so the
+mmap fails, GetFileDataAddr returns MAP_FAILED, and PhotoAssetProxy::
+SaveImage writes a 0-byte photo into the media library (write err 14).
+
+Keep the SurfaceBuffer the proxy was built from and map through it
+first: SurfaceBuffer::Map goes to the allocator that produced the
+buffer, which knows how to map its own handles.  The raw mmap stays as
+the fallback, so allocators that were already fine keep their behaviour.
+Release() must not munmap a mapping the SurfaceBuffer owns, so track
+which path produced the pointer.
+
+Change-Id: If0f1a4a3d115ecfc4c0aec2749957efe29d22b03
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ common/utils/camera_server_photo_proxy.cpp | 45 ++++++++++++++++++----
+ common/utils/camera_server_photo_proxy.h   |  4 ++
+ 2 files changed, 41 insertions(+), 8 deletions(-)
+
+diff --git a/common/utils/camera_server_photo_proxy.cpp b/common/utils/camera_server_photo_proxy.cpp
+index 3fc5456c6..66c4e9b2f 100644
+--- a/common/utils/camera_server_photo_proxy.cpp
++++ b/common/utils/camera_server_photo_proxy.cpp
+@@ -201,6 +201,7 @@ void CameraServerPhotoProxy::GetServerPhotoProxyInfo(sptr<SurfaceBuffer>& surfac
+     captureId_ = CameraSurfaceBufferUtil::GetCaptureId(surfaceBuffer);
+     BufferHandle *bufferHandle = surfaceBuffer->GetBufferHandle();
+     bufferHandle_ = bufferHandle;
++    surfaceBuffer_ = surfaceBuffer;
+     CHECK_RETURN_ELOG(bufferHandle == nullptr, "invalid bufferHandle");
+     format_ = bufferHandle->format;
+     std::string imageIdStr = std::to_string(CameraSurfaceBufferUtil::GetImageId(surfaceBuffer));
+@@ -277,15 +278,35 @@ void* CameraServerPhotoProxy::GetFileDataAddr()
+     std::lock_guard<std::mutex> lock(mutex_);
+     CHECK_RETURN_RET_ELOG(
+         bufferHandle_ == nullptr, fileDataAddr_, "CameraServerPhotoProxy::GetFileDataAddr bufferHandle_ is nullptr");
+-    if (!isMmaped_) {
+-        MEDIA_INFO_LOG("CameraServerPhotoProxy::GetFileDataAddr mmap");
+-        fileDataAddr_ = mmap(nullptr, bufferHandle_->size, PROT_READ, MAP_SHARED, bufferHandle_->fd, 0);
+-        CHECK_RETURN_RET_ELOG(
+-            fileDataAddr_ == MAP_FAILED, fileDataAddr_, "CameraServerPhotoProxy::GetFileDataAddr mmap failed");
+-        isMmaped_ = true;
+-    } else {
+-        MEDIA_ERR_LOG("CameraServerPhotoProxy::GetFileDataAddr mmap failed");
++    if (isMmaped_ || mappedBySurfaceBuffer_) {
++        return fileDataAddr_;
++    }
++    /*
++     * Prefer the buffer's own mapping.  Raw-mmap'ing BufferHandle::fd only
++     * works when the allocator hands out a plain DMA-BUF as the handle's first
++     * fd; some vendor gralloc implementations put an unmappable metadata fd
++     * there and keep the real memory in the reserve fds, so the mmap below
++     * fails and the photo gets written out empty.  SurfaceBuffer::Map goes
++     * through the allocator that produced the buffer and gets this right.
++     */
++    if (surfaceBuffer_ != nullptr) {
++        void *virAddr = surfaceBuffer_->GetVirAddr();
++        if (virAddr == nullptr && surfaceBuffer_->Map() == GSERROR_OK) {
++            virAddr = surfaceBuffer_->GetVirAddr();
++        }
++        if (virAddr != nullptr) {
++            MEDIA_INFO_LOG("CameraServerPhotoProxy::GetFileDataAddr mapped via SurfaceBuffer");
++            fileDataAddr_ = virAddr;
++            mappedBySurfaceBuffer_ = true;
++            return fileDataAddr_;
++        }
++        MEDIA_WARNING_LOG("CameraServerPhotoProxy::GetFileDataAddr SurfaceBuffer map failed, trying fd mmap");
+     }
++    MEDIA_INFO_LOG("CameraServerPhotoProxy::GetFileDataAddr mmap");
++    fileDataAddr_ = mmap(nullptr, bufferHandle_->size, PROT_READ, MAP_SHARED, bufferHandle_->fd, 0);
++    CHECK_RETURN_RET_ELOG(
++        fileDataAddr_ == MAP_FAILED, fileDataAddr_, "CameraServerPhotoProxy::GetFileDataAddr mmap failed");
++    isMmaped_ = true;
+     return fileDataAddr_;
+ }
+ 
+@@ -325,6 +346,14 @@ void CameraServerPhotoProxy::Release()
+ {
+     // LCOV_EXCL_START
+     MEDIA_INFO_LOG("CameraServerPhotoProxy release enter");
++    if (mappedBySurfaceBuffer_) {
++        // The mapping belongs to the SurfaceBuffer; dropping our reference is
++        // all that is owed here, and munmap would tear down its mapping.
++        fileDataAddr_ = nullptr;
++        mappedBySurfaceBuffer_ = false;
++        surfaceBuffer_ = nullptr;
++        return;
++    }
+     bool isMmappedAndBufferValid = isMmaped_ && bufferHandle_ != nullptr;
+     if (isMmappedAndBufferValid) {
+         munmap(fileDataAddr_, bufferHandle_->size);
+diff --git a/common/utils/camera_server_photo_proxy.h b/common/utils/camera_server_photo_proxy.h
+index d4848cf27..c88fe05af 100644
+--- a/common/utils/camera_server_photo_proxy.h
++++ b/common/utils/camera_server_photo_proxy.h
+@@ -84,6 +84,10 @@ public:
+ private:
+     uint32_t cloudImageEnhanceFlag_;
+     BufferHandle* bufferHandle_;
++    // Kept so GetFileDataAddr can map through the buffer's own allocator
++    // instead of assuming BufferHandle::fd is directly mmap-able.
++    sptr<SurfaceBuffer> surfaceBuffer_;
++    bool mappedBySurfaceBuffer_ = false;
+     int32_t format_;
+     int32_t photoWidth_;
+     int32_t photoHeight_;
+-- 
+2.50.1
+

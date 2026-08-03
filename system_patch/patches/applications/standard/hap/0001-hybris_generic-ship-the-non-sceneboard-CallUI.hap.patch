@@ -1,0 +1,68 @@
+From 815f4c4015e9df4c2f4ce8c494b0117da49163f9 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Sat, 1 Aug 2026 14:14:53 +0000
+Subject: [PATCH] hybris_generic: ship the non-sceneboard CallUI.hap
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The sceneboard variant is signed with a certificate that is not listed in
+install_list_capability.json, so bms rejects it at first boot:
+
+    bundleName: com.ohos.callui signature verify failed in capability list
+    ProcessBundleInfoByPrivilegeCapability: not allow use privilege extension
+    base_bundle_installer.cpp:ParseHapFiles: errorCode : 8519888
+
+com.ohos.callui declares a privileged ServiceAbility, and that privilege is
+granted only when the hap's appIdentifier, appId or fingerprint matches the
+entry in install_list_capability.json.  The sceneboard hap matches none of
+them, so the device comes up with no in-call UI and nothing but one line in
+the BMSInstaller log to say why.  Every other sceneboard hap in this
+directory installs, so this is specific to CallUI's build.
+
+The non-sceneboard hap carries the listed certificate, installs, and renders
+correctly over SceneBoard — verified on the Volla Phone Plinius: in-call
+screen with the number, running timer and the hold/mute/keypad/speaker
+controls.
+
+Change-Id: I2949e98216c3d3050705b39fbebae4844d3f0339
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 21 ++++++++++++++++++++-
+ 1 file changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 100000a..121248b 100755
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -191,7 +191,26 @@ ohos_prebuilt_etc("media_scanner_hap") {
+ }
+ 
+ ohos_prebuilt_etc("callUI_hap") {
+-  source = hap_src_dir + "CallUI.hap"
++  # Deliberately NOT hap_src_dir: the sceneboard variant of this one hap is
++  # signed with a certificate that is not in install_list_capability.json, so
++  # bms refuses to install it —
++  #
++  #   bundleName: com.ohos.callui signature verify failed in capability list
++  #   ProcessBundleInfoByPrivilegeCapability: not allow use privilege extension
++  #   install parse profile prop check error (9568344)
++  #
++  # com.ohos.callui declares a privileged ServiceAbility, and that privilege is
++  # granted by matching the hap's appIdentifier/appId/fingerprint against the
++  # entry in install_list_capability.json; the sceneboard hap matches none of
++  # them.  The result is a phone with no in-call UI at all, and the only trace
++  # is one line in the BMSInstaller log at first boot.  Every other sceneboard
++  # hap here installs, so this is specific to CallUI's build.
++  #
++  # The non-sceneboard hap is signed with the listed certificate, installs, and
++  # renders correctly over SceneBoard (verified on ansuz: in-call screen, timer,
++  # hold/mute/keypad/speaker controls).  Drop this override once upstream ships
++  # a sceneboard CallUI.hap whose signature is in the capability list.
++  source = "CallUI.hap"
+   module_install_dir = "app/com.ohos.callui"
+   part_name = "prebuilt_hap"
+   subsystem_name = "applications"
+-- 
+2.50.1
+

@@ -1,0 +1,56 @@
+From fb53aa14b517faed77c7bccffd279c75066726ae Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 27 Jul 2026 09:39:37 +0000
+Subject: [PATCH 3/7] alsa_adapter: don't let snd_mixer_load failure veto
+ stream open
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+snd_mixer_load walks every kcontrol on the card, and exotic vendor
+controls can refuse reads: the mt6878-mt6369 card (Volla Phone Plinius)
+has a BYTES control whose get handler returns EPERM, which failed the
+whole load and with it RenderOpenImpl/CaptureOpenImpl — every OHOS
+playback session died with 'SndOpenMixer failed' and AVPlayer went to
+PLAYER_STATE_ERROR before a single frame.
+
+The adapter never element-accesses through the snd_mixer handle (all
+mixer work goes through the snd_ctl name-based API in SndElementWrite/
+SndElementRead*), so a failed load only needs a warning: close the
+handle and open the stream anyway.
+
+Change-Id: Iaa2ebf60d399d4fe505f664e43728f8fd2e9d82d
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ audio/supportlibs/alsa_adapter/src/alsa_soundcard.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
+index 093905613..304569d94 100644
+--- a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
++++ b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
+@@ -635,13 +635,19 @@ int32_t SndOpenMixer(struct AlsaSoundCard *cardIns)
+ 
+     ret = snd_mixer_load(cardIns->mixerHandle);
+     if (ret < 0) {
+-        AUDIO_FUNC_LOGE("Failed to load mixer element: %{public}s.", snd_strerror(ret));
++        /* Non-fatal: loading walks every kcontrol on the card, and exotic
++         * vendor controls can refuse reads (mt6878-mt6369 has a BYTES
++         * control whose get handler returns EPERM), which would otherwise
++         * veto opening the stream. The adapter never element-accesses
++         * through this handle — all mixer work goes through the snd_ctl
++         * name-based API — so drop the handle and carry on. */
++        AUDIO_FUNC_LOGW("mixer element load failed (%{public}s), continuing without mixer handle",
++            snd_strerror(ret));
+         ret = snd_mixer_close(cardIns->mixerHandle);
+         if (ret < 0) {
+             AUDIO_FUNC_LOGE("mixer close error: %{public}s.", snd_strerror(ret));
+         }
+         cardIns->mixerHandle = NULL;
+-        return HDF_FAILURE;
+     }
+     return HDF_SUCCESS;
+ }
+-- 
+2.50.1
+

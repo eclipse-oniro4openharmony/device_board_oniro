@@ -1,0 +1,63 @@
+From 50a0f0147c206b70ce255288d62ed54d8bcbfe85 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 3 Aug 2026 13:59:29 +0000
+Subject: [PATCH] mindspore-lite: disable NNRT and AVX512 paths on x86_general
+
+x86_general does not ship NNRT, and the AVX512 paths require CPU support
+absent on QEMU. Mirror the existing is_emulator gates so the build does
+not attempt to compile those sources.
+
+Rebased onto OpenHarmony-6.1-LTS: the NNRT gate moved inside an
+is_standard_system block upstream.
+
+Change-Id: I3cd8be88156deee0683dce30ae0c3e535f174d51
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ mindspore-src/source/mindspore-lite/BUILD.gn                   | 3 ++-
+ .../source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn       | 2 +-
+ .../mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn      | 2 +-
+ 3 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/mindspore-src/source/mindspore-lite/BUILD.gn b/mindspore-src/source/mindspore-lite/BUILD.gn
+index 39b5e696..dd53e9d0 100644
+--- a/mindspore-src/source/mindspore-lite/BUILD.gn
++++ b/mindspore-src/source/mindspore-lite/BUILD.gn
+@@ -355,7 +355,8 @@ all_sources += missing_sources
+ SUPPORT_NNRT = false
+ 
+ if (is_standard_system) {
+-  if ((target_cpu == "arm" || target_cpu == "arm64") && !is_emulator) {
++  if ((target_cpu == "arm" || target_cpu == "arm64") && !is_emulator &&
++      product_name != "x86_general") {
+     SUPPORT_NNRT = true
+   }
+ }
+diff --git a/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn b/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn
+index eaa5b422..f8f79a42 100644
+--- a/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn
++++ b/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn
+@@ -250,7 +250,7 @@ control_kernel_sources = [
+ ]
+ 
+ # emulator not support avx512
+-if (!is_emulator) {
++if (!is_emulator && product_name != "x86_general") {
+   cpu_kernel_sources += [
+     "fp32/convolution_im2col_avx512_fp32.cc",
+     "fp32/matmul_fp32_avx512.cc",
+diff --git a/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn b/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn
+index 60173952..2fe2ca96 100644
+--- a/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn
++++ b/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn
+@@ -939,7 +939,7 @@ arm64_only_sources += arm64_fp32_kernel_sources
+ x86_64_only_sources = sse_avx_avx512_sources
+ x86_64_only_sources += avx_fp32_kernel_sources
+ # emulator not support avx512
+-if (is_emulator) {
++if (is_emulator || product_name == "x86_general") {
+   not_needed(avx512_fp32_kernel_sources)
+   not_needed(gemm_avx512_kernel_sources)
+   not_needed(gemm_mask_avx512_kernel_sources)
+-- 
+2.50.1
+

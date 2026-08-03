@@ -1,0 +1,31 @@
+From d4c7724a22d197e5ec37bd389532f0cfc3956dee Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 12:00:13 +0200
+Subject: [PATCH 10/10] render_frame_trace: enable ThinLTO on x86_64 to satisfy
+ CFI
+
+render_frame_trace was compiled with -flto=thin only on arm/arm64. On x86_64 the FRAME_TRACE::RenderFrameTrace vtable failed cross-DSO CFI (render_service SIGABRTed at __cfi_check). Adding x86_64 to the gate so the vtable is LTO-visible to CFI.
+
+Change-Id: If177678a3297961b76e506f382dcf0fa039136aa
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ rosen/modules/render_frame_trace/BUILD.gn | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/rosen/modules/render_frame_trace/BUILD.gn b/rosen/modules/render_frame_trace/BUILD.gn
+index 9d9206a249..3a896f9be1 100644
+--- a/rosen/modules/render_frame_trace/BUILD.gn
++++ b/rosen/modules/render_frame_trace/BUILD.gn
+@@ -22,7 +22,8 @@ ohos_source_set("render_frame_trace") {
+     "src/render_frame_trace.cpp",
+   ]
+   cflags = [ "-fstack-protector-all" ]
+-  if (is_ohos && is_clang && (target_cpu == "arm" || target_cpu == "arm64")) {
++  if (is_ohos && is_clang &&
++      (target_cpu == "arm" || target_cpu == "arm64" || target_cpu == "x86_64")) {
+     if (!use_libfuzzer) {
+       cflags += [ "-flto=thin" ]
+     }
+-- 
+2.50.1
+

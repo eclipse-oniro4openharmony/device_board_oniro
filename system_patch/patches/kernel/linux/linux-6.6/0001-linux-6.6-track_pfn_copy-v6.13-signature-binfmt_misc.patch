@@ -1,0 +1,79 @@
+From 09eeae9626c6119da57fedcefbf2612ae738fb60 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 11:59:58 +0200
+Subject: [PATCH] linux-6.6: track_pfn_copy v6.13 signature; binfmt_misc
+ allow_write_access
+
+Two kernel-API drift fixes:
+- track_pfn_copy() in v6.13+ takes (dst_vma, src_vma, *pfn) instead of just (vma); also add the corresponding untrack_pfn_copy() entry point that frees the reserved pfn range when the dup_mmap path errors out
+- bm_register_write() should call allow_write_access() not exe_file_allow_write_access() on the format-handler file in this kernel revision.
+
+Change-Id: I44a78de9591585b91e778df4791fd558db3ee9fc
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ arch/x86/mm/pat/memtype.c | 23 +++++++++++++++++++----
+ fs/binfmt_misc.c          |  2 +-
+ 2 files changed, 20 insertions(+), 5 deletions(-)
+
+diff --git a/arch/x86/mm/pat/memtype.c b/arch/x86/mm/pat/memtype.c
+index 36b603d0c..b2f6abec0 100644
+--- a/arch/x86/mm/pat/memtype.c
++++ b/arch/x86/mm/pat/memtype.c
+@@ -986,22 +986,37 @@ static int get_pat_info(struct vm_area_struct *vma, resource_size_t *paddr,
+  * If the vma has a linear pfn mapping for the entire range, we get the prot
+  * from pte and reserve the entire vma range with single reserve_pfn_range call.
+  */
+-int track_pfn_copy(struct vm_area_struct *vma)
++int track_pfn_copy(struct vm_area_struct *dst_vma,
++		struct vm_area_struct *src_vma, unsigned long *pfn)
+ {
+ 	resource_size_t paddr;
+-	unsigned long vma_size = vma->vm_end - vma->vm_start;
++	unsigned long vma_size = src_vma->vm_end - src_vma->vm_start;
+ 	pgprot_t pgprot;
+ 
+-	if (vma->vm_flags & VM_PAT) {
+-		if (get_pat_info(vma, &paddr, &pgprot))
++	if (src_vma->vm_flags & VM_PAT) {
++		if (get_pat_info(src_vma, &paddr, &pgprot))
+ 			return -EINVAL;
+ 		/* reserve the whole chunk covered by vma. */
++		*pfn = paddr >> PAGE_SHIFT;
+ 		return reserve_pfn_range(paddr, vma_size, &pgprot, 1);
+ 	}
+ 
+ 	return 0;
+ }
+ 
++void untrack_pfn_copy(struct vm_area_struct *dst_vma, unsigned long pfn)
++{
++	resource_size_t paddr;
++	unsigned long vma_size;
++
++	if (!(dst_vma->vm_flags & VM_PAT))
++		return;
++
++	paddr = (resource_size_t)pfn << PAGE_SHIFT;
++	vma_size = dst_vma->vm_end - dst_vma->vm_start;
++	free_pfn_range(paddr, vma_size);
++}
++
+ /*
+  * prot is passed in as a parameter for the new mapping. If the vma has
+  * a linear pfn mapping for the entire range, or no vma is provided,
+diff --git a/fs/binfmt_misc.c b/fs/binfmt_misc.c
+index afb50f41a..a45b5ba12 100644
+--- a/fs/binfmt_misc.c
++++ b/fs/binfmt_misc.c
+@@ -816,7 +816,7 @@ static ssize_t bm_register_write(struct file *file, const char __user *buffer,
+ 
+ 	if (err) {
+ 		if (f) {
+-			exe_file_allow_write_access(f);
++			allow_write_access(f);
+ 			filp_close(f, NULL);
+ 		}
+ 		kfree(e);
+-- 
+2.50.1
+

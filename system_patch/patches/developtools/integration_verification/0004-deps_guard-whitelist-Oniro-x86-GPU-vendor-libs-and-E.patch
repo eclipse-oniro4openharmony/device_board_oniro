@@ -1,0 +1,100 @@
+From 314d0dc806a1416fe2a0a94c658fa806d9432521 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 12:00:22 +0200
+Subject: [PATCH 4/4] deps_guard: whitelist Oniro x86 GPU vendor libs and EGL
+ bridges
+
+Add 10 chipsetsdk_dep_whitelist entries:
+- libdisplay_buffer_vdi_impl.z.so -> ld-musl loader (passthrough HDI on Oniro)
+- 6 vendor GPU libs (libdrm_nouveau/radeon/amdgpu, libelf, libgallium_dri, libvulkan_radeon) -> ld-musl loader
+- 3 system libEGL.so -> vendor chipsetsdk libGLESv1_CM/libGLESv2/libEGL bridges. These reflect the Oniro x86 graphics stack layout where opengl_wrapper links against the vendor's Mesa/Vulkan blobs.
+
+Change-Id: I2a1753a21b103dc567cb3a4ce1a1f21c389d59e0
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../rules/chipsetsdk_dep_whitelist.json       | 70 +++++++++++++++++++
+ 1 file changed, 70 insertions(+)
+
+diff --git a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+index 8b532e5..0580730 100644
+--- a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
++++ b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+@@ -10658,5 +10658,75 @@
+         "dep_file_name": "libv8_shared.so",
+         "dep_file_path": "system/lib64/libv8_shared.so",
+         "description": "libunwinder.so with innerapi_tags [chipsetsdk_sp_indirect,platformsdk_indirect] cannot depend system only file libv8_shared.so with //arkcompiler/jsvm:libv8"
++    },
++    {
++        "so_file_name": "libdisplay_buffer_vdi_impl.z.so",
++        "so_file_path": "vendor/lib/passthrough/libdisplay_buffer_vdi_impl.z.so",
++        "dep_file_name": "ld-musl-arm.so.1",
++        "dep_file_path": "system/lib/ld-musl-arm.so.1",
++        "description": "lib libdisplay_buffer_vdi_impl.z.so with innerapi_tags [passthrough] cannot depend system only file ld-musl loader"
++    },
++    {
++        "so_file_name": "libdrm_nouveau.so",
++        "so_file_path": "vendor/lib64/libdrm_nouveau.so",
++        "dep_file_name": "ld-musl-arm.so.1",
++        "dep_file_path": "system/lib/ld-musl-arm.so.1",
++        "description": "Oniro x86 GPU vendor lib libdrm_nouveau.so depends on ld-musl loader"
++    },
++    {
++        "so_file_name": "libdrm_radeon.so",
++        "so_file_path": "vendor/lib64/libdrm_radeon.so",
++        "dep_file_name": "ld-musl-arm.so.1",
++        "dep_file_path": "system/lib/ld-musl-arm.so.1",
++        "description": "Oniro x86 GPU vendor lib libdrm_radeon.so depends on ld-musl loader"
++    },
++    {
++        "so_file_name": "libdrm_amdgpu.so",
++        "so_file_path": "vendor/lib64/libdrm_amdgpu.so",
++        "dep_file_name": "ld-musl-arm.so.1",
++        "dep_file_path": "system/lib/ld-musl-arm.so.1",
++        "description": "Oniro x86 GPU vendor lib libdrm_amdgpu.so depends on ld-musl loader"
++    },
++    {
++        "so_file_name": "libelf.so",
++        "so_file_path": "vendor/lib64/libelf.so",
++        "dep_file_name": "ld-musl-arm.so.1",
++        "dep_file_path": "system/lib/ld-musl-arm.so.1",
++        "description": "Oniro x86 GPU stack vendor lib libelf.so depends on ld-musl loader"
++    },
++    {
++        "so_file_name": "libgallium_dri.so",
++        "so_file_path": "vendor/lib64/libgallium_dri.so",
++        "dep_file_name": "ld-musl-arm.so.1",
++        "dep_file_path": "system/lib/ld-musl-arm.so.1",
++        "description": "Oniro x86 GPU vendor lib libgallium_dri.so depends on ld-musl loader"
++    },
++    {
++        "so_file_name": "libvulkan_radeon.so",
++        "so_file_path": "vendor/lib64/libvulkan_radeon.so",
++        "dep_file_name": "ld-musl-arm.so.1",
++        "dep_file_path": "system/lib/ld-musl-arm.so.1",
++        "description": "Oniro x86 GPU vendor lib libvulkan_radeon.so depends on ld-musl loader"
++    },
++    {
++        "so_file_name": "libEGL.so",
++        "so_file_path": "system/lib64/libEGL.so",
++        "dep_file_name": "libEGL.so.1.0.0",
++        "dep_file_path": "vendor/lib64/chipsetsdk/libEGL.so.1.0.0",
++        "description": "Oniro graphic_2d opengl_wrapper bridges system libEGL.so to vendor chipsetsdk libEGL.so.1.0.0"
++    },
++    {
++        "so_file_name": "libEGL.so",
++        "so_file_path": "system/lib64/libEGL.so",
++        "dep_file_name": "libGLESv2.so.2.0.0",
++        "dep_file_path": "vendor/lib64/chipsetsdk/libGLESv2.so.2.0.0",
++        "description": "Oniro graphic_2d opengl_wrapper bridges system libEGL.so to vendor chipsetsdk libGLESv2.so.2.0.0"
++    },
++    {
++        "so_file_name": "libEGL.so",
++        "so_file_path": "system/lib64/libEGL.so",
++        "dep_file_name": "libGLESv1_CM.so.1.1.0",
++        "dep_file_path": "vendor/lib64/chipsetsdk/libGLESv1_CM.so.1.1.0",
++        "description": "Oniro graphic_2d opengl_wrapper bridges system libEGL.so to vendor chipsetsdk libGLESv1_CM.so.1.1.0"
+     }
+ ]
+-- 
+2.50.1
+

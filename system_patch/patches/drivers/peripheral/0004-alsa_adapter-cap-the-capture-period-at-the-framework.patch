@@ -1,0 +1,46 @@
+From b91813c960a6d0275cd35f64852bb8a1df49f333 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 28 Jul 2026 22:10:50 +0000
+Subject: [PATCH 4/7] alsa_adapter: cap the capture period at the framework's
+ fragment size
+
+AudioCaptureCaptureFrame rejects a read whose caller buffer is smaller
+than one ALSA period ("CaptureframeLen too little!"). The audio
+framework's capture source always reads 8192-byte fragments (2048 frames
+at 48 kHz S16 stereo), but AUDIO_PERIOD_TIME_DEF asked for 100 ms, which
+on mt6878 rounds to 4800 frames / 16384 bytes. Every framework read
+therefore failed and recording returned zero bytes on any device whose
+card accepts the requested period verbatim.
+
+Lower the default period to 40 ms, which rounds to at most 2048 frames
+and so always fits the fragment. Playback is unaffected; the render path
+has its own period handling.
+
+Change-Id: I917e34bf407b6440bfc123b0f19c418344d68bd4
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c b/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
+index 82b046780..5ca98fb83 100755
+--- a/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
++++ b/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
+@@ -27,7 +27,13 @@
+ 
+ #define POLL_EVENT_DEF false
+ #define AUDIO_BUFFER_TIME_DEF 500000
+-#define AUDIO_PERIOD_TIME_DEF 100000
++/* AudioCaptureCaptureFrame() rejects reads when the caller's buffer is
++ * smaller than one ALSA period, and the audio framework's capture source
++ * reads 8192-byte fragments (2048 frames at 48 kHz S16 stereo). Keep the
++ * period at or below that: 40 ms rounds to <= 2048 frames. At the previous
++ * 100 ms every framework read failed with "CaptureframeLen too little" and
++ * recording returned 0 bytes. */
++#define AUDIO_PERIOD_TIME_DEF 40000
+ #define PCM_WAIT_TIME         5000
+ 
+ static struct AlsaCapture *g_alsaCaptureList = NULL;
+-- 
+2.50.1
+

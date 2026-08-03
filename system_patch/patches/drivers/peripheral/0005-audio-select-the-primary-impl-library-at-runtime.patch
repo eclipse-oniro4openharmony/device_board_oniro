@@ -1,0 +1,137 @@
+From dcde22b1ba98a7440305c75fffe2272aa25e0275 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 29 Jul 2026 10:26:24 +0000
+Subject: [PATCH 5/7] audio: select the primary impl library at runtime
+
+The primary audio HDI service loads its entire implementation through one
+fixed dlopen of libaudio_primary_impl_vendor.z.so.  On products where a
+single image serves several boards, which implementation is correct is a
+per-device fact, and a build-time choice cannot express it.
+
+Read the library from the ohos.audio.hdi_impl parameter, falling back to
+the historical path when the parameter is unset or names something the
+build does not ship, and log which one was taken.  Devices opt in from
+their own init .cfg; every existing product keeps loading exactly what it
+loaded before.
+
+Change-Id: Ica95ae8e383942edd9c1d3f5f3ae9d12c2e675ef
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ audio/bundle.json                             |  1 +
+ audio/hdi_service/primary/BUILD.gn            |  1 +
+ .../primary/audio_manager_service.c           | 45 +++++++++++++++++--
+ 3 files changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/audio/bundle.json b/audio/bundle.json
+index 4645f244e..ed8b0f6b3 100755
+--- a/audio/bundle.json
++++ b/audio/bundle.json
+@@ -48,6 +48,7 @@
+                 "hicollie",
+                 "alsa-lib",
+                 "hisysevent",
++                "init",
+                 "ipc"
+             ],
+             "third_party": []
+diff --git a/audio/hdi_service/primary/BUILD.gn b/audio/hdi_service/primary/BUILD.gn
+index bf60660f7..95227e46d 100644
+--- a/audio/hdi_service/primary/BUILD.gn
++++ b/audio/hdi_service/primary/BUILD.gn
+@@ -66,6 +66,7 @@ ohos_shared_library("audio_manager_service_6.0") {
+       "hdf_core:libhdf_utils",
+       "hdf_core:libhdi",
+       "hilog:libhilog",
++      "init:libbegetutil",
+     ]
+   } else if (defined(ohos_lite)) {
+     external_deps = [ "hilog_lite:hilog_shared" ]
+diff --git a/audio/hdi_service/primary/audio_manager_service.c b/audio/hdi_service/primary/audio_manager_service.c
+index 1f2586902..3240f1f9b 100644
+--- a/audio/hdi_service/primary/audio_manager_service.c
++++ b/audio/hdi_service/primary/audio_manager_service.c
+@@ -14,15 +14,26 @@
+  */
+ 
+ #include <dlfcn.h>
++#include <string.h>
+ #include <hdf_base.h>
+ #include <hdf_dlist.h>
+ #include <osal_mem.h>
+ 
++#include "parameter.h"
+ #include "v6_0/iaudio_manager.h"
+ #include "audio_uhdf_log.h"
+ 
+ #define HDF_LOG_TAG    HDF_AUDIO_PRIMARY_SRV
+ 
++/*
++ * Which implementation library backs the primary adapter is a per-device
++ * decision on products that ship one image for several boards, so it is read
++ * from a system parameter instead of being fixed at build time.  Unset (the
++ * default) keeps the historical library.
++ */
++#define HDI_AUDIO_IMPL_PARAM        "ohos.audio.hdi_impl"
++#define HDI_AUDIO_IMPL_PARAM_MAX    32
++
+ typedef struct IAudioManager* (*AudioManagerCreateIfInstance)(void);
+ typedef int32_t (*AudioManagerDestroyIfInstance)(struct IAudioManager *);
+ 
+@@ -34,6 +45,33 @@ struct AudioManagerPriv {
+ 
+ static const char *HDI_AUDIO_LIB_PATH = HDF_LIBRARY_FULL_PATH("libaudio_primary_impl_vendor");
+ 
++static const struct {
++    const char *name;
++    const char *path;
++} g_audioImplLibs[] = {
++    { "vdi", HDF_LIBRARY_FULL_PATH("libaudio_primary_impl_vdi") },
++};
++
++static const char *AudioManagerImplLibPath(void)
++{
++    char value[HDI_AUDIO_IMPL_PARAM_MAX] = {0};
++
++    if (GetParameter(HDI_AUDIO_IMPL_PARAM, "", value, sizeof(value)) <= 0) {
++        return HDI_AUDIO_LIB_PATH;
++    }
++
++    for (size_t i = 0; i < sizeof(g_audioImplLibs) / sizeof(g_audioImplLibs[0]); i++) {
++        if (strcmp(value, g_audioImplLibs[i].name) == 0) {
++            HDF_LOGI("%{public}s:%{public}s=%{public}s, using %{public}s", __func__,
++                HDI_AUDIO_IMPL_PARAM, value, g_audioImplLibs[i].path);
++            return g_audioImplLibs[i].path;
++        }
++    }
++
++    HDF_LOGW("%{public}s:unknown %{public}s=%{public}s, using default", __func__, HDI_AUDIO_IMPL_PARAM, value);
++    return HDI_AUDIO_LIB_PATH;
++}
++
+ static struct AudioManagerPriv *GetAudioManagerPriv(void)
+ {
+     static struct AudioManagerPriv priv;
+@@ -43,16 +81,17 @@ static struct AudioManagerPriv *GetAudioManagerPriv(void)
+ static int32_t AudioManagerLoadPrimaryLib(struct AudioManagerPriv *priv)
+ {
+     char *error = NULL;
++    const char *libPath = AudioManagerImplLibPath();
+ 
+-    if (HDI_AUDIO_LIB_PATH == NULL || priv == NULL) {
++    if (libPath == NULL || priv == NULL) {
+         HDF_LOGE("%{public}s:para is null", __func__);
+         return HDF_ERR_INVALID_PARAM;
+     }
+ 
+-    priv->handle = dlopen(HDI_AUDIO_LIB_PATH, RTLD_LAZY);
++    priv->handle = dlopen(libPath, RTLD_LAZY);
+     if (priv->handle == NULL) {
+         error = dlerror();
+-        HDF_LOGE("%{public}s:load path%{public}s, dlopen err=%{public}s", __func__, HDI_AUDIO_LIB_PATH, error);
++        HDF_LOGE("%{public}s:load path%{public}s, dlopen err=%{public}s", __func__, libPath, error);
+         return HDF_FAILURE;
+     }
+ 
+-- 
+2.50.1
+

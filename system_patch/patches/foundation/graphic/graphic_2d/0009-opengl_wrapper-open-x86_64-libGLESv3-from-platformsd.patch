@@ -1,0 +1,41 @@
+From 948eaa871f8a657880118014d8898d1098704ad9 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 12:00:10 +0200
+Subject: [PATCH 09/10] opengl_wrapper: open x86_64 libGLESv3 from platformsdk
+ path
+
+libGLESv3.so installs under /system/lib64/platformsdk/, so the lib64
+dlopen in FindBuiltinWrapper never succeeds. Fix the path on x86_64
+(x86_general needs the builtin wrapper for eglGetProcAddress).
+
+aarch64 deliberately keeps the failing historical path: hybris devices
+serve GL through libhybris and rely on builtin-wrapper lookup staying
+out of eglGetProcAddress.
+
+Change-Id: I5be3c85407c408b51d2c6c2a86b5fe8fda31cec1
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp b/frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp
+index b3446f1774..9b6f7e6d10 100644
+--- a/frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp
++++ b/frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp
+@@ -300,7 +300,12 @@ EGLint EglGetErrorImpl(void)
+ 
+ static __eglMustCastToProperFunctionPointerType FindBuiltinWrapper(const char* procname)
+ {
+-#if (defined(__aarch64__) || defined(__x86_64__))
++#if defined(__x86_64__)
++    static void* dlglv3Handle = dlopen("/system/lib64/platformsdk/libGLESv3.so", RTLD_NOW | RTLD_LOCAL);
++#elif defined(__aarch64__)
++    // Keep the historical path: on hybris devices GL is served through
++    // libhybris, and this dlopen failing (GLESv3 lives in platformsdk/)
++    // keeps builtin-wrapper lookup out of eglGetProcAddress.
+     static void* dlglv3Handle = dlopen("/system/lib64/libGLESv3.so", RTLD_NOW | RTLD_LOCAL);
+ #else
+     static void* dlglv3Handle = dlopen("/system/lib/platformsdk/libGLESv3.so", RTLD_NOW | RTLD_LOCAL);
+-- 
+2.50.1
+

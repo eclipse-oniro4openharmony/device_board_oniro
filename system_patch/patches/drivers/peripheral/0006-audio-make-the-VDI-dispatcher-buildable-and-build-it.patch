@@ -1,0 +1,201 @@
+From b67beeaee962b04ba2ec5ba03b6f5104f23d9162 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 29 Jul 2026 14:26:23 +0000
+Subject: [PATCH 6/7] audio: make the VDI dispatcher buildable and build it
+ alongside the default impl
+
+The vdi_src implementation does not compile.  audio_render_vdi.c mixes
+renderId and rendrId in five functions, leaving undeclared identifiers,
+and audio_manager_vdi.c ends in a C++ IPCSkeleton call inside a .c file.
+Neither can ever have been built, which fits: the sources are reachable
+only by setting drivers_peripheral_audio_feature_community to false, and
+nothing does.
+
+Fix both, and add a second target that builds the same sources
+unconditionally as libaudio_primary_impl_vdi.  A product that ships one
+image for several boards cannot express "this board uses the VDI
+implementation" as a build flag, so both implementations have to be
+present and chosen at runtime.
+
+SetMaxWorkThreadNum becomes a no-op: IPCSkeleton is C++ only and its C
+binding is an NDK module, which deps_guard does not allow a
+vendor-installed library to depend on.  The effect is limited to the
+size of the IPC worker pool.
+
+Change-Id: I0460dcf9b433288ec998e31a2535c4873972218a
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ audio/hdi_service/BUILD.gn                    |  1 +
+ audio/hdi_service/primary_impl/BUILD.gn       | 54 +++++++++++++++++++
+ .../primary_impl/vdi_src/audio_manager_vdi.c  |  8 ++-
+ .../primary_impl/vdi_src/audio_render_vdi.c   | 24 ++++-----
+ 4 files changed, 74 insertions(+), 13 deletions(-)
+
+diff --git a/audio/hdi_service/BUILD.gn b/audio/hdi_service/BUILD.gn
+index 0cbdaf23c..5d7e961df 100644
+--- a/audio/hdi_service/BUILD.gn
++++ b/audio/hdi_service/BUILD.gn
+@@ -18,6 +18,7 @@ group("idl_audio") {
+   deps = [
+     "primary:audio_manager_service_6.0",
+     "primary:audio_primary_driver",
++    "primary_impl:audio_primary_impl_vdi",
+     "primary_impl:audio_primary_impl_vendor",
+   ]
+ 
+diff --git a/audio/hdi_service/primary_impl/BUILD.gn b/audio/hdi_service/primary_impl/BUILD.gn
+index bd26a686b..3ed420f0a 100644
+--- a/audio/hdi_service/primary_impl/BUILD.gn
++++ b/audio/hdi_service/primary_impl/BUILD.gn
+@@ -100,3 +100,57 @@ ohos_shared_library("audio_primary_impl_vendor") {
+   subsystem_name = "hdf"
+   part_name = "drivers_peripheral_audio"
+ }
++
++# The same VDI dispatcher, built unconditionally under its own name so a
++# product can ship it alongside the default implementation and choose between
++# them at runtime (ohos.audio.hdi_impl, see ../primary/audio_manager_service.c).
++# Without this the dispatcher is only reachable by flipping
++# drivers_peripheral_audio_feature_community for the whole product, which is a
++# build-time decision and cannot serve two boards from one image.
++ohos_shared_library("audio_primary_impl_vdi") {
++  defines = []
++  sources = [
++    "vdi_src/audio_adapter_vdi.c",
++    "vdi_src/audio_capture_vdi.c",
++    "vdi_src/audio_common_vdi.c",
++    "vdi_src/audio_manager_vdi.c",
++    "vdi_src/audio_render_vdi.c",
++  ]
++
++  if (drivers_peripheral_audio_feature_reclaim_memory) {
++    defines += [ "AUDIO_RECLAIM_MEMORY_ENABLE" ]
++  }
++
++  deps = [ "$hdf_audio_path/audio_dfx:libaudio_dfx_static" ]
++
++  include_dirs = [
++    "$hdf_audio_path/interfaces/sound/v1_0",
++    "$hdf_hdi_service_path/vendor_interface/utils",
++  ]
++
++  if (enable_audio_hal_hdf_log) {
++    defines += [ "AUDIO_HDF_LOG" ]
++  }
++
++  if (musl_use_jemalloc && musl_use_jemalloc_dfx_intf) {
++    defines += [ "CONFIG_USE_JEMALLOC_DFX_INTF" ]
++  }
++
++  external_deps = [
++    "bounds_checking_function:libsec_shared",
++    "drivers_interface_audio:libaudio_proxy_6.0",
++    "hdf_core:libhdf_ipc_adapter",
++    "hdf_core:libhdi",
++    "hdf_core:libpub_utils",
++    "hilog:libhilog",
++    "ipc:ipc_single",
++  ]
++  if (enable_c_utils) {
++    external_deps += [ "c_utils:utils" ]
++  }
++
++  output_name = "libaudio_primary_impl_vdi"
++  install_images = [ chipset_base_dir ]
++  subsystem_name = "hdf"
++  part_name = "drivers_peripheral_audio"
++}
+diff --git a/audio/hdi_service/primary_impl/vdi_src/audio_manager_vdi.c b/audio/hdi_service/primary_impl/vdi_src/audio_manager_vdi.c
+index c36a77e82..27e544a8a 100644
+--- a/audio/hdi_service/primary_impl/vdi_src/audio_manager_vdi.c
++++ b/audio/hdi_service/primary_impl/vdi_src/audio_manager_vdi.c
+@@ -572,5 +572,11 @@ int32_t AudioManagerDestroyIfInstance(struct IAudioManager *manager)
+ 
+ void SetMaxWorkThreadNum(int32_t count)
+ {
+-    OHOS::IPCSkeleton::GetInstance().SetMaxWorkThreadNum(count);
++    /*
++     * IPCSkeleton is C++ only and its C binding (libipc_capi) is an NDK module
++     * a vendor-installed library may not depend on, so the worker pool keeps
++     * the IPC default here.  That only caps concurrent incoming transactions;
++     * the audio host has one client.
++     */
++    (void)count;
+ }
+\ No newline at end of file
+diff --git a/audio/hdi_service/primary_impl/vdi_src/audio_render_vdi.c b/audio/hdi_service/primary_impl/vdi_src/audio_render_vdi.c
+index 2ba722e42..25c28b5ee 100644
+--- a/audio/hdi_service/primary_impl/vdi_src/audio_render_vdi.c
++++ b/audio/hdi_service/primary_impl/vdi_src/audio_render_vdi.c
+@@ -103,8 +103,8 @@ int32_t AudioRenderFrameVdi(struct IAudioRender *render, const int8_t *frame, ui
+     CHECK_NULL_PTR_RETURN_VALUE(frame, HDF_ERR_INVALID_PARAM);
+     CHECK_NULL_PTR_RETURN_VALUE(replyBytes, HDF_ERR_INVALID_PARAM);
+     struct AudioRenderInfo *renderInfo = (struct AudioRenderInfo *)render;
+-    uint32_t renderId = renderInfo->rendrId;
+-    if (rendrId >= AUDIO_VDI_STREAM_NUM_MAX) {
++    uint32_t renderId = renderInfo->renderId;
++    if (renderId >= AUDIO_VDI_STREAM_NUM_MAX) {
+         AUDIO_FUNC_LOGE("invalid param");
+         return HDF_ERR_INVALID_PARAM;
+     }
+@@ -773,8 +773,8 @@ int32_t AudioRenderStartVdi(struct IAudioRender *render)
+     AUDIO_FUNC_LOGI("hdi start enter");
+     CHECK_NULL_PTR_RETURN_VALUE(render, HDF_ERR_INVALID_PARAM);
+     struct AudioRenderInfo *renderInfo = (struct AudioRenderInfo *)render;
+-    uint32_t rendrId = renderInfo->renderId;
+-    if (rendrId >= AUDIO_VDI_STREAM_NUM_MAX) {
++    uint32_t renderId = renderInfo->renderId;
++    if (renderId >= AUDIO_VDI_STREAM_NUM_MAX) {
+         AUDIO_FUNC_LOGE("invalid param");
+         return HDF_ERR_INVALID_PARAM;
+     }
+@@ -808,8 +808,8 @@ int32_t AudioRenderStopVdi(struct IAudioRender *render)
+     AUDIO_FUNC_LOGI("hdi stop enter");
+     CHECK_NULL_PTR_RETURN_VALUE(render, HDF_ERR_INVALID_PARAM);
+     struct AudioRenderInfo *renderInfo = (struct AudioRenderInfo *)render;
+-    uint32_t rendrId = renderInfo->renderId;
+-    if (rendrId >= AUDIO_VDI_STREAM_NUM_MAX) {
++    uint32_t renderId = renderInfo->renderId;
++    if (renderId >= AUDIO_VDI_STREAM_NUM_MAX) {
+         AUDIO_FUNC_LOGE("invalid param");
+         return HDF_ERR_INVALID_PARAM;
+     }
+@@ -842,8 +842,8 @@ int32_t AudioRenderPauseVdi(struct IAudioRender *render)
+ {
+     CHECK_NULL_PTR_RETURN_VALUE(render, HDF_ERR_INVALID_PARAM);
+     struct AudioRenderInfo *renderInfo = (struct AudioRenderInfo *)render;
+-    uint32_t rendrId = renderInfo->renderId;
+-    if (rendrId >= AUDIO_VDI_STREAM_NUM_MAX) {
++    uint32_t renderId = renderInfo->renderId;
++    if (renderId >= AUDIO_VDI_STREAM_NUM_MAX) {
+         AUDIO_FUNC_LOGE("invalid param");
+         return HDF_ERR_INVALID_PARAM;
+     }
+@@ -873,8 +873,8 @@ int32_t AudioRenderResumeVdi(struct IAudioRender *render)
+ {
+     CHECK_NULL_PTR_RETURN_VALUE(render, HDF_ERR_INVALID_PARAM);
+     struct AudioRenderInfo *renderInfo = (struct AudioRenderInfo *)render;
+-    uint32_t rendrId = renderInfo->renderId;
+-    if (rendrId >= AUDIO_VDI_STREAM_NUM_MAX) {
++    uint32_t renderId = renderInfo->renderId;
++    if (renderId >= AUDIO_VDI_STREAM_NUM_MAX) {
+         AUDIO_FUNC_LOGE("invalid param");
+         return HDF_ERR_INVALID_PARAM;
+     }
+@@ -1144,11 +1144,11 @@ uint32_t DecreaseRenderUsrCount(uint32_t renderId)
+         return usrCnt;
+     }
+     struct AudioRenderPrivVdi *priv = AudioRenderGetPrivVdi();
+-    if (priv->renderInfos[rendrId].vdiRender == NULL) {
++    if (priv->renderInfos[renderId].vdiRender == NULL) {
+         AUDIO_FUNC_LOGE("audio check render index fail, descIndex=%{public}d", renderId);
+         return usrCnt;
+     }
+-    if (priv->renderInfos[rendrId].usrCount > 0) {
++    if (priv->renderInfos[renderId].usrCount > 0) {
+         priv->renderInfos[renderId].usrCount--;
+     }
+     usrCnt = priv->renderInfos[renderId].usrCount;
+-- 
+2.50.1
+

@@ -1,0 +1,100 @@
+From e3d221a172a783128f698a40bbb1916be4c904f2 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 12:00:27 +0200
+Subject: [PATCH] runtime_core: x86_64 codegen support (asmjit/zydis deps,
+ zycore path, irtoc)
+
+Wire up x86_64 codegen into the static-core build:
+- bundle.json declares asmjit and zydis as third_party rom_dependencies so they build before runtime_core
+- arkencoder and aotdump BUILD.gns point at the canonical 'zydis/dependencies/zycore/include' (the submodule path) instead of the legacy 'zydis/zycore/include' that no longer exists in our checkout
+- libarkruntime_set_static_host links in the irtoc-generated .o files when enable_irtoc is on, matching how the device variant pulls them in.
+
+Change-Id: I66e7936544558d61639ebb797d564d1076413c1f
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ bundle.json                                           |  2 +-
+ .../compiler/optimizer/code_generator/BUILD.gn        |  4 ++--
+ static_core/compiler/tools/aotdump/BUILD.gn           |  2 +-
+ static_core/runtime/BUILD.gn                          | 11 +++++++++++
+ 4 files changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/bundle.json b/bundle.json
+index 9f9f6f3498..4e0a7d56dd 100644
+--- a/bundle.json
++++ b/bundle.json
+@@ -50,7 +50,7 @@
+                 "qos_manager",
+                 "ffrt"
+             ],
+-            "third_party": []
++            "third_party": ["asmjit", "zydis"]
+         },
+         "build": {
+             "sub_component": [
+diff --git a/static_core/compiler/optimizer/code_generator/BUILD.gn b/static_core/compiler/optimizer/code_generator/BUILD.gn
+index 7c651700a9..589dd8e1c7 100644
+--- a/static_core/compiler/optimizer/code_generator/BUILD.gn
++++ b/static_core/compiler/optimizer/code_generator/BUILD.gn
+@@ -71,7 +71,7 @@ if (enable_codegen) {
+         include_dirs = [
+           "$ark_third_party_root/asmjit/src",
+           "$ark_third_party_root/zydis/include",
+-          "$ark_third_party_root/zydis/zycore/include",
++          "$ark_third_party_root/zydis/dependencies/zycore/include",
+         ]
+         deps += [
+           "$ark_third_party_root/asmjit:libasmjit",
+@@ -168,7 +168,7 @@ if (enable_codegen) {
+         include_dirs = [
+           "$ark_third_party_root/asmjit/src",
+           "$ark_third_party_root/zydis/include",
+-          "$ark_third_party_root/zydis/zycore/include",
++          "$ark_third_party_root/zydis/dependencies/zycore/include",
+         ]
+         deps += [
+           "$ark_third_party_root/asmjit:libasmjit_frontend_static",
+diff --git a/static_core/compiler/tools/aotdump/BUILD.gn b/static_core/compiler/tools/aotdump/BUILD.gn
+index c56169c359..2dcdce7b27 100644
+--- a/static_core/compiler/tools/aotdump/BUILD.gn
++++ b/static_core/compiler/tools/aotdump/BUILD.gn
+@@ -32,7 +32,7 @@ config("aotdump_public_config") {
+     #target: amd64/x64/x86_64
+     include_dirs += [
+       "$ark_third_party_root/zydis/include",
+-      "$ark_third_party_root/zydis/zycore/include",
++      "$ark_third_party_root/zydis/dependencies/zycore/include",
+     ]
+ 
+     #target: aarch64
+diff --git a/static_core/runtime/BUILD.gn b/static_core/runtime/BUILD.gn
+index 00a3bce1f0..0bbf41d205 100644
+--- a/static_core/runtime/BUILD.gn
++++ b/static_core/runtime/BUILD.gn
+@@ -639,6 +639,13 @@ ohos_source_set("libarkruntime_set_static_host") {
+   deps = []
+   defines = []
+ 
++  if (enable_irtoc) {
++    sources += [ "$ark_root_gen_dir/generated/irtoc_lib.o" ]
++    if (is_llvm_interpreter || is_llvm_fastpath) {
++      sources += [ "$ark_root_gen_dir/generated/irtoc_llvm_lib.o" ]
++    }
++  }
++
+   public_configs = _libarkruntime_calculated_configs
+   public_configs += [ "$ark_root:ark_host_config" ]
+ 
+@@ -653,6 +660,10 @@ ohos_source_set("libarkruntime_set_static_host") {
+     "$ark_root/compiler:libarktscompiler_host",
+   ]
+ 
++  if (enable_irtoc) {
++    deps += [ "$ark_root/irtoc:irtoc_generate" ]
++  }
++
+   external_deps = _libarkruntime_calculated_external_deps
+   defines += _libarkruntime_calculated_defines
+   include_dirs = _libarkruntime_calculated_include_dirs
+-- 
+2.50.1
+

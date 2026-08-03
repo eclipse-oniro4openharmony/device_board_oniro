@@ -1,0 +1,183 @@
+From 2ce934c3107d7d0c2f87e1607d8045d879d392b8 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 12:00:53 +0200
+Subject: [PATCH] zydis: add OH GN BUILD, bundle.json, and
+ Zydis/ZycoreExportConfig.h shims
+
+Upstream zydis (and the zycore submodule) use CMake's generate_export_header() to produce ZydisExportConfig.h / ZycoreExportConfig.h with the dllexport / visibility macros. OH builds zydis via GN and never runs CMake, so ship 4-macro stubs in zydis/include/. The 'zydis/include' search path is listed first in the public config so both upstream zydis sources (#include <ZydisExportConfig.h>) and upstream zycore sources (#include <ZycoreExportConfig.h>) find them there, leaving the pinned zycore submodule pristine.
+
+BUILD.gn produces ohos_static_library libZydis and a zydis_public_config; bundle.json registers it as a 'thirdparty' subsystem component named 'zydis'.
+
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn                     | 57 ++++++++++++++++++++++++++++++++++++
+ bundle.json                  | 39 ++++++++++++++++++++++++
+ include/ZycoreExportConfig.h | 19 ++++++++++++
+ include/ZydisExportConfig.h  | 19 ++++++++++++
+ 4 files changed, 134 insertions(+)
+ create mode 100644 BUILD.gn
+ create mode 100644 bundle.json
+ create mode 100644 include/ZycoreExportConfig.h
+ create mode 100644 include/ZydisExportConfig.h
+
+diff --git a/BUILD.gn b/BUILD.gn
+new file mode 100644
+index 0000000..32ad1ca
+--- /dev/null
++++ b/BUILD.gn
+@@ -0,0 +1,57 @@
++# Copyright (c) Huawei Technologies Co., Ltd. 2021-2021. All rights reserved.
++
++import("//arkcompiler/runtime_core/static_core/ark_config.gni")
++import("//build/ohos.gni")
++
++config("zydis_public_config") {
++  include_dirs = [
++    "$ark_third_party_root/zydis/include",
++    "$ark_third_party_root/zydis/dependencies/zycore/include",
++    "$ark_third_party_root/zydis/src",
++  ]
++}
++
++ohos_static_library("libZydis") {
++  sources = [
++    "include/Zydis/Decoder.h",
++    "include/Zydis/DecoderTypes.h",
++    "include/Zydis/Formatter.h",
++    "include/Zydis/FormatterBuffer.h",
++    "include/Zydis/Internal/DecoderData.h",
++    "include/Zydis/Internal/FormatterATT.h",
++    "include/Zydis/Internal/FormatterBase.h",
++    "include/Zydis/Internal/FormatterIntel.h",
++    "include/Zydis/Internal/SharedData.h",
++    "include/Zydis/Internal/String.h",
++    "include/Zydis/MetaInfo.h",
++    "include/Zydis/Mnemonic.h",
++    "include/Zydis/Register.h",
++    "include/Zydis/SharedTypes.h",
++    "include/Zydis/ShortString.h",
++    "include/Zydis/Status.h",
++    "include/Zydis/Utils.h",
++    "include/Zydis/Zydis.h",
++    "src/Decoder.c",
++    "src/DecoderData.c",
++    "src/Formatter.c",
++    "src/FormatterATT.c",
++    "src/FormatterBase.c",
++    "src/FormatterBuffer.c",
++    "src/FormatterIntel.c",
++    "src/MetaInfo.c",
++    "src/Mnemonic.c",
++    "src/Register.c",
++    "src/SharedData.c",
++    "src/String.c",
++    "src/Utils.c",
++    "src/Zydis.c",
++  ]
++
++  configs = [ ":zydis_public_config" ]
++  if (!ark_static_standalone_build) {
++    remove_configs = [ "//build/config/compiler:chromium_code" ]
++  }
++
++  part_name = "zydis"
++  subsystem_name = "thirdparty"
++}
+diff --git a/bundle.json b/bundle.json
+new file mode 100644
+index 0000000..83a71b4
+--- /dev/null
++++ b/bundle.json
+@@ -0,0 +1,39 @@
++{
++    "name": "@ohos/zydis",
++    "description": "Zydis is a fast and lightweight x86/x86-64 disassembler and code generation library.",
++    "version": "3.2.1",
++    "license": "MIT",
++    "publishAs": "code-segment",
++    "segment": {
++        "destPath": "third_party/zydis"
++    },
++    "dirs": {},
++    "scripts": {},
++    "licensePath": "LICENSE",
++    "component": {
++        "name": "zydis",
++        "subsystem": "thirdparty",
++        "syscap": [],
++        "features": [],
++        "adapted_system_type": [
++            "standard"
++        ],
++        "rom": "",
++        "ram": "",
++        "deps": {
++            "components": [],
++            "third_party": []
++        },
++        "build": {
++            "sub_component": [
++                "//third_party/zydis:libZydis"
++            ],
++            "inner_kits": [
++                {
++                    "name": "//third_party/zydis:libZydis"
++                }
++            ],
++            "test": []
++        }
++    }
++}
+diff --git a/include/ZycoreExportConfig.h b/include/ZycoreExportConfig.h
+new file mode 100644
+index 0000000..f71faf5
+--- /dev/null
++++ b/include/ZycoreExportConfig.h
+@@ -0,0 +1,19 @@
++/*
++ * Shim for the CMake-generated ZycoreExportConfig.h.
++ *
++ * Upstream zycore-c uses CMake's generate_export_header() to produce this
++ * file, which #defines ZYCORE_EXPORT to the appropriate dllexport/visibility
++ * macro. OpenHarmony builds zycore as a static library via GN and never runs
++ * CMake, so we ship this stub instead. ZYCORE_EXPORT expands to nothing,
++ * matching ZYCORE_STATIC_DEFINE behaviour.
++ */
++
++#ifndef ZYCORE_EXPORT_CONFIG_H
++#define ZYCORE_EXPORT_CONFIG_H
++
++#define ZYCORE_EXPORT
++#define ZYCORE_NO_EXPORT
++#define ZYCORE_DEPRECATED_EXPORT
++#define ZYCORE_DEPRECATED_NO_EXPORT
++
++#endif /* ZYCORE_EXPORT_CONFIG_H */
+diff --git a/include/ZydisExportConfig.h b/include/ZydisExportConfig.h
+new file mode 100644
+index 0000000..dcf2365
+--- /dev/null
++++ b/include/ZydisExportConfig.h
+@@ -0,0 +1,19 @@
++/*
++ * Shim for the CMake-generated ZydisExportConfig.h.
++ *
++ * Upstream Zydis uses CMake's generate_export_header() to produce this file,
++ * which #defines ZYDIS_EXPORT to the appropriate dllexport/visibility macro.
++ * OpenHarmony builds Zydis as a static library via GN and never runs CMake,
++ * so we ship this stub instead. All ZYDIS_* visibility macros expand to
++ * nothing, matching ZYDIS_STATIC_DEFINE behaviour.
++ */
++
++#ifndef ZYDIS_EXPORT_CONFIG_H
++#define ZYDIS_EXPORT_CONFIG_H
++
++#define ZYDIS_EXPORT
++#define ZYDIS_NO_EXPORT
++#define ZYDIS_DEPRECATED_EXPORT
++#define ZYDIS_DEPRECATED_NO_EXPORT
++
++#endif /* ZYDIS_EXPORT_CONFIG_H */
+-- 
+2.50.1
+

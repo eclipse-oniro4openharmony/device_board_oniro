@@ -1,0 +1,60 @@
+From a85e365845dc6084c34f1b70d80b25b61484a9c3 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 11:59:45 +0200
+Subject: [PATCH 7/7] usb_ddk: null-guard listener callback, lazy-init listener
+ mgr
+
+Two robustness fixes in DdkListenerMgr: guard listener->callBack with NULL check before invocation (raced into a null on Bind/Init reorder), and lazy-init the listener list in DdkListenerMgrAdd so Bind can run before DdkListenerMgrInit without crashing.
+
+Change-Id: I2dcda8ed66d19af03c34afc69a4a772690887422
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ usb/ddk/host/src/ddk_pnp_listener_mgr.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/usb/ddk/host/src/ddk_pnp_listener_mgr.c b/usb/ddk/host/src/ddk_pnp_listener_mgr.c
+index 0b3c9c6af..c877230af 100644
+--- a/usb/ddk/host/src/ddk_pnp_listener_mgr.c
++++ b/usb/ddk/host/src/ddk_pnp_listener_mgr.c
+@@ -97,6 +97,11 @@ static int32_t DdkListenerMgrNotifyOne(const struct UsbPnpNotifyMatchInfoTable *
+             dataTmp = data;
+         }
+ 
++        if (listener->callBack == NULL) {
++            HDF_LOGW("%{public}s:callBack is NULL, cmd is %{public}u", __func__, handlePriv->cmd);
++            ret = HDF_ERR_INVALID_PARAM;
++            break;
++        }
+         if (listener->callBack(listener->priv, handlePriv->cmd, dataTmp) != HDF_SUCCESS) {
+             HDF_LOGE("%{public}s:callback failed, cmd is %{public}u", __func__, handlePriv->cmd);
+             ret = HDF_FAILURE;
+@@ -111,6 +116,10 @@ static int32_t DdkListenerMgrNotifyGadgetOne(void *priv)
+ {
+     struct UsbDdkDeviceHanldePriv *handlePriv = (struct UsbDdkDeviceHanldePriv *)priv;
+     const struct HdfDevEventlistener *listener = handlePriv->listener;
++    if (listener->callBack == NULL) {
++        HDF_LOGW("%{public}s:callBack is NULL", __func__);
++        return HDF_ERR_INVALID_PARAM;
++    }
+     if (listener->callBack(listener->priv, handlePriv->cmd, NULL) != HDF_SUCCESS) {
+         HDF_LOGE("%{public}s:callback failed", __func__);
+         return HDF_FAILURE;
+@@ -156,6 +165,15 @@ int32_t DdkListenerMgrAdd(struct HdfDevEventlistener *listener)
+         return HDF_ERR_INVALID_PARAM;
+     }
+ 
++    // Auto-init if not yet initialized (Bind can race ahead of Init)
++    if (!g_ddkListenerList.isInit) {
++        int32_t initRet = DdkListenerMgrInit();
++        if (initRet != HDF_SUCCESS) {
++            HDF_LOGE("%{public}s: lazy init failed", __func__);
++            return initRet;
++        }
++    }
++
+     // notify all device to listener
+     struct UsbDdkDeviceHanldePriv handlePriv = {.listener = listener, .cmd = USB_PNP_NOTIFY_ADD_DEVICE};
+     struct UsbDdkDeviceHanldePriv handlePriv1 = {.listener = listener, .cmd = USB_PNP_DRIVER_GADGET_ADD};
+-- 
+2.50.1
+

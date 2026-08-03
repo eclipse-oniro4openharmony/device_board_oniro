@@ -1,0 +1,91 @@
+From 94b589762bea23a0efc0ef99badfef16f8552edb Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 30 Jul 2026 12:19:32 +0000
+Subject: [PATCH 1/2] storage_daemon: fall back to local mount when the kernel
+ has no hmdfs
+
+SupportHmdfs() only asks the product whether it wants hmdfs
+(const.distributed_file_property.enabled), never whether the running
+kernel can provide it.  On a hybris/Halium port the OHOS userspace runs
+on the vendor's Android GKI kernel, which has no hmdfs driver, so
+MountHmdfs() takes the real `-t hmdfs` path and the mount fails with
+ENODEV.
+
+That failure is not contained: PrepareStartUser returns E_MOUNT_HMDFS,
+so os_account's SendToStorageAccountStart never sets isUserUnlocked, the
+account is never marked verified, and COMMON_EVENT_USER_UNLOCKED is
+never published.  Everything gated on user-unlock then stays dead --
+most visibly the medialibrary DataShareExtAbility, which checks
+IsOsAccountVerified in CheckUnlockScene and kills itself on every start,
+so the camera app ANRs waiting for getPhotoAccessHelper.
+
+Ask the kernel as well as the syscap, and fall back to LocalMount when
+the driver is absent.  LocalMount is already the supported no-hmdfs
+path: it bind-mounts /data/service/el2/<uid>/hmdfs/account onto
+/storage/media/<uid>/local and /storage/cloud/<uid>, which is all a
+device without distributed file service needs.  Devices whose kernel
+does have hmdfs (the Volla X23 carries an hmdfs backport) are
+unaffected -- they still take the real mount.
+
+Change-Id: Ib7fba3bfb5ec1f592bfc52613df18d6bfc7db505
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../storage_daemon/user/src/mount_manager.cpp | 36 +++++++++++++++++--
+ 1 file changed, 33 insertions(+), 3 deletions(-)
+
+diff --git a/services/storage_daemon/user/src/mount_manager.cpp b/services/storage_daemon/user/src/mount_manager.cpp
+index 86c431026..ca1486558 100644
+--- a/services/storage_daemon/user/src/mount_manager.cpp
++++ b/services/storage_daemon/user/src/mount_manager.cpp
+@@ -468,15 +468,45 @@ int32_t MountManager::UMountByListWithDetach(std::list<std::string> &list)
+     return result;
+ }
+ 
++static bool KernelSupportsFileSystem(const std::string &fsType)
++{
++    std::ifstream filesystems("/proc/filesystems");
++    if (!filesystems.is_open()) {
++        LOGE("failed to open /proc/filesystems, err %{public}d", errno);
++        return true;
++    }
++    // Each line is either "\t<name>" or "nodev\t<name>"; compare the last field.
++    std::string line;
++    while (std::getline(filesystems, line)) {
++        auto tab = line.rfind('\t');
++        if (tab != std::string::npos && line.substr(tab + 1) == fsType) {
++            return true;
++        }
++    }
++    return false;
++}
++
+ bool MountManager::SupportHmdfs()
+ {
+     char hmdfsEnable[HMDFS_VAL_LEN + 1] = {"false"};
+     int ret = GetParameter(HMDFS_SYS_CAP, "", hmdfsEnable, HMDFS_VAL_LEN);
+     LOGI("GetParameter hmdfsEnable %{public}s, ret %{public}d", hmdfsEnable, ret);
+-    if (strncmp(hmdfsEnable, "true", HMDFS_TRUE_LEN) == 0) {
+-        return true;
++    if (strncmp(hmdfsEnable, "true", HMDFS_TRUE_LEN) != 0) {
++        return false;
+     }
+-    return false;
++    /*
++     * The syscap only says the product wants hmdfs; it does not say the running
++     * kernel provides it.  A kernel without the driver fails the mount with
++     * ENODEV, which aborts StartUser and leaves the account unverified forever
++     * (no COMMON_EVENT_USER_UNLOCKED, so medialibrary and friends never start).
++     * Ask the kernel too, and fall back to the plain bind mounts of LocalMount
++     * when it cannot deliver -- that path is already the no-hmdfs contract.
++     */
++    if (!KernelSupportsFileSystem("hmdfs")) {
++        LOGW("hmdfs syscap is enabled but the kernel has no hmdfs, using local mount");
++        return false;
++    }
++    return true;
+ }
+ 
+ int32_t MountManager::LocalMount(int32_t userId, const std::vector<MountNodeInfo> &hmdfsMountNodeList)
+-- 
+2.50.1
+

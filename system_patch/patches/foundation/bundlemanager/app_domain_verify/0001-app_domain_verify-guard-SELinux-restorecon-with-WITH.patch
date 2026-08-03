@@ -1,0 +1,59 @@
+From 6a0baff018aca70f61fd98052311d6d141e6b671 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 28 May 2026 11:59:26 +0200
+Subject: [PATCH] app_domain_verify: guard SELinux restorecon with WITH_SELINUX
+
+Builds without SELinux drop the librestorecon dep and stub out the RestoreconRecurse call so the service still links and runs.
+
+Change-Id: Ie6e16b1fa4ac1036cee1f3e2897b33150cea27eb
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/BUILD.gn                                           | 5 ++++-
+ services/src/manager/core/app_domain_verify_mgr_service.cpp | 4 ++++
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/services/BUILD.gn b/services/BUILD.gn
+index 13a6d79..5495b71 100644
+--- a/services/BUILD.gn
++++ b/services/BUILD.gn
+@@ -105,8 +105,11 @@ ohos_shared_library("app_domain_verify_mgr_service") {
+     "relational_store:native_rdb",
+     "safwk:system_ability_fwk",
+     "samgr:samgr_proxy",
+-    "selinux_adapter:librestorecon"
+   ]
++  if (build_selinux) {
++    external_deps += [ "selinux_adapter:librestorecon" ]
++    defines += [ "WITH_SELINUX" ]
++  }
+ 
+   sanitize = {
+     boundary_sanitize = true
+diff --git a/services/src/manager/core/app_domain_verify_mgr_service.cpp b/services/src/manager/core/app_domain_verify_mgr_service.cpp
+index de70b12..d399241 100644
+--- a/services/src/manager/core/app_domain_verify_mgr_service.cpp
++++ b/services/src/manager/core/app_domain_verify_mgr_service.cpp
+@@ -29,7 +29,9 @@
+ #include "sa_interface/app_domain_verify_mgr_service.h"
+ #include "common_event_manager.h"
+ #include "common_event_support.h"
++#ifdef WITH_SELINUX
+ #include "policycoreutils.h"
++#endif
+ #include <sys/stat.h>
+ #include <unistd.h>
+ namespace OHOS {
+@@ -71,8 +73,10 @@ bool AppDomainVerifyMgrService::ResetDBSecurityByPath()
+         return false;
+     }
+ 
++#ifdef WITH_SELINUX
+     auto ret = RestoreconRecurse(Constants::SERVICE_PATH);
+     APP_DOMAIN_VERIFY_HILOGI(APP_DOMAIN_VERIFY_MGR_MODULE_SERVICE, "RestoreconRecurse %{public}d.", ret);
++#endif
+     return ERR_OK;
+ }
+ 
+-- 
+2.50.1
+

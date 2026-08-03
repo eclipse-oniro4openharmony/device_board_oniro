@@ -1,0 +1,102 @@
+From 22e6860dfb0ef7c6448090a1c3e8425c037414e0 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Sat, 25 Jul 2026 01:10:47 +0000
+Subject: [PATCH 04/10] graphic_2d: bail out of GPU context creation when no
+ EGL context is current
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RenderContextGL::CreateShareContext() reports eglCreateContext /
+eglMakeCurrent failures with a log line only; callers charge ahead and
+hand Skia a thread with no current EGL context.  On the Volla Plinius
+(ansuz, Mali G615 / Android 14 EGL under libhybris) the sub-thread share
+context never becomes current, so GrGLInterfaces::MakeEGL()'s first call
+lands in the Android EGL 'no context' dispatch stubs (bionic TLS vs
+musl) and render_service SIGSEGVs in a loop.
+
+Guard the three sub-thread GPU-context creation sites (RSSubThread,
+RSBackgroundThread, RSColorPickerThread) with an
+eglGetCurrentContext() == EGL_NO_CONTEXT check and return nullptr — the
+thread then runs without a GPU cache, which the callers already handle.
+
+Change-Id: I9f86c41df6eded9f0428e8158c90055f9ff60a7f
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../core/feature/uifirst/rs_sub_thread.cpp               | 9 +++++++++
+ .../src/common/rs_background_thread.cpp                  | 6 ++++++
+ .../src/feature/color_picker/rs_color_picker_thread.cpp  | 7 +++++++
+ 3 files changed, 22 insertions(+)
+
+diff --git a/rosen/modules/render_service/core/feature/uifirst/rs_sub_thread.cpp b/rosen/modules/render_service/core/feature/uifirst/rs_sub_thread.cpp
+index d7588f1bd2..c6244355bd 100644
+--- a/rosen/modules/render_service/core/feature/uifirst/rs_sub_thread.cpp
++++ b/rosen/modules/render_service/core/feature/uifirst/rs_sub_thread.cpp
+@@ -23,6 +23,7 @@
+ #include "feature/hdr/rs_hdr_util.h"
+ #include "feature/uifirst/rs_sub_thread_manager.h"
+ #include "feature/uifirst/rs_uifirst_manager.h"
++#include "EGL/egl.h"
+ #include "GLES3/gl3.h"
+ #include "include/core/SkCanvas.h"
+ #include "memory/rs_memory_manager.h"
+@@ -237,6 +238,14 @@ std::shared_ptr<Drawing::GPUContext> RSSubThread::CreateShareGrContext()
+ #ifdef RS_ENABLE_GL
+     if (RSSystemProperties::GetGpuApiType() == GpuApiType::OPENGL) {
+         renderContext_->CreateShareContext();
++        /* hybris: CreateShareContext() failures are log-only.  If no EGL context
++         * became current on this sub-thread, Skia's MakeEGL would call GL through
++         * the Android EGL "no context" dispatch stubs and SIGSEGV (bionic TLS vs
++         * musl).  Bail out — the sub-thread then runs without a GPU cache. */
++        if (eglGetCurrentContext() == EGL_NO_CONTEXT) {
++            RS_LOGE("CreateShareGrContext: no current EGL context on sub-thread, GPU context disabled");
++            return nullptr;
++        }
+         auto gpuContext = std::make_shared<Drawing::GPUContext>();
+         Drawing::GPUContextOptions options;
+         auto handler = std::make_shared<MemoryHandler>();
+diff --git a/rosen/modules/render_service_base/src/common/rs_background_thread.cpp b/rosen/modules/render_service_base/src/common/rs_background_thread.cpp
+index 86b5a626a9..d9b1598ac4 100644
+--- a/rosen/modules/render_service_base/src/common/rs_background_thread.cpp
++++ b/rosen/modules/render_service_base/src/common/rs_background_thread.cpp
+@@ -100,6 +100,12 @@ std::shared_ptr<Drawing::GPUContext> RSBackgroundThread::CreateShareGPUContext()
+             return nullptr;
+         }
+         renderContext_->CreateShareContext();
++        /* hybris: bail if no EGL context became current — see
++         * RSSubThread::CreateShareGrContext. */
++        if (eglGetCurrentContext() == EGL_NO_CONTEXT) {
++            RS_LOGE("RSBackgroundThread: no current EGL context, GPU context disabled");
++            return nullptr;
++        }
+ 
+         Drawing::GPUContextOptions options = {};
+         auto handler = std::make_shared<MemoryHandler>();
+diff --git a/rosen/modules/render_service_base/src/feature/color_picker/rs_color_picker_thread.cpp b/rosen/modules/render_service_base/src/feature/color_picker/rs_color_picker_thread.cpp
+index e7d144714c..4d82ad9c34 100644
+--- a/rosen/modules/render_service_base/src/feature/color_picker/rs_color_picker_thread.cpp
++++ b/rosen/modules/render_service_base/src/feature/color_picker/rs_color_picker_thread.cpp
+@@ -17,6 +17,7 @@
+ 
+ #include <chrono>
+ 
++#include "EGL/egl.h"
+ #include "platform/common/rs_log.h"
+ #include "platform/common/rs_system_properties.h"
+ 
+@@ -142,6 +143,12 @@ std::shared_ptr<Drawing::GPUContext> RSColorPickerThread::CreateShareGPUContext(
+             return nullptr;
+         }
+         renderContext_->CreateShareContext();
++        /* hybris: bail if no EGL context became current — see
++         * RSSubThread::CreateShareGrContext. */
++        if (eglGetCurrentContext() == EGL_NO_CONTEXT) {
++            RS_LOGE("RSColorPickerThread: no current EGL context, GPU context disabled");
++            return nullptr;
++        }
+ 
+         Drawing::GPUContextOptions options = {};
+         auto handler = std::make_shared<MemoryHandler>();
+-- 
+2.50.1
+
