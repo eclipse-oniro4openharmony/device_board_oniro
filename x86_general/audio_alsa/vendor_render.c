@@ -71,10 +71,11 @@ static int32_t RenderInitImpl(struct AlsaRender *renderIns)
     return HDF_SUCCESS;
 }
 
-static int32_t RenderSelectSceneImpl(struct AlsaRender *renderIns, enum AudioPortPin descPins,
-    const struct PathDeviceInfo *deviceInfo)
+static int32_t RenderSelectSceneImpl(struct AlsaRender *renderIns, const struct AudioHwRenderParam *handleData)
 {
-    renderIns->descPins = descPins;
+    CHECK_NULL_PTR_RETURN_DEFAULT(renderIns);
+    CHECK_NULL_PTR_RETURN_DEFAULT(handleData);
+    renderIns->descPins = handleData->renderMode.hwInfo.deviceDescript.pins;
     return HDF_SUCCESS;
 }
 
@@ -166,8 +167,9 @@ static int32_t RenderSetMuteImpl(struct AlsaRender *renderIns, bool muteFlag)
     return HDF_SUCCESS;
 }
 
-static int32_t RenderStartImpl(struct AlsaRender *renderIns)
+static int32_t RenderStartImpl(struct AlsaRender *renderIns, const struct AudioHwRenderParam *handleData)
 {
+    (void)handleData;
     int32_t ret;
     struct AlsaMixerCtlElement elem;
     struct AlsaSoundCard *cardIns = (struct AlsaSoundCard *)renderIns;
@@ -271,4 +273,12 @@ int32_t RenderOverrideFunc(struct AlsaRender *renderIns)
     }
 
     return HDF_SUCCESS;
+}
+
+/* QEMU exposes a single ALSA playback/capture device (ES1370/AC97), so every
+ * scene resolves to the default device (-1 => let the adapter pick card 0). */
+int32_t RenderGetSceneDev(enum AudioCategory scene)
+{
+    (void)scene;
+    return -1;
 }

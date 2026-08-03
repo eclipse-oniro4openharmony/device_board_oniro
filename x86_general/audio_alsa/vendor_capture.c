@@ -60,10 +60,11 @@ static int32_t CaptureInitImpl(struct AlsaCapture* captureIns)
     return HDF_SUCCESS;
 }
 
-static int32_t CaptureSelectSceneImpl(struct AlsaCapture *captureIns, enum AudioPortPin descPins,
-    const struct PathDeviceInfo *deviceInfo)
+static int32_t CaptureSelectSceneImpl(struct AlsaCapture *captureIns, const struct AudioHwCaptureParam *handleData)
 {
-    captureIns->descPins = descPins;
+    CHECK_NULL_PTR_RETURN_DEFAULT(captureIns);
+    CHECK_NULL_PTR_RETURN_DEFAULT(handleData);
+    captureIns->descPins = handleData->captureMode.hwInfo.deviceDescript.pins;
     return HDF_SUCCESS;
 }
 
@@ -146,8 +147,9 @@ static int32_t CaptureSetMuteImpl(struct AlsaCapture *captureIns, bool muteFlag)
     return HDF_SUCCESS;
 }
 
-static int32_t CaptureStartImpl(struct AlsaCapture *captureIns)
+static int32_t CaptureStartImpl(struct AlsaCapture *captureIns, const struct AudioHwCaptureParam *handleData)
 {
+    (void)handleData;
     struct AlsaMixerCtlElement mixerItem;
     CHECK_NULL_PTR_RETURN_DEFAULT(captureIns);
 
@@ -222,4 +224,12 @@ int32_t CaptureOverrideFunc(struct AlsaCapture *captureIns)
     }
     
     return HDF_SUCCESS;
+}
+
+/* QEMU exposes a single ALSA playback/capture device (ES1370/AC97), so every
+ * scene resolves to the default device (-1 => let the adapter pick card 0). */
+int32_t CaptureGetSceneDev(enum AudioCategory scene)
+{
+    (void)scene;
+    return -1;
 }
