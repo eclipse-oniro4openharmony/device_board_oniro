@@ -1,0 +1,234 @@
+From dfb56905bc619930c5938b17c32844149b99a37a Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 7 Aug 2026 10:03:51 +0000
+Subject: [PATCH 1/2] bms: make the HAP signature bypass an opt-in build arg
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The bypass was unconditional: services/bundlemgr/BUILD.gn defined
+X86_EMULATOR_MODE for libbms and bundle_parser regardless of platform,
+and the code-signature paths in BaseBundleInstaller swallowed installd's
+EnforceCodeSignForApp failures outright. Every image built from this
+tree therefore accepted unsigned and tampered HAPs, which is fine for
+bring-up and unshippable for a release.
+
+Put it behind a new gn arg, bundle_framework_allow_unsigned_hap,
+declared in appexecfwk.gni and defaulting to false. With the default,
+every touched file compiles exactly as upstream — the bypass is not in
+the binary at all, so it cannot be turned on at runtime. With the arg
+set, behaviour is identical to the previous unconditional patch:
+
+  ./build.sh --product-name <product> --ccache \
+      --gn-args "bundle_framework_allow_unsigned_hap=true"
+
+The arg only concerns real devices. The x86 emulator keeps bypassing
+verification by default: is_emulator implies both defines, since the
+emulator is a development artefact that never ships. The gn-time warning
+is therefore raised only for the explicit opt-in, not for is_emulator.
+
+Two defines are involved. X86_EMULATOR_MODE enables the upstream
+emulator paths (no-fail in CheckMultipleHapsSignInfo, appId cleared on
+bad provision info, ACL_IGNORE_CHECK for unsigned HAPs in
+bundle_permission_mgr.cpp). BMS_ALLOW_UNSIGNED_HAP guards the four sites
+the emulator mode does not cover: VerifyCodeSignature and
+VerifyCodeSignatureForHap, which call into installd's
+EnforceCodeSignForApp and still reject unsigned HAPs with
+ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FAILED (8519738);
+FindSignatureFileDir / CheckSignatureFileDir; and
+BundleVerifyMgr::EnableDebug() at BMS init, which loads the debug root
+CA and trusted-source set and must never be reached in a release image.
+A one-line APP_LOGW marks a bypass image in hilog at BMS init.
+
+Two hunks the previous patch carried in CheckMultipleHapsSignInfo are
+dropped rather than guarded: they edited code inside
+'#ifndef X86_EMULATOR_MODE' while the same patch defined that macro, so
+they were never compiled. Reverting them to upstream is what restores
+enforcement when the arg is off, and is a no-op when it is on.
+
+Verified on a Volla Plinius (arm64, is_emulator false): with the default
+an unsigned HAP is refused ("no signature file", 9568320) while a HAP
+signed with the OpenHarmony Application Release chain still installs and
+all 53 preinstalled bundles survive a reboot; with the arg set the
+unsigned HAP installs again. 'strings libbms.z.so | grep -c "but
+bypassing"' gives 0 and 3 respectively.
+
+Change-Id: I89ad92f61dd71c4f9ce20a324591c3206f233d61
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ appexecfwk.gni                                | 15 ++++++++++++
+ services/bundlemgr/BUILD.gn                   | 20 +++++++++++++---
+ .../bundlemgr/src/base_bundle_installer.cpp   | 23 +++++++++++++++++++
+ .../bundlemgr/src/bundle_install_checker.cpp  |  5 ++++
+ services/bundlemgr/src/bundle_mgr_service.cpp |  9 ++++++++
+ 5 files changed, 69 insertions(+), 3 deletions(-)
+
+diff --git a/appexecfwk.gni b/appexecfwk.gni
+index 7afc1f829..243194784 100644
+--- a/appexecfwk.gni
++++ b/appexecfwk.gni
+@@ -40,6 +40,21 @@ declare_args() {
+   bundle_framework_form_dimension_2_3 = false
+   bundle_framework_form_dimension_3_3 = false
+ 
++  # Accept HAPs that fail signature and code-signature verification.
++  #
++  # DEVELOPMENT BUILDS ONLY. It disables the checks that keep unsigned or
++  # tampered application packages off the device, so a device image built
++  # with it must never be released. Left false, the bypass is not compiled
++  # in at all and verification behaves exactly as upstream.
++  #
++  # This arg only concerns real devices. The x86 emulator (is_emulator)
++  # bypasses verification unconditionally — see services/bundlemgr/BUILD.gn.
++  #
++  # Enable for a single device build with:
++  #   ./build.sh --product-name <product> --ccache \
++  #       --gn-args "bundle_framework_allow_unsigned_hap=true"
++  bundle_framework_allow_unsigned_hap = false
++
+   ability_runtime_enable = true
+   account_enable = true
+   configpolicy_enable = true
+diff --git a/services/bundlemgr/BUILD.gn b/services/bundlemgr/BUILD.gn
+index 9d1a49ed0..e13a7c689 100644
+--- a/services/bundlemgr/BUILD.gn
++++ b/services/bundlemgr/BUILD.gn
+@@ -217,7 +217,7 @@ ohos_source_set("bundle_parser") {
+     defines += [ "BUNDLE_FRAMEWORK_OVERLAY_INSTALLATION" ]
+   }
+ 
+-  if (is_emulator) {
++  if (is_emulator || bundle_framework_allow_unsigned_hap) {
+     defines += [ "X86_EMULATOR_MODE" ]
+   }
+   part_name = "bundle_framework"
+@@ -311,8 +311,22 @@ ohos_shared_library("libbms") {
+     "LOG_DOMAIN = 0xD001120",
+   ]
+ 
+-  if (is_emulator) {
+-    defines += [ "X86_EMULATOR_MODE" ]
++  # The x86 emulator bypasses HAP signature verification by default — it is a
++  # development artefact and never ships. Real devices must opt in explicitly
++  # with bundle_framework_allow_unsigned_hap.
++  if (is_emulator || bundle_framework_allow_unsigned_hap) {
++    defines += [
++      "X86_EMULATOR_MODE",
++      "BMS_ALLOW_UNSIGNED_HAP",
++    ]
++  }
++
++  # Warn only for the explicit opt-in: on the emulator this is the intended
++  # default, on a device image it is a release blocker.
++  if (bundle_framework_allow_unsigned_hap && !is_emulator) {
++    print("*** bundle_framework_allow_unsigned_hap=true: HAP signature " +
++          "verification is BYPASSED in libbms. Development builds only — " +
++          "do not release this image. ***")
+   }
+ 
+   if (build_variant == "user") {
+diff --git a/services/bundlemgr/src/base_bundle_installer.cpp b/services/bundlemgr/src/base_bundle_installer.cpp
+index d17c1f01c..e930023e0 100644
+--- a/services/bundlemgr/src/base_bundle_installer.cpp
++++ b/services/bundlemgr/src/base_bundle_installer.cpp
+@@ -6346,7 +6346,15 @@ ErrCode BaseBundleInstaller::VerifyCodeSignatureForNativeFiles(InnerBundleInfo &
+     codeSignatureParam.isPreInstalledBundle = IsDataPreloadHap(modulePath_) ? false : info.IsPreInstallApp();
+     codeSignatureParam.isCompileSdkOpenHarmony = (compileSdkType == COMPILE_SDK_TYPE_OPEN_HARMONY);
+     bundleInstallChecker_->ProcessCodeSignatureParam(verifyRes_, codeSignatureParam);
++#ifdef BMS_ALLOW_UNSIGNED_HAP
++    auto verifyRet = InstalldClient::GetInstance()->VerifyCodeSignature(codeSignatureParam);
++    if (verifyRet != ERR_OK) {
++        LOG_W(BMS_TAG_INSTALLER, "VerifyCodeSignature failed: %{public}d, but bypassing...", verifyRet);
++    }
++    return ERR_OK;
++#else
+     return InstalldClient::GetInstance()->VerifyCodeSignature(codeSignatureParam);
++#endif
+ }
+ 
+ ErrCode BaseBundleInstaller::VerifyCodeSignatureForHap(const std::unordered_map<std::string, InnerBundleInfo> &infos,
+@@ -6383,7 +6391,15 @@ ErrCode BaseBundleInstaller::VerifyCodeSignatureForHap(const std::unordered_map<
+     codeSignatureParam.isPreInstalledBundle = IsDataPreloadHap(realHapPath) ? false : info.IsPreInstallApp();
+     codeSignatureParam.isCompressNativeLibrary = info.IsCompressNativeLibs(info.GetCurModuleName());
+     bundleInstallChecker_->ProcessCodeSignatureParam(verifyRes_, codeSignatureParam);
++#ifdef BMS_ALLOW_UNSIGNED_HAP
++    auto verifyRet = InstalldClient::GetInstance()->VerifyCodeSignatureForHap(codeSignatureParam);
++    if (verifyRet != ERR_OK) {
++        LOG_W(BMS_TAG_INSTALLER, "VerifyCodeSignatureForHap failed: %{public}d, but bypassing...", verifyRet);
++    }
++    return ERR_OK;
++#else
+     return InstalldClient::GetInstance()->VerifyCodeSignatureForHap(codeSignatureParam);
++#endif
+ }
+ 
+ ErrCode BaseBundleInstaller::CheckSoEncryption(InnerBundleInfo &info, const std::string &cpuAbi,
+@@ -6593,8 +6609,15 @@ ErrCode BaseBundleInstaller::FindSignatureFileDir(const std::string &moduleName,
+     }
+     auto iterator = verifyCodeParams_.find(moduleName);
+     if (iterator == verifyCodeParams_.end()) {
++#ifdef BMS_ALLOW_UNSIGNED_HAP
++        LOG_W(BMS_TAG_INSTALLER, "no signature file dir exist of module %{public}s, but bypassing...",
++            moduleName.c_str());
++        signatureFileDir = "";
++        return ERR_OK;
++#else
+         LOG_E(BMS_TAG_INSTALLER, "no signature file dir exist of module %{public}s", moduleName.c_str());
+         return ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FAILED;
++#endif
+     }
+     signatureFileDir = verifyCodeParams_.at(moduleName);
+ 
+diff --git a/services/bundlemgr/src/bundle_install_checker.cpp b/services/bundlemgr/src/bundle_install_checker.cpp
+index 1e0403289..e945827af 100644
+--- a/services/bundlemgr/src/bundle_install_checker.cpp
++++ b/services/bundlemgr/src/bundle_install_checker.cpp
+@@ -1832,6 +1832,10 @@ ErrCode BundleInstallChecker::CheckIsolationMode(const std::unordered_map<std::s
+ 
+ ErrCode BundleInstallChecker::CheckSignatureFileDir(const std::string &signatureFileDir) const
+ {
++#ifdef BMS_ALLOW_UNSIGNED_HAP
++    // FindSignatureFileDir hands us an empty dir for modules that ship no .sig
++    return ERR_OK;
++#else
+     ErrCode ret = BundleUtil::CheckFileName(signatureFileDir);
+     if (ret != ERR_OK) {
+         LOG_E(BMS_TAG_INSTALLER, "code signature file dir is invalid");
+@@ -1847,6 +1851,7 @@ ErrCode BundleInstallChecker::CheckSignatureFileDir(const std::string &signature
+         return ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FILE_IS_INVALID;
+     }
+     return ERR_OK;
++#endif
+ }
+ 
+ ErrCode BundleInstallChecker::CheckDeveloperMode(
+diff --git a/services/bundlemgr/src/bundle_mgr_service.cpp b/services/bundlemgr/src/bundle_mgr_service.cpp
+index a225a8816..57e909232 100644
+--- a/services/bundlemgr/src/bundle_mgr_service.cpp
++++ b/services/bundlemgr/src/bundle_mgr_service.cpp
+@@ -35,6 +35,9 @@
+ #include "perf_profile.h"
+ #include "scope_guard.h"
+ #include "bundle_backup_mgr.h"
++#ifdef BMS_ALLOW_UNSIGNED_HAP
++#include "bundle_verify_mgr.h"
++#endif
+ #include "system_ability_definition.h"
+ #include "system_ability_helper.h"
+ #include "xcollie_helper.h"
+@@ -132,6 +135,12 @@ bool BundleMgrService::Init()
+     InitBmsParam();
+     APP_LOGI_NOFUNC("BundleMgrService InitPreInstallExceptionMgr");
+     InitPreInstallExceptionMgr();
++#ifdef BMS_ALLOW_UNSIGNED_HAP
++    // Marker so a bypass image can be told apart from a release one on device
++    APP_LOGW("BMS built with BMS_ALLOW_UNSIGNED_HAP: HAP signature verification is bypassed");
++    // Loads the debug root CA / trusted-source set so debug-signed HAPs verify
++    BundleVerifyMgr::EnableDebug();
++#endif
+     CHECK_INIT_RESULT(InitBundleMgrHost(), "Init bundleMgr fail");
+     CHECK_INIT_RESULT(InitBundleInstaller(), "Init bundleInstaller fail");
+     InitBundleDataMgr();
+-- 
+2.50.1
+

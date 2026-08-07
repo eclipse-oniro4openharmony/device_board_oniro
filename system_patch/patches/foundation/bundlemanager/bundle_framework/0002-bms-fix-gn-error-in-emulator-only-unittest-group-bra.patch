@@ -1,0 +1,61 @@
+From 4e601117c0dcb9704e3998dd71dac21523b5c016 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 7 Aug 2026 10:03:51 +0000
+Subject: [PATCH 2/2] bms: fix gn error in emulator-only unittest group
+ branches
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two `group("unittest")` targets do `defines += [ "X86_EMULATOR_MODE" ]` in
+their `if (is_emulator)` branch. A gn group has no `defines` variable, so
+this is an undefined identifier and `gn gen` aborts:
+
+  ERROR at //foundation/bundlemanager/bundle_framework/services/bundlemgr/
+  test/unittest/bms_install_daemon_test/BUILD.gn:442:7: Undefined identifier.
+
+It only fires when is_emulator is true, which is why it has gone unnoticed.
+Setting defines on a group would do nothing in any case — the real intent of
+the branch is the `else`, which drops two test targets on the emulator. Keep
+just that, inverted.
+
+Change-Id: Ieb0e3688ac2e4151789554b19842ba371c23fd29
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../test/unittest/bms_bundle_installer_test/BUILD.gn          | 4 +---
+ .../bundlemgr/test/unittest/bms_install_daemon_test/BUILD.gn  | 4 +---
+ 2 files changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/services/bundlemgr/test/unittest/bms_bundle_installer_test/BUILD.gn b/services/bundlemgr/test/unittest/bms_bundle_installer_test/BUILD.gn
+index 62b528c1a..5979182cb 100755
+--- a/services/bundlemgr/test/unittest/bms_bundle_installer_test/BUILD.gn
++++ b/services/bundlemgr/test/unittest/bms_bundle_installer_test/BUILD.gn
+@@ -2143,9 +2143,7 @@ group("unittest") {
+       ":BmsSystemBundleInstallerTest",
+     ]
+ 
+-    if (is_emulator) {
+-      defines += [ "X86_EMULATOR_MODE" ]
+-    } else {
++    if (!is_emulator) {
+       deps += [
+         ":BmsBundleInstallerPermissionTest",
+         ":BmsBundleInstallerTest",
+diff --git a/services/bundlemgr/test/unittest/bms_install_daemon_test/BUILD.gn b/services/bundlemgr/test/unittest/bms_install_daemon_test/BUILD.gn
+index 54228bdaf..565082aab 100644
+--- a/services/bundlemgr/test/unittest/bms_install_daemon_test/BUILD.gn
++++ b/services/bundlemgr/test/unittest/bms_install_daemon_test/BUILD.gn
+@@ -438,9 +438,7 @@ group("unittest") {
+       ":BmsInstallDaemonTest",
+       ":BmsInstalldOperatorTest"
+     ]
+-    if (is_emulator) {
+-      defines += [ "X86_EMULATOR_MODE" ]
+-    } else {
++    if (!is_emulator) {
+       deps += [
+         ":BmsInstallDaemonHostImplTest",
+         ":BmsInstallDaemonOperatorTest",
+-- 
+2.50.1
+
