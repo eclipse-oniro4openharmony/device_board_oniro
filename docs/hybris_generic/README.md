@@ -93,6 +93,9 @@ bash device/board/oniro/system_patch/do_patch.sh
 bash vendor/oniro/oniro-haps/build-oniro-haps.sh
 
 # Build  (ThinLTO off + symbol_level=1 are the in-tree defaults; see CLAUDE.md)
+# HAP signature verification is enforced.  To sideload unsigned HAPs during
+# bring-up, add --gn-args "bundle_framework_allow_unsigned_hap=true" — never
+# on a build that gets released.
 ./build.sh --product-name hybris_generic --ccache
 bash device/board/oniro/hybris_generic/kernel/x23/build_super_img.sh
 bash device/board/oniro/hybris_generic/kernel/x23/build_boot_img_chainload.sh
