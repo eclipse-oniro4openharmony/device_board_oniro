@@ -62,6 +62,13 @@
 #define HOSTHALS_FILE  WAYDROID_DIR "/hosthals.xml"
 #define PID_FILE       WAYDROID_DIR "/waydroidd.pid"
 
+/* waydroid_compositor's XDG_RUNTIME_DIR; bound into the container at
+ * /run/xdg (waydroid.xdg_runtime_dir / waydroid.wayland_display in the
+ * prop file point the hwcomposer there). */
+#define XDG_DIR        WAYDROID_DIR "/run/xdg"
+#define WL_SOCKET      XDG_DIR "/wayland-0"
+#define WL_SOCKET_WAIT_SEC 30
+
 #define DATA_IMG_BYTES (6LL * 1024 * 1024 * 1024)
 
 /* Halium world as mounted by the chainload (OHOS-namespace view). */
@@ -138,7 +145,10 @@ static void bind_node(const char *src, const char *dst)
 {
     struct stat st;
     if (stat(src, &st) < 0) return;
-    if (touch_file(dst) < 0) {
+    /* Only create the mountpoint when it is missing — binding OVER an
+     * existing file (e.g. a patched binary on the ro vendor image) must
+     * not try to write to it. */
+    if (stat(dst, &st) < 0 && touch_file(dst) < 0) {
         logmsg("touch %s: %s (skipped)", dst, strerror(errno));
         return;
     }
@@ -364,6 +374,17 @@ static int child_main(void *arg)
                    strerror(errno));
     }
 
+    /* Binary-patched composer service (W3): stock main() does
+     * configureRpcThreadpool(4) while the waydroid hwc module's binder
+     * thread does configureRpcThreadpool(1) — if the module thread runs
+     * after main has started the pool, libhidlbase aborts ("Binder
+     * threadpool cannot be shrunk after starting").  Upstream wins that
+     * race by luck; this container loses it every boot.  The patch flips
+     * main's 4 to 1 (equal values can never shrink), one mov-immediate
+     * at 0x7138 — see halium-blobs/waydroid/patches/README. */
+    bind_node(WAYDROID_DIR "/patches/composer-service",
+              ROOTFS "/vendor/bin/hw/android.hardware.graphics.composer@2.1-service");
+
     /* /data: the ext4 loop image, rw. */
     loop_dev_path(g_dat_loop, dev, sizeof dev);
     if (mount(dev, ROOTFS "/data", "ext4",
@@ -459,7 +480,14 @@ static int child_main(void *arg)
     (void)mount("tmpfs", ROOTFS "/run", "tmpfs", MS_NODEV, NULL);
     (void)mount("tmpfs", ROOTFS "/mnt_extra", "tmpfs", MS_NODEV, NULL);
     (void)mount("tmpfs", ROOTFS "/cache", "tmpfs", MS_NODEV, NULL);
-    mkdir_p(ROOTFS "/run/xdg", 0777);   /* wayland socket bind target (W3) */
+
+    /* Compositor socket dir at /run/xdg (W3).  The DIRECTORY is bound,
+     * not the socket file: a bind of the dir shares the underlying
+     * dentry tree, so a socket the compositor re-creates after a restart
+     * shows up in the container, whereas a file bind would pin the old
+     * dead inode. */
+    mkdir_p(ROOTFS "/run/xdg", 0777);
+    bind_dir(XDG_DIR, ROOTFS "/run/xdg");
 
     /* Container env: mimic lxc-start (minimal env + container=lxc). */
     clearenv();
@@ -542,6 +570,65 @@ static void on_term(int sig)
     if (g_child > 0) kill(g_child, SIGKILL);
 }
 
+/* keychord-wedge guard (W3).  lineage init's keychord scanner
+ * (system/core/init/keychords.cpp) inotify-watches /dev/input and does a
+ * BLOCKING O_RDONLY open of every new node — including the FIFOs the
+ * waydroid hwc creates there for input forwarding.  A FIFO with no
+ * writer blocks that open forever, freezing container init (it is the
+ * zombie reaper AND the ctl.* queue; the queue then overflows and
+ * services stop restarting).  Holding an O_RDWR fd on each fifo from
+ * the host side means a writer always exists, so init's open returns at
+ * once (it closes the fd right after its evdev ioctls fail — it never
+ * steals input events).  Re-checked periodically because do_hotplug in
+ * the hwc remove()s + re-mkfifo()s the touch fifo on display resize. */
+static int g_fifo_fd[2] = { -1, -1 };
+
+static void hold_fifo_writers(pid_t child)
+{
+    static const char *names[2] = { "wl_touch_events", "wl_keyboard_events" };
+    for (int i = 0; i < 2; ++i) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof path, "/proc/%ld/root/dev/input/%s",
+                 (long)child, names[i]);
+        struct stat st;
+        if (stat(path, &st) < 0 || !S_ISFIFO(st.st_mode)) continue;
+        if (g_fifo_fd[i] >= 0) {
+            struct stat fst;
+            if (fstat(g_fifo_fd[i], &fst) == 0 && fst.st_ino == st.st_ino)
+                continue;   /* same fifo, writer already held */
+            close(g_fifo_fd[i]);
+            g_fifo_fd[i] = -1;
+        }
+        g_fifo_fd[i] = open(path, O_RDWR | O_CLOEXEC | O_NONBLOCK);
+        if (g_fifo_fd[i] >= 0)
+            logmsg("holding writer fd on %s (keychord-wedge guard)",
+                   names[i]);
+    }
+}
+
+/* Start-order handshake (plan §5 W3): the compositor owns the socket, so
+ * the socket itself is the readiness signal — more direct than a param.
+ * A timeout is not fatal: the container's hwcomposer service crashes on
+ * connect failure and init restarts it, so a late compositor is absorbed
+ * (just noisily). */
+static void wait_for_compositor(void)
+{
+    struct stat st;
+    for (int i = 0; i < WL_SOCKET_WAIT_SEC * 2; ++i) {
+        if (stat(WL_SOCKET, &st) == 0 && S_ISSOCK(st.st_mode)) {
+            if (i > 0)
+                logmsg("compositor socket appeared after %d ms", i * 500);
+            return;
+        }
+        if (i == 0)
+            logmsg("waiting up to %ds for %s ...", WL_SOCKET_WAIT_SEC,
+                   WL_SOCKET);
+        usleep(500 * 1000);
+    }
+    logmsg("WARNING: no compositor socket at %s — container boots headless "
+           "until one appears", WL_SOCKET);
+}
+
 static pid_t read_pidfile(void)
 {
     FILE *f = fopen(PID_FILE, "r");
@@ -590,6 +677,15 @@ int main(int argc, char **argv)
     if (data_img_prepare() < 0)
         die("data.img prepare failed: %s", strerror(errno));
 
+    /* Bind target for the compositor socket dir: make sure it exists in
+     * the host namespace even if the compositor has never run, so the
+     * child's bind always succeeds and a compositor started later is
+     * still seen through it. */
+    if (mkdir_p(XDG_DIR, 0755) < 0)
+        logmsg("mkdir %s: %s (wayland bind will be skipped)", XDG_DIR,
+               strerror(errno));
+    wait_for_compositor();
+
     g_sys_loop = loop_attach(SYSTEM_IMG, 1, &g_sys_dev);
     if (g_sys_loop < 0) die("loop attach system.img: %s", strerror(errno));
     g_ven_loop = loop_attach(VENDOR_IMG, 1, &g_ven_dev);
@@ -614,8 +710,15 @@ int main(int argc, char **argv)
     signal(SIGINT,  on_term);
 
     int wst = 0;
-    while (waitpid(g_child, &wst, 0) < 0 && errno == EINTR)
-        ;
+    for (;;) {
+        pid_t r = waitpid(g_child, &wst, WNOHANG);
+        if (r == g_child)
+            break;
+        if (r < 0 && errno != EINTR)
+            break;
+        hold_fifo_writers(g_child);
+        sleep(2);
+    }
     if (WIFEXITED(wst))
         logmsg("container init exited with status %d", WEXITSTATUS(wst));
     else if (WIFSIGNALED(wst))

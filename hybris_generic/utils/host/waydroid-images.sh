@@ -56,6 +56,15 @@ push() {
             $HDC file send "$BLOB_DIR/$extra" "$DEVICE_DIR/$extra"
         fi
     done
+    # Binary patches bind-mounted over image files by waydroidd (see
+    # patches/README).
+    if [ -d "$BLOB_DIR/patches" ]; then
+        $HDC shell "mkdir -p $DEVICE_DIR/patches"
+        for p in "$BLOB_DIR"/patches/*; do
+            [ -f "$p" ] || continue
+            $HDC file send "$p" "$DEVICE_DIR/patches/$(basename "$p")"
+        done
+    fi
     $HDC shell "ls -la $DEVICE_DIR $DEVICE_DIR/images"
 }
 
