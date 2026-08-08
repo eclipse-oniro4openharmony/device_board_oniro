@@ -139,6 +139,30 @@ static int mknod_min(const char *path, mode_t mode, dev_t dev)
     return 0;
 }
 
+static int copy_file(const char *src, const char *dst)
+{
+    int in = open(src, O_RDONLY | O_CLOEXEC);
+    if (in < 0) return -1;
+    int out = open(dst, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (out < 0) { close(in); return -1; }
+    char buf[8192];
+    ssize_t n;
+    int rc = 0;
+    while ((n = read(in, buf, sizeof buf)) > 0) {
+        ssize_t off = 0;
+        while (off < n) {
+            ssize_t w = write(out, buf + off, (size_t)(n - off));
+            if (w < 0) { rc = -1; break; }
+            off += w;
+        }
+        if (rc < 0) break;
+    }
+    if (n < 0) rc = -1;
+    close(in);
+    close(out);
+    return rc;
+}
+
 /* Bind a single host file into the container /dev; missing sources are
  * skipped (mirrors upstream's `optional` LXC mount flag). */
 static void bind_node(const char *src, const char *dst)
@@ -397,6 +421,16 @@ static int child_main(void *arg)
     bind_node(WAYDROID_DIR "/patches/libui.so",
               ROOTFS "/system/lib64/libui.so");
 
+    /* The AIDL graphics.allocator VINTF declaration (W3 gate 2) is
+     * shipped in the graft dir at etc/vintf/manifest/ (graft is bound at
+     * the container's /odm below, an ODM manifest source VINTF reads).
+     * /vendor is read-only so a fragment can't be added there; /odm is
+     * writable.  The host A14 Mali allocator is AIDL but the Waydroid
+     * image only declares the HIDL gbm_mesa allocator, so without this
+     * the container's servicemanager rejects the AIDL registration with
+     * EX_ILLEGAL_ARGUMENT (-3).  See gralloc_bridge/README. */
+
+
     /* /data: the ext4 loop image, rw. */
     loop_dev_path(g_dat_loop, dev, sizeof dev);
     if (mount(dev, ROOTFS "/data", "ext4",
@@ -500,6 +534,34 @@ static int child_main(void *arg)
      * dead inode. */
     mkdir_p(ROOTFS "/run/xdg", 0777);
     bind_dir(XDG_DIR, ROOTFS "/run/xdg");
+
+    /* The host Mali allocator reads /vendor/etc/gralloc/gpu.xml and
+     * aborts ("Unable to retrieve GPU capabilities") if it is missing.
+     * The shim /vendor has no such file and is read-only, so overlay
+     * /vendor/etc with just that one file added from the host vendor
+     * (/vendor_extra).  overlayfs resolves lowerdir before the mount
+     * shadows it, so an in-place lower==mountpoint overlay is valid.
+     * Done here (not with the other vendor binds) because the upper/work
+     * dirs need /data mounted rw, which happens above.  Still before
+     * exec /init, so the container's init sees the merged /vendor/etc. */
+    {
+        struct stat st;
+        if (stat(ROOTFS "/vendor_extra/etc/gralloc/gpu.xml", &st) == 0) {
+            mkdir_p(ROOTFS "/data/.gralloc_ovl/up/gralloc", 0755);
+            mkdir_p(ROOTFS "/data/.gralloc_ovl/wk", 0755);
+            if (copy_file(ROOTFS "/vendor_extra/etc/gralloc/gpu.xml",
+                          ROOTFS "/data/.gralloc_ovl/up/gralloc/gpu.xml") < 0)
+                logmsg("copy gpu.xml: %s", strerror(errno));
+            else if (mount("overlay", ROOTFS "/vendor/etc", "overlay", 0,
+                           "lowerdir=" ROOTFS "/vendor/etc,upperdir="
+                           ROOTFS "/data/.gralloc_ovl/up,workdir="
+                           ROOTFS "/data/.gralloc_ovl/wk") < 0)
+                logmsg("overlay /vendor/etc for gpu.xml: %s (allocator will abort)",
+                       strerror(errno));
+            else
+                logmsg("overlaid /vendor/etc/gralloc/gpu.xml from host");
+        }
+    }
 
     /* Container env: mimic lxc-start (minimal env + container=lxc). */
     clearenv();
