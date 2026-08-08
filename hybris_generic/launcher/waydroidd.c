@@ -385,6 +385,18 @@ static int child_main(void *arg)
     bind_node(WAYDROID_DIR "/patches/composer-service",
               ROOTFS "/vendor/bin/hw/android.hardware.graphics.composer@2.1-service");
 
+    /* Binary-patched libui (W3): the container is A13 (lineage-20) but the
+     * host Mali gralloc is A14 (MTK).  A13 libui's Gralloc4 client builds a
+     * BufferDescriptorInfo whose usage carries phantom high bits
+     * (0x7f00080000) that A13 libui's own validUsageBits mask rejects with
+     * -EINVAL, so SurfaceFlinger cannot allocate any buffer and crashloops
+     * in RenderEngine.  The patch makes validateBufferDescriptorInfo CLEAR
+     * the invalid bits instead of rejecting — yielding the clean descriptor
+     * the A14 mapper accepts (proven by libhybris/the W2 harness).  See
+     * halium-blobs/waydroid/patches/README. */
+    bind_node(WAYDROID_DIR "/patches/libui.so",
+              ROOTFS "/system/lib64/libui.so");
+
     /* /data: the ext4 loop image, rw. */
     loop_dev_path(g_dat_loop, dev, sizeof dev);
     if (mount(dev, ROOTFS "/data", "ext4",
