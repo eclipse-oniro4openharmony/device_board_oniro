@@ -31,10 +31,13 @@
 #define _GNU_SOURCE
 #endif
 
+#include <arpa/inet.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -44,6 +47,7 @@
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
@@ -52,6 +56,13 @@
 #include <unistd.h>
 
 #include <linux/loop.h>
+/* The OHOS musl sysroot's <linux/socket.h> redefines sockaddr_storage
+ * against <sys/socket.h>; rename the kernel copy out of the way. */
+#define sockaddr_storage kernel_sockaddr_storage__
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+#include <linux/veth.h>
+#undef sockaddr_storage
 
 #define WAYDROID_DIR   "/data/waydroid"
 #define ROOTFS         WAYDROID_DIR "/rootfs"
@@ -61,6 +72,7 @@
 #define PROP_FILE      WAYDROID_DIR "/waydroid.prop"
 #define HOSTHALS_FILE  WAYDROID_DIR "/hosthals.xml"
 #define PID_FILE       WAYDROID_DIR "/waydroidd.pid"
+#define CONTAINER_PID_FILE WAYDROID_DIR "/container.pid"
 
 /* waydroid_compositor's XDG_RUNTIME_DIR; bound into the container at
  * /run/xdg (waydroid.xdg_runtime_dir / waydroid.wayland_display in the
@@ -81,6 +93,21 @@
 #define HOST_HWBINDER   "/dev/binderfs/hwbinder"
 
 #define CHILD_STACK_SIZE (1 * 1024 * 1024)
+
+/* W4 networking-lite (plan §W4): a static veth pair into the container
+ * netns.  eth0's subnet route must ALSO land in netd's local_network
+ * table (Android policy routing never consults the main table; rule
+ * 32000 is `from all unreachable`) — the graft's waydroid-net.rc does
+ * that at sys.boot_completed.  tcprelay bridges device-loopback (the
+ * only thing `hdc fport` can reach) to the container's adbd. */
+#define VETH_HOST_IF   "wdb0"
+#define VETH_CONT_IF   "eth0"
+#define VETH_HOST_IP   "192.168.240.1"
+#define VETH_CONT_IP   "192.168.240.2"
+#define VETH_NETMASK   "255.255.255.0"
+#define ADB_RELAY_BIN  WAYDROID_DIR "/bin/tcprelay"
+#define ADB_RELAY_PORT "15555"
+#define ADB_CONT_PORT  "5555"
 
 static void logmsg(const char *fmt, ...)
 {
@@ -703,6 +730,196 @@ static void wait_for_compositor(void)
            "until one appears", WL_SOCKET);
 }
 
+/* --- veth + adb relay (W4) ------------------------------------------- */
+
+static void nla_put(struct nlmsghdr *nh, unsigned short type,
+                    const void *data, int len)
+{
+    struct rtattr *rta =
+        (struct rtattr *)((char *)nh + NLMSG_ALIGN(nh->nlmsg_len));
+    rta->rta_type = type;
+    rta->rta_len = (unsigned short)RTA_LENGTH(len);
+    if (len)
+        memcpy(RTA_DATA(rta), data, (size_t)len);
+    nh->nlmsg_len = NLMSG_ALIGN(nh->nlmsg_len) + RTA_ALIGN(rta->rta_len);
+}
+
+static struct rtattr *nla_nest_start(struct nlmsghdr *nh, unsigned short type)
+{
+    struct rtattr *rta =
+        (struct rtattr *)((char *)nh + NLMSG_ALIGN(nh->nlmsg_len));
+    rta->rta_type = type;
+    rta->rta_len = (unsigned short)RTA_LENGTH(0);
+    nh->nlmsg_len = NLMSG_ALIGN(nh->nlmsg_len) + RTA_LENGTH(0);
+    return rta;
+}
+
+static void nla_nest_end(struct nlmsghdr *nh, struct rtattr *nest)
+{
+    nest->rta_len = (unsigned short)((char *)nh + nh->nlmsg_len -
+                                     (char *)nest);
+}
+
+/* Create wdb0 (this netns) <-> eth0 (container_pid's netns).  The
+ * kernel checklist equivalent of
+ *   ip link add wdb0 type veth peer name eth0 netns <pid>
+ */
+static int veth_create(pid_t container_pid)
+{
+    char buf[1024];
+    memset(buf, 0, sizeof buf);
+    struct nlmsghdr *nh = (struct nlmsghdr *)buf;
+    nh->nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg));
+    nh->nlmsg_type = RTM_NEWLINK;
+    nh->nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL | NLM_F_ACK;
+    nh->nlmsg_seq = 1;
+
+    nla_put(nh, IFLA_IFNAME, VETH_HOST_IF, (int)strlen(VETH_HOST_IF) + 1);
+    struct rtattr *linkinfo = nla_nest_start(nh, IFLA_LINKINFO);
+    nla_put(nh, IFLA_INFO_KIND, "veth", 5);
+    struct rtattr *infodata = nla_nest_start(nh, IFLA_INFO_DATA);
+    struct rtattr *peer = nla_nest_start(nh, VETH_INFO_PEER);
+    /* VETH_INFO_PEER payload = struct ifinfomsg + nested attrs */
+    memset((char *)nh + nh->nlmsg_len, 0, sizeof(struct ifinfomsg));
+    nh->nlmsg_len += (unsigned int)sizeof(struct ifinfomsg);
+    nla_put(nh, IFLA_IFNAME, VETH_CONT_IF, (int)strlen(VETH_CONT_IF) + 1);
+    unsigned int ns_pid = (unsigned int)container_pid;
+    nla_put(nh, IFLA_NET_NS_PID, &ns_pid, sizeof ns_pid);
+    nla_nest_end(nh, peer);
+    nla_nest_end(nh, infodata);
+    nla_nest_end(nh, linkinfo);
+
+    int s = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+    if (s < 0)
+        return -1;
+    struct sockaddr_nl sa = { .nl_family = AF_NETLINK };
+    int rc = -1;
+    if (sendto(s, nh, nh->nlmsg_len, 0, (struct sockaddr *)&sa,
+               sizeof sa) >= 0) {
+        char rbuf[1024];
+        ssize_t n = recv(s, rbuf, sizeof rbuf, 0);
+        if (n >= (ssize_t)NLMSG_LENGTH(sizeof(struct nlmsgerr))) {
+            struct nlmsghdr *rnh = (struct nlmsghdr *)rbuf;
+            if (rnh->nlmsg_type == NLMSG_ERROR) {
+                int err = ((struct nlmsgerr *)NLMSG_DATA(rnh))->error;
+                if (err == 0 || err == -EEXIST) {
+                    rc = 0;
+                } else {
+                    errno = -err;
+                }
+            }
+        }
+    }
+    int e = errno;
+    close(s);
+    errno = e;
+    return rc;
+}
+
+/* ifconfig <ifname> <ip> netmask <mask> up, in the CURRENT netns. */
+static int if_config(const char *ifname, const char *ip, const char *mask)
+{
+    int s = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (s < 0)
+        return -1;
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof ifr);
+    strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
+    struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+    sin->sin_family = AF_INET;
+    if (inet_pton(AF_INET, ip, &sin->sin_addr) != 1 ||
+        ioctl(s, SIOCSIFADDR, &ifr) < 0)
+        goto err;
+    if (inet_pton(AF_INET, mask, &sin->sin_addr) != 1 ||
+        ioctl(s, SIOCSIFNETMASK, &ifr) < 0)
+        goto err;
+    if (ioctl(s, SIOCGIFFLAGS, &ifr) < 0)
+        goto err;
+    ifr.ifr_flags |= IFF_UP;
+    if (ioctl(s, SIOCSIFFLAGS, &ifr) < 0)
+        goto err;
+    close(s);
+    return 0;
+err:
+    {
+        int e = errno;
+        close(s);
+        errno = e;
+        return -1;
+    }
+}
+
+/* Configure the container end from outside: fork, setns(net), ioctl. */
+static int netns_if_config(pid_t pid)
+{
+    char path[64];
+    snprintf(path, sizeof path, "/proc/%ld/ns/net", (long)pid);
+    int nsfd = open(path, O_RDONLY | O_CLOEXEC);
+    if (nsfd < 0)
+        return -1;
+    pid_t p = fork();
+    if (p == 0) {
+        if (setns(nsfd, CLONE_NEWNET) < 0)
+            _exit(1);
+        if (if_config(VETH_CONT_IF, VETH_CONT_IP, VETH_NETMASK) < 0)
+            _exit(2);
+        _exit(0);
+    }
+    close(nsfd);
+    if (p < 0)
+        return -1;
+    int st;
+    if (waitpid(p, &st, 0) < 0)
+        return -1;
+    return (WIFEXITED(st) && WEXITSTATUS(st) == 0) ? 0 : -1;
+}
+
+static void spawn_adb_relay(void)
+{
+    struct stat st;
+    if (stat(ADB_RELAY_BIN, &st) < 0) {
+        logmsg("no %s — adb relay disabled", ADB_RELAY_BIN);
+        return;
+    }
+    pid_t p = fork();
+    if (p == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull >= 0) {
+            dup2(devnull, 0);
+            dup2(devnull, 1);
+            dup2(devnull, 2);
+            if (devnull > 2)
+                close(devnull);
+        }
+        execl(ADB_RELAY_BIN, "tcprelay", ADB_RELAY_PORT, VETH_CONT_IP,
+              ADB_CONT_PORT, (char *)NULL);
+        _exit(127);
+    }
+    if (p > 0)
+        logmsg("adb relay: 127.0.0.1:%s -> %s:%s (pid %ld)",
+               ADB_RELAY_PORT, VETH_CONT_IP, ADB_CONT_PORT, (long)p);
+}
+
+static void setup_network(pid_t container_pid)
+{
+    if (veth_create(container_pid) < 0) {
+        logmsg("veth create failed: %s (adb rig disabled)", strerror(errno));
+        return;
+    }
+    if (if_config(VETH_HOST_IF, VETH_HOST_IP, VETH_NETMASK) < 0) {
+        logmsg("host veth config failed: %s", strerror(errno));
+        return;
+    }
+    if (netns_if_config(container_pid) < 0) {
+        logmsg("container veth config failed");
+        return;
+    }
+    logmsg("veth up: %s=%s <-> %s=%s", VETH_HOST_IF, VETH_HOST_IP,
+           VETH_CONT_IF, VETH_CONT_IP);
+    spawn_adb_relay();
+}
+
 static pid_t read_pidfile(void)
 {
     FILE *f = fopen(PID_FILE, "r");
@@ -777,8 +994,15 @@ int main(int argc, char **argv)
         die("clone: %s", strerror(errno));
     logmsg("container init cloned: pid %ld", (long)g_child);
 
+    setup_network(g_child);
+
     FILE *f = fopen(PID_FILE, "w");
     if (f) { fprintf(f, "%ld\n", (long)getpid()); fclose(f); }
+
+    /* The container init pid, for the compositor's W5 cgroup freezer
+     * (it runs in the host pid-ns and finds the rest by pid-ns inode). */
+    FILE *cf = fopen(CONTAINER_PID_FILE, "w");
+    if (cf) { fprintf(cf, "%ld\n", (long)g_child); fclose(cf); }
 
     signal(SIGTERM, on_term);
     signal(SIGINT,  on_term);
