@@ -41,6 +41,8 @@
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -94,20 +96,46 @@
 
 #define CHILD_STACK_SIZE (1 * 1024 * 1024)
 
-/* W4 networking-lite (plan §W4): a static veth pair into the container
- * netns.  eth0's subnet route must ALSO land in netd's local_network
- * table (Android policy routing never consults the main table; rule
- * 32000 is `from all unreachable`) — the graft's waydroid-net.rc does
- * that at sys.boot_completed.  tcprelay bridges device-loopback (the
- * only thing `hdc fport` can reach) to the container's adbd. */
+/* Networking: a veth pair (wdb0 host <-> eth0 container) into the
+ * container netns.
+ *
+ * W4 (networking-lite) assigned static addresses and re-published the
+ * /24 subnet route into netd's local_network table (Android policy
+ * routing never consults the main table; rule 32000 is `from all
+ * unreachable`).  That was enough to reach the container's adbd but NOT
+ * the internet: app traffic is bound to a netd "network" (fwmark/netId),
+ * and no such network exists until IpClient provisions eth0 and registers
+ * a NetworkAgent with ConnectivityService.
+ *
+ * W6 (real networking, plan §W6) makes that happen the *Android* way:
+ *   - the host enables ip_forward and MASQUERADEs 192.168.240.0/24 out
+ *     the active uplink (wlan0, or a future cellular rmnet — the rule is
+ *     uplink-agnostic so it survives WiFi switching);
+ *   - a minimal single-lease DHCP server answers on wdb0, so the image's
+ *     ethernet stack (networkstack IpClient/DhcpClient, which flushes the
+ *     static IP at boot expecting a lease) provisions eth0 with a default
+ *     route + DNS that netd installs into the per-network policy tables
+ *     app traffic actually uses.
+ * The graft's waydroid-net.rc is now only a *fallback* (re-apply the W4
+ * static config if DHCP produced no default route, so adb still works).
+ * tcprelay bridges device-loopback (the only thing `hdc fport` can reach)
+ * to the container's adbd. */
 #define VETH_HOST_IF   "wdb0"
 #define VETH_CONT_IF   "eth0"
 #define VETH_HOST_IP   "192.168.240.1"
 #define VETH_CONT_IP   "192.168.240.2"
 #define VETH_NETMASK   "255.255.255.0"
+#define VETH_SUBNET    "192.168.240.0/24"
 #define ADB_RELAY_BIN  WAYDROID_DIR "/bin/tcprelay"
 #define ADB_RELAY_PORT "15555"
 #define ADB_CONT_PORT  "5555"
+
+/* W6 real networking. */
+#define IPTABLES_BIN     "/system/bin/iptables"
+#define DHCP_SERVER_PORT 67
+#define DHCP_CLIENT_PORT 68
+#define DHCP_MAGIC       0x63825363u
+#define DHCP_LEASE_SECS  86400u
 
 static void logmsg(const char *fmt, ...)
 {
@@ -760,12 +788,46 @@ static void nla_nest_end(struct nlmsghdr *nh, struct rtattr *nest)
                                      (char *)nest);
 }
 
+/* Delete a stale host-side veth (RTM_DELLINK wdb0), ignoring errors.  A
+ * supervisor `kill -9` of the previous waydroidd can leave wdb0 lingering
+ * briefly after its container netns died; without this, veth_create below
+ * hits EEXIST, treats it as success, and the NEW container is left with no
+ * eth0 (no static IP, no DHCP, no adb).  Deleting first guarantees a fresh
+ * pair every generation.  Deleting wdb0 also removes its eth0 peer, which
+ * is only ever in a dead generation's netns here, so it is safe. */
+static void veth_delete(void)
+{
+    char buf[256];
+    memset(buf, 0, sizeof buf);
+    struct nlmsghdr *nh = (struct nlmsghdr *)buf;
+    nh->nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg));
+    nh->nlmsg_type = RTM_DELLINK;
+    nh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+    nh->nlmsg_seq = 1;
+    struct ifinfomsg *ifi = NLMSG_DATA(nh);
+    ifi->ifi_family = AF_UNSPEC;
+    nla_put(nh, IFLA_IFNAME, VETH_HOST_IF, (int)strlen(VETH_HOST_IF) + 1);
+
+    int s = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+    if (s < 0)
+        return;
+    struct sockaddr_nl sa = { .nl_family = AF_NETLINK };
+    if (sendto(s, nh, nh->nlmsg_len, 0, (struct sockaddr *)&sa,
+               sizeof sa) >= 0) {
+        char rbuf[256];
+        (void)!recv(s, rbuf, sizeof rbuf, 0);   /* drain the ACK */
+    }
+    close(s);
+}
+
 /* Create wdb0 (this netns) <-> eth0 (container_pid's netns).  The
  * kernel checklist equivalent of
  *   ip link add wdb0 type veth peer name eth0 netns <pid>
  */
 static int veth_create(pid_t container_pid)
 {
+    veth_delete();   /* clear any stale wdb0 from a prior generation */
+
     char buf[1024];
     memset(buf, 0, sizeof buf);
     struct nlmsghdr *nh = (struct nlmsghdr *)buf;
@@ -901,6 +963,459 @@ static void spawn_adb_relay(void)
                ADB_RELAY_PORT, VETH_CONT_IP, ADB_CONT_PORT, (long)p);
 }
 
+/* --- W6 real networking: NAT + DHCP (host side) ---------------------- */
+
+static void enable_ip_forward(void)
+{
+    int fd = open("/proc/sys/net/ipv4/ip_forward", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) {
+        logmsg("ip_forward open: %s", strerror(errno));
+        return;
+    }
+    if (write(fd, "1\n", 2) < 0)
+        logmsg("ip_forward write: %s", strerror(errno));
+    close(fd);
+}
+
+/* Spawn /system/bin/iptables with argv (argv[0] = "iptables"); returns the
+ * child's exit status, or -1 on spawn/wait failure.  Output is muted so a
+ * failing -C (rule absent) does not spam the log. */
+static int iptables_run(char *const argv[])
+{
+    pid_t p = fork();
+    if (p == 0) {
+        int n = open("/dev/null", O_WRONLY);
+        if (n >= 0) { dup2(n, 1); dup2(n, 2); if (n > 2) close(n); }
+        execv(IPTABLES_BIN, argv);
+        _exit(127);
+    }
+    if (p < 0)
+        return -1;
+    int st;
+    if (waitpid(p, &st, 0) < 0)
+        return -1;
+    return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+}
+
+/* The container-uplink NAT ruleset.  `spec` is the argv tail after the
+ * chain; FORWARD accepts are belt-and-suspenders (the default policy is
+ * ACCEPT today, but an OHOS firewall could flip it later).  The rule is
+ * uplink-agnostic (no `-o wlan0`) so MASQUERADE follows WiFi reconnects
+ * and a future cellular default route without re-plumbing. */
+struct ipt_rule {
+    const char *table;
+    const char *chain;
+    const char *spec[10];
+};
+
+static const struct ipt_rule g_nat_rules[] = {
+    { "nat", "POSTROUTING",
+      { "-s", VETH_SUBNET, "!", "-d", VETH_SUBNET, "-j", "MASQUERADE", NULL } },
+    { "filter", "FORWARD", { "-i", VETH_HOST_IF, "-j", "ACCEPT", NULL } },
+    { "filter", "FORWARD", { "-o", VETH_HOST_IF, "-j", "ACCEPT", NULL } },
+};
+
+static int ipt_op(const struct ipt_rule *r, const char *op)
+{
+    char *argv[18];
+    int i = 0;
+    argv[i++] = "iptables";
+    argv[i++] = "-t";
+    argv[i++] = (char *)r->table;
+    argv[i++] = (char *)op;
+    argv[i++] = (char *)r->chain;
+    for (int j = 0; r->spec[j] && i < 17; ++j)
+        argv[i++] = (char *)r->spec[j];
+    argv[i] = NULL;
+    return iptables_run(argv);
+}
+
+static void nl_del_main_default(void);   /* fwd: defined with uplink router */
+
+static void nat_setup(void)
+{
+    enable_ip_forward();
+    for (size_t k = 0; k < sizeof g_nat_rules / sizeof g_nat_rules[0]; ++k) {
+        if (ipt_op(&g_nat_rules[k], "-C") != 0)   /* absent -> append */
+            ipt_op(&g_nat_rules[k], "-A");
+    }
+    logmsg("NAT up: ip_forward=1, MASQUERADE %s -> active uplink", VETH_SUBNET);
+}
+
+static void nat_teardown(void)
+{
+    for (size_t k = 0; k < sizeof g_nat_rules / sizeof g_nat_rules[0]; ++k)
+        while (ipt_op(&g_nat_rules[k], "-D") == 0)  /* drop any dups */
+            ;
+    nl_del_main_default();
+}
+
+/* --- W6 uplink router: mirror OHOS's default route into table `main` ---
+ *
+ * OHOS (like Android) keeps its uplink default route in a per-network
+ * policy table, and forwarded container packets are routed out of `main`,
+ * which has no default — so they are dropped before ever reaching the
+ * MASQUERADE rule.  Discover the active uplink default (gateway + oif) with
+ * a netlink route dump and install a copy in `main`.  A background poll
+ * refreshes it so WiFi reconnects / late WiFi bring-up / network switches
+ * keep working (the plan's §W6 coexistence requirement). */
+
+/* Find the active uplink default route (RTN_UNICAST, /0, has a gateway) in
+ * any table other than `main` — i.e. OHOS's own, not the copy we install.
+ * Picks the lowest-metric candidate.  Returns 0 and fills gw/oif on hit. */
+static int nl_find_uplink_default(uint32_t *gw_out, int *oif_out)
+{
+    int s = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+    if (s < 0)
+        return -1;
+    struct { struct nlmsghdr nh; struct rtgenmsg gen; } req;
+    memset(&req, 0, sizeof req);
+    req.nh.nlmsg_len = NLMSG_LENGTH(sizeof(struct rtgenmsg));
+    req.nh.nlmsg_type = RTM_GETROUTE;
+    req.nh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    req.nh.nlmsg_seq = 1;
+    req.gen.rtgen_family = AF_INET;
+    struct sockaddr_nl sa = { .nl_family = AF_NETLINK };
+    if (sendto(s, &req, req.nh.nlmsg_len, 0, (struct sockaddr *)&sa,
+               sizeof sa) < 0) {
+        close(s);
+        return -1;
+    }
+
+    char buf[16384];
+    uint32_t best_gw = 0, best_metric = 0xffffffffu;
+    int best_oif = 0, found = -1, done = 0;
+    while (!done) {
+        ssize_t n = recv(s, buf, sizeof buf, 0);
+        if (n <= 0)
+            break;
+        for (struct nlmsghdr *nh = (struct nlmsghdr *)buf;
+             NLMSG_OK(nh, n); nh = NLMSG_NEXT(nh, n)) {
+            if (nh->nlmsg_type == NLMSG_DONE || nh->nlmsg_type == NLMSG_ERROR) {
+                done = 1;
+                break;
+            }
+            if (nh->nlmsg_type != RTM_NEWROUTE)
+                continue;
+            struct rtmsg *rtm = NLMSG_DATA(nh);
+            if (rtm->rtm_family != AF_INET || rtm->rtm_dst_len != 0 ||
+                rtm->rtm_type != RTN_UNICAST)
+                continue;
+            uint32_t gw = 0, table = rtm->rtm_table, metric = 0;
+            int oif = 0, rtl = (int)RTM_PAYLOAD(nh);
+            for (struct rtattr *rta = RTM_RTA(rtm); RTA_OK(rta, rtl);
+                 rta = RTA_NEXT(rta, rtl)) {
+                switch (rta->rta_type) {
+                case RTA_GATEWAY:  memcpy(&gw, RTA_DATA(rta), 4); break;
+                case RTA_OIF:      memcpy(&oif, RTA_DATA(rta), 4); break;
+                case RTA_TABLE:    memcpy(&table, RTA_DATA(rta), 4); break;
+                case RTA_PRIORITY: memcpy(&metric, RTA_DATA(rta), 4); break;
+                }
+            }
+            if (!gw || table == RT_TABLE_MAIN)
+                continue;                        /* need a gw; skip our copy */
+            if (metric < best_metric) {
+                best_metric = metric;
+                best_gw = gw;
+                best_oif = oif;
+                found = 0;
+            }
+        }
+    }
+    close(s);
+    if (found == 0) {
+        *gw_out = best_gw;
+        *oif_out = best_oif;
+    }
+    return found;
+}
+
+/* RTM_NEWROUTE/RTM_DELROUTE for `default via gw dev oif` in table main. */
+static int nl_main_default(int type, unsigned flags, uint32_t gw, int oif)
+{
+    char buf[256];
+    memset(buf, 0, sizeof buf);
+    struct nlmsghdr *nh = (struct nlmsghdr *)buf;
+    nh->nlmsg_len = NLMSG_LENGTH(sizeof(struct rtmsg));
+    nh->nlmsg_type = (unsigned short)type;
+    nh->nlmsg_flags = (unsigned short)(NLM_F_REQUEST | NLM_F_ACK | flags);
+    nh->nlmsg_seq = 2;
+    struct rtmsg *rt = NLMSG_DATA(nh);
+    rt->rtm_family = AF_INET;
+    rt->rtm_dst_len = 0;
+    rt->rtm_table = RT_TABLE_MAIN;
+    rt->rtm_protocol = RTPROT_STATIC;
+    rt->rtm_scope = RT_SCOPE_UNIVERSE;
+    rt->rtm_type = RTN_UNICAST;
+    nla_put(nh, RTA_GATEWAY, &gw, 4);
+    if (oif > 0)
+        nla_put(nh, RTA_OIF, &oif, 4);
+
+    int s = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+    if (s < 0)
+        return -1;
+    struct sockaddr_nl sa = { .nl_family = AF_NETLINK };
+    int rc = -1;
+    if (sendto(s, nh, nh->nlmsg_len, 0, (struct sockaddr *)&sa,
+               sizeof sa) >= 0) {
+        char rbuf[256];
+        ssize_t n = recv(s, rbuf, sizeof rbuf, 0);
+        if (n >= (ssize_t)NLMSG_LENGTH(sizeof(struct nlmsgerr))) {
+            struct nlmsghdr *rnh = (struct nlmsghdr *)rbuf;
+            if (rnh->nlmsg_type == NLMSG_ERROR) {
+                int err = ((struct nlmsgerr *)NLMSG_DATA(rnh))->error;
+                if (err == 0 || err == -EEXIST || err == -ESRCH)
+                    rc = 0;
+                else
+                    errno = -err;
+            }
+        }
+    }
+    int e = errno;
+    close(s);
+    errno = e;
+    return rc;
+}
+
+static void nl_del_main_default(void)
+{
+    uint32_t gw;
+    int oif;
+    if (nl_find_uplink_default(&gw, &oif) == 0)
+        nl_main_default(RTM_DELROUTE, 0, gw, oif);
+}
+
+static void uplink_router_loop(void)
+{
+    uint32_t last_gw = 0;
+    int last_oif = -1;
+    for (;;) {
+        uint32_t gw;
+        int oif;
+        /* Re-install every tick (idempotent REPLACE) so the copy survives
+         * any host-side route churn; only log when it actually changes. */
+        if (nl_find_uplink_default(&gw, &oif) == 0 &&
+            nl_main_default(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE,
+                            gw, oif) == 0 &&
+            (gw != last_gw || oif != last_oif)) {
+            struct in_addr a = { .s_addr = gw };
+            logmsg("uplink default -> main: via %s oif %d", inet_ntoa(a), oif);
+            last_gw = gw;
+            last_oif = oif;
+        }
+        sleep(15);   /* follow WiFi reconnects / late bring-up / switches */
+    }
+}
+
+static void spawn_uplink_router(void)
+{
+    pid_t p = fork();
+    if (p == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        uplink_router_loop();
+        _exit(0);
+    }
+    if (p > 0)
+        logmsg("uplink router forked (pid %ld)", (long)p);
+    else
+        logmsg("uplink router fork: %s", strerror(errno));
+}
+
+/* Host default gateway (network-order __be32) from /proc/net/route, or 0.
+ * Handed to the container as a DNS resolver — most home routers resolve,
+ * and it is the same server the OHOS side uses on this LAN. */
+static uint32_t host_default_gw(void)
+{
+    FILE *f = fopen("/proc/net/route", "r");
+    if (!f)
+        return 0;
+    char line[256];
+    uint32_t gw = 0;
+    if (fgets(line, sizeof line, f)) {          /* skip header */
+        char iface[32];
+        unsigned long dest, gwv, flags;
+        while (fgets(line, sizeof line, f)) {
+            if (sscanf(line, "%31s %lx %lx %lx", iface, &dest, &gwv, &flags)
+                    == 4 && dest == 0 && (flags & 0x2) && gwv != 0) {
+                gw = (uint32_t)gwv;   /* /proc prints __be32 host-order hex,
+                                       * i.e. the wire bytes on this LE host */
+                break;
+            }
+        }
+    }
+    fclose(f);
+    return gw;
+}
+
+/* BOOTP/DHCP wire frame (RFC 2131). */
+struct dhcp_msg {
+    uint8_t  op, htype, hlen, hops;
+    uint32_t xid;
+    uint16_t secs, flags;
+    uint32_t ciaddr, yiaddr, siaddr, giaddr;
+    uint8_t  chaddr[16];
+    uint8_t  sname[64];
+    uint8_t  file[128];
+    uint8_t  options[312];
+} __attribute__((packed));
+
+static uint8_t *dhcp_put(uint8_t *o, uint8_t code, uint8_t len, const void *d)
+{
+    *o++ = code;
+    *o++ = len;
+    if (len) memcpy(o, d, len);
+    return o + len;
+}
+
+/* Find DHCP option `want` in a received message; returns its first byte or
+ * -1.  Only fixed-header options are parsed (no overload). */
+static int dhcp_opt_u8(const struct dhcp_msg *m, size_t optlen, uint8_t want)
+{
+    const uint8_t *o = m->options;
+    size_t i = 4;                               /* past magic cookie */
+    while (i < optlen && o[i] != 255) {
+        if (o[i] == 0) { i++; continue; }       /* pad */
+        if (i + 1 >= optlen) break;
+        uint8_t code = o[i], len = o[i + 1];
+        if (i + 2 + len > optlen) break;
+        if (code == want && len >= 1)
+            return o[i + 2];
+        i += 2 + len;
+    }
+    return -1;
+}
+
+static size_t dhcp_build_reply(const struct dhcp_msg *req, struct dhcp_msg *rep,
+                               uint8_t msgtype)
+{
+    memset(rep, 0, sizeof *rep);
+    rep->op    = 2;                             /* BOOTREPLY */
+    rep->htype = req->htype ? req->htype : 1;
+    rep->hlen  = req->hlen ? req->hlen : 6;
+    rep->xid   = req->xid;
+    rep->flags = req->flags;
+    rep->yiaddr = inet_addr(VETH_CONT_IP);
+    rep->siaddr = inet_addr(VETH_HOST_IP);
+    rep->giaddr = req->giaddr;
+    memcpy(rep->chaddr, req->chaddr, 16);
+
+    uint8_t *o = rep->options;
+    uint32_t v = htonl(DHCP_MAGIC);
+    memcpy(o, &v, 4); o += 4;
+
+    o = dhcp_put(o, 53, 1, &msgtype);
+    v = inet_addr(VETH_HOST_IP);   o = dhcp_put(o, 54, 4, &v);   /* server id */
+    v = htonl(DHCP_LEASE_SECS);    o = dhcp_put(o, 51, 4, &v);   /* lease */
+    v = inet_addr(VETH_NETMASK);   o = dhcp_put(o, 1,  4, &v);   /* mask */
+    v = inet_addr(VETH_HOST_IP);   o = dhcp_put(o, 3,  4, &v);   /* router */
+
+    uint32_t dns[3];
+    int nd = 0;
+    uint32_t gw = host_default_gw();
+    if (gw) dns[nd++] = gw;
+    dns[nd++] = inet_addr("8.8.8.8");
+    dns[nd++] = inet_addr("1.1.1.1");
+    o = dhcp_put(o, 6, (uint8_t)(nd * 4), dns);
+
+    *o++ = 255;                                 /* end */
+    return (size_t)(o - (uint8_t *)rep);
+}
+
+/* Single-lease DHCP responder bound to wdb0.  Runs in a forked child for
+ * the life of waydroidd; the container's DhcpClient (a raw packet socket)
+ * accepts the broadcast reply, and renewals arrive unicast to us. */
+static void dhcp_server_loop(void)
+{
+    int s = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (s < 0) { logmsg("dhcp socket: %s", strerror(errno)); return; }
+    int one = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    setsockopt(s, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof ifr);
+    strncpy(ifr.ifr_name, VETH_HOST_IF, IFNAMSIZ - 1);
+    if (setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof ifr) < 0)
+        logmsg("dhcp SO_BINDTODEVICE %s: %s", VETH_HOST_IF, strerror(errno));
+
+    struct sockaddr_in me = {
+        .sin_family = AF_INET,
+        .sin_port = htons(DHCP_SERVER_PORT),
+        .sin_addr.s_addr = INADDR_ANY,          /* must catch 255.255.255.255 */
+    };
+    if (bind(s, (struct sockaddr *)&me, sizeof me) < 0) {
+        logmsg("dhcp bind :67: %s (server disabled)", strerror(errno));
+        close(s);
+        return;
+    }
+    logmsg("dhcp server on %s, lease %s -> gw/dns %s",
+           VETH_HOST_IF, VETH_CONT_IP, VETH_HOST_IP);
+
+    for (;;) {
+        struct dhcp_msg req;
+        ssize_t n = recv(s, &req, sizeof req, 0);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            logmsg("dhcp recv: %s", strerror(errno));
+            break;
+        }
+        if ((size_t)n < offsetof(struct dhcp_msg, options) + 4 || req.op != 1)
+            continue;
+        uint32_t magic;
+        memcpy(&magic, req.options, 4);
+        if (ntohl(magic) != DHCP_MAGIC)
+            continue;
+
+        /* bytes present in options[], including the 4-byte magic cookie */
+        size_t optlen = (size_t)n - offsetof(struct dhcp_msg, options);
+        int type = dhcp_opt_u8(&req, optlen, 53);
+        logmsg("dhcp: rx type=%d xid=%08x ci=%08x flags=%04x mac=%02x:%02x:%02x:%02x:%02x:%02x",
+               type, ntohl(req.xid), ntohl(req.ciaddr), ntohs(req.flags),
+               req.chaddr[0], req.chaddr[1], req.chaddr[2],
+               req.chaddr[3], req.chaddr[4], req.chaddr[5]);
+        uint8_t reply_type;
+        if (type == 1)        reply_type = 2;   /* DISCOVER -> OFFER */
+        else if (type == 3)   reply_type = 5;   /* REQUEST  -> ACK   */
+        else continue;                          /* ignore the rest   */
+
+        struct dhcp_msg rep;
+        size_t rlen = dhcp_build_reply(&req, &rep, reply_type);
+
+        /* RFC 2131 §4.1 reply destination. */
+        struct sockaddr_in dst = { .sin_family = AF_INET,
+                                   .sin_port = htons(DHCP_CLIENT_PORT) };
+        if (req.giaddr) {
+            dst.sin_addr.s_addr = req.giaddr;
+            dst.sin_port = htons(DHCP_SERVER_PORT);
+        } else if (req.ciaddr) {                /* RENEW/REBIND (unicast) */
+            dst.sin_addr.s_addr = req.ciaddr;
+        } else {
+            dst.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+        }
+        if (sendto(s, &rep, rlen, 0, (struct sockaddr *)&dst, sizeof dst) < 0)
+            logmsg("dhcp send %s: %s",
+                   reply_type == 2 ? "OFFER" : "ACK", strerror(errno));
+        else
+            logmsg("dhcp: tx %s yiaddr=%s dst=%08x len=%zu",
+                   reply_type == 2 ? "OFFER" : "ACK", VETH_CONT_IP,
+                   ntohl(dst.sin_addr.s_addr), rlen);
+    }
+    close(s);
+}
+
+static void spawn_dhcp_server(void)
+{
+    pid_t p = fork();
+    if (p == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        dhcp_server_loop();
+        _exit(0);
+    }
+    if (p > 0)
+        logmsg("dhcp server forked (pid %ld)", (long)p);
+    else
+        logmsg("dhcp server fork: %s", strerror(errno));
+}
+
 static void setup_network(pid_t container_pid)
 {
     if (veth_create(container_pid) < 0) {
@@ -908,15 +1423,22 @@ static void setup_network(pid_t container_pid)
         return;
     }
     if (if_config(VETH_HOST_IF, VETH_HOST_IP, VETH_NETMASK) < 0) {
-        logmsg("host veth config failed: %s", strerror(errno));
+        logmsg("host veth config failed: %s (networking disabled)",
+               strerror(errno));
         return;
     }
-    if (netns_if_config(container_pid) < 0) {
-        logmsg("container veth config failed");
-        return;
-    }
-    logmsg("veth up: %s=%s <-> %s=%s", VETH_HOST_IF, VETH_HOST_IP,
-           VETH_CONT_IF, VETH_CONT_IP);
+    /* The early static IP on the container end is best-effort: it lets the
+     * adb rig work before Android's DHCP completes.  DHCP (below) is what
+     * really provisions eth0, so a transient failure here (eth0 not yet
+     * migrated into the container netns) must NOT skip NAT/DHCP/uplink. */
+    if (netns_if_config(container_pid) < 0)
+        logmsg("container veth static config failed (DHCP will provision eth0)");
+    else
+        logmsg("veth up: %s=%s <-> %s=%s", VETH_HOST_IF, VETH_HOST_IP,
+               VETH_CONT_IF, VETH_CONT_IP);
+    nat_setup();            /* W6: ip_forward + MASQUERADE */
+    spawn_uplink_router();  /* W6: mirror OHOS uplink default into `main` */
+    spawn_dhcp_server();    /* W6: eth0 gets a real lease -> default route */
     spawn_adb_relay();
 }
 
@@ -1021,6 +1543,10 @@ int main(int argc, char **argv)
         logmsg("container init exited with status %d", WEXITSTATUS(wst));
     else if (WIFSIGNALED(wst))
         logmsg("container init killed by signal %d", WTERMSIG(wst));
+    /* Best-effort NAT cleanup on a graceful exit; a supervisor `kill -9`
+     * skips this, but nat_setup() is idempotent (-C||-A) and a stray
+     * MASQUERADE for a dead subnet matches no traffic, so it is harmless. */
+    nat_teardown();
     unlink(PID_FILE);
     return 0;
 }
