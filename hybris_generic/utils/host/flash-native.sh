@@ -100,7 +100,7 @@ Examples:
   ./flash-native.sh -d ansuz
 
   # phone plugged into an ssh-reachable relay box
-  ./flash-native.sh -d ansuz --remote frankpi
+  ./flash-native.sh -d ansuz --remote usb-host
 
   # kernel-only rebuild: skip super, keep the device in fastboot
   ./flash-native.sh -d x23 --only boot_a --no-reboot

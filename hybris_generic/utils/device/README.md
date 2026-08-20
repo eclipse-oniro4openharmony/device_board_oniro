@@ -16,9 +16,9 @@ prebuilts/clang/ohos/linux-x86_64/llvm/bin/clang \
     --target=aarch64-linux-gnu -nostdlib -static -O2 -fuse-ld=lld \
     -o reboot-bl reboot-bl.c
 ```
-A compiled copy lives on the Pi at `~frankpi/reboot-bl` (push into a debug
-ramdisk via the rescue RNDIS: `python3 -m http.server` on the Pi + busybox
-`wget` on the device).  Note: the BCB `bootonce-bootloader` command in
+Keep a compiled copy on the USB relay box (push it into a debug ramdisk via
+the rescue RNDIS: `python3 -m http.server` on the relay + busybox `wget` on
+the device).  Note: the BCB `bootonce-bootloader` command in
 `misc` is ignored by this LK — this binary is the working replacement.
 
 ## init-strace-wrap.c
