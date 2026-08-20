@@ -7,7 +7,7 @@
 #
 # Usage:
 #   waydroid-adb.sh                 # phone on this host's USB
-#   waydroid-adb.sh --remote frankpi  # phone on the Pi (hdc server there)
+#   waydroid-adb.sh --remote usb-host  # phone on the relay box (hdc server there)
 #
 # Then:  adb -s $TARGET shell / install ...;  scrcpy -s $TARGET
 # (scrcpy needs a desktop session; from a headless workstation run this
