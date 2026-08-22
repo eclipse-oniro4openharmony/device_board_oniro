@@ -137,9 +137,6 @@ companion `androidd` process runs the device's Android (Halium) HAL services in
 a child namespace so the OHOS graphics/HAL stack can reach the hardware through
 **libhybris**.
 
-Full build, flash, and architecture details are in the
-[Volla X23 documentation](./docs/volla_x23.md).
-
 ---
 
 ## Contributing
