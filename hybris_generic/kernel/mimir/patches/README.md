@@ -50,5 +50,4 @@ specific order is required.
 > The X23 (`kernel/x23/`) additionally carries a `sharefs.patch` here that
 > ports the OHOS `sharefs` filesystem. mimir does not — if the tablet's
 > file picker needs `/storage/Users` access for normal apps, the same
-> port applies (see `kernel/x23/patches/kernel-source/sharefs.patch` and
-> `docs/hybris_generic/legacy_sharefs_user_files.md`).
+> port applies (see `kernel/x23/patches/kernel-source/sharefs.patch`).

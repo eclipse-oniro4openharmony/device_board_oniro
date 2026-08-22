@@ -25,9 +25,6 @@
  *    VDIs and WiFi/RIL share OHOS's network ns.  LXC's NS-share knobs
  *    work but add config complexity over a few extra clone-flag bits.
  *  - We get to keep the binary <40 KB and depend on libc only.
- *
- * The bring-up checklist lives in
- *   device/board/oniro/docs/hybris_generic/native_boot_plan/phase_n4_androidd.md
  */
 
 #ifndef _GNU_SOURCE
