@@ -147,19 +147,32 @@ the OHOS graphics/HAL stack can reach the hardware through **libhybris**.
 
 ### 📋 Prerequisites
 
-- The phone with an **unlocked bootloader**, and Ubuntu Touch (Halium) installed at
-  least once: the Android `system`/`vendor` blobs and the donor boot images come
-  from that install.
+- The phone with an **unlocked bootloader**. 
 - **`fastboot`** (Android platform-tools) on whichever host the phone is plugged into.
 - An OHOS source tree and build container — see
   [Set up the build container](#-set-up-the-build-container) above.
 - **Halium blobs** for the device. They provide the Android HAL runtime; an
-  OHOS-only image builds and boots without them, but has no graphics.
-  - X23: fetched host-side, SHA256-pinned, by
-    `hybris_generic/utils/host/pull-halium-blobs.sh` (once per tree).
-  - Plinius: dumped from the live UT device into
-    `hybris_generic/halium-blobs/ansuz/` as
-    `halium_{system,vendor,vendor_dlkm,system_dlkm}_a.img` — no public download.
+  OHOS-only image builds and boots without them, but has no graphics. Both
+  devices are served by the same fetcher, once per tree:
+
+  ```bash
+  bash device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh -d x23
+  bash device/board/oniro/hybris_generic/utils/host/pull-halium-blobs.sh -d ansuz
+  ```
+
+  It pulls two upstream sources and lands the result in
+  `hybris_generic/halium-blobs/` (X23) or `hybris_generic/halium-blobs/ansuz/`
+  (Plinius: `halium_{system,vendor,vendor_dlkm,system_dlkm}_a.img` plus the
+  pristine Halium boot chain in `ut-boot/`):
+
+  | Source | Provides |
+  |---|---|
+  | Volla's ubports-installer **bootstrap zip** (`volla.tech/filedump`) | the MediaTek `vendor` partition, and on the Plinius `vendor_dlkm` + `system_dlkm` — extracted straight out of the stock `super.img` |
+  | **UBports system-image** channel tarballs | `android-rootfs.img` (the Halium Android `/system`) and the pristine Halium boot chain |
+
+  Downloads are ~1 GB per device and are cached under `halium-blobs/`
+  (`--clean-downloads` deletes them afterwards). The pins are the constants at
+  the top of each `pull_*` function — update them consciously.
 
 ### 🛠️ Build
 
@@ -190,12 +203,13 @@ D=device/board/oniro/hybris_generic
 
 # --- Volla X23 ---
 bash $D/kernel/x23/build_kernel.sh
-bash $D/utils/host/pull-halium-blobs.sh          # once
+bash $D/utils/host/pull-halium-blobs.sh -d x23   # once
 bash $D/kernel/x23/build_super_img.sh
 bash $D/kernel/x23/build_boot_img_chainload.sh
 
 # --- Volla Plinius ---
 bash $D/kernel/ansuz/build_kernel.sh
+bash $D/utils/host/pull-halium-blobs.sh -d ansuz # once
 bash $D/kernel/ansuz/build_super_img.sh
 bash $D/kernel/ansuz/build_init_boot_chainload.sh
 ```

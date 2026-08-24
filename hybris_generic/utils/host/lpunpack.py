@@ -11,7 +11,11 @@ building it from AOSP requires the AOSP build system).
 
 Format reference: AOSP system/core/fs_mgr/liblp/include/liblp/metadata_format.h.
 Supported: LP metadata v1.0 through v1.2 (single block device, linear
-extents — what the UBports bootstrap super.img uses)."""
+extents — what the UBports bootstrap super.img uses).
+
+Android *sparse* super images are read transparently (see SparseReader),
+so the caller never has to materialise the multi-GB raw expansion that
+`simg2img` would write."""
 
 import argparse
 import os
@@ -24,6 +28,123 @@ LP_METADATA_GEOMETRY_SIZE = 4096
 LP_METADATA_GEOMETRY_MAGIC = 0x616C4467
 LP_METADATA_HEADER_MAGIC = 0x414C5030
 LP_TARGET_TYPE_LINEAR = 0
+
+SPARSE_HEADER_MAGIC = 0xED26FF3A
+CHUNK_TYPE_RAW = 0xCAC1
+CHUNK_TYPE_FILL = 0xCAC2
+CHUNK_TYPE_DONT_CARE = 0xCAC3
+CHUNK_TYPE_CRC32 = 0xCAC4
+
+
+class SparseReader:
+    """Read-only seekable view of an Android sparse image as its raw expansion.
+
+    Only the chunks a read actually touches are pulled from disk, so
+    extracting a 900 MB partition out of a sparse super never
+    materialises the 9 GB raw image.
+    """
+
+    def __init__(self, f):
+        self._f = f
+        f.seek(0)
+        hdr = f.read(28)
+        (magic, major, _minor, file_hdr_sz, chunk_hdr_sz, blk_sz,
+         total_blks, total_chunks, _checksum) = struct.unpack("<IHHHHIIII", hdr)
+        if magic != SPARSE_HEADER_MAGIC:
+            raise ValueError("not a sparse image")
+        if major != 1:
+            raise SystemExit(f"unsupported sparse major version {major}")
+        self.size = total_blks * blk_sz
+        self._pos = 0
+        # chunks: (out_start, out_end, kind, payload) sorted by out_start
+        self._chunks = []
+        off = file_hdr_sz
+        out = 0
+        for _ in range(total_chunks):
+            f.seek(off)
+            chunk_type, _res, chunk_sz, total_sz = struct.unpack("<HHII", f.read(12))
+            data_off = off + chunk_hdr_sz
+            data_len = total_sz - chunk_hdr_sz
+            out_len = chunk_sz * blk_sz
+            if chunk_type == CHUNK_TYPE_RAW:
+                self._chunks.append((out, out + out_len, "raw", data_off))
+            elif chunk_type == CHUNK_TYPE_FILL:
+                f.seek(data_off)
+                self._chunks.append((out, out + out_len, "fill", f.read(4)))
+            elif chunk_type == CHUNK_TYPE_DONT_CARE:
+                self._chunks.append((out, out + out_len, "zero", None))
+            elif chunk_type == CHUNK_TYPE_CRC32:
+                out_len = 0
+            else:
+                raise SystemExit(f"unknown sparse chunk type 0x{chunk_type:04x}")
+            out += out_len
+            off += chunk_hdr_sz + data_len
+
+    def seek(self, offset, whence=os.SEEK_SET):
+        if whence == os.SEEK_SET:
+            self._pos = offset
+        elif whence == os.SEEK_CUR:
+            self._pos += offset
+        else:
+            self._pos = self.size + offset
+        return self._pos
+
+    def tell(self):
+        return self._pos
+
+    def _find(self, pos):
+        lo, hi = 0, len(self._chunks) - 1
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            start, end, _, _ = self._chunks[mid]
+            if pos < start:
+                hi = mid - 1
+            elif pos >= end:
+                lo = mid + 1
+            else:
+                return mid
+        return None
+
+    def read(self, size=-1):
+        if size < 0:
+            size = self.size - self._pos
+        size = max(0, min(size, self.size - self._pos))
+        out = bytearray()
+        while size > 0:
+            i = self._find(self._pos)
+            if i is None:
+                break
+            start, end, kind, payload = self._chunks[i]
+            n = min(size, end - self._pos)
+            if kind == "raw":
+                self._f.seek(payload + (self._pos - start))
+                out += self._f.read(n)
+            elif kind == "fill":
+                skew = (self._pos - start) % 4
+                out += ((payload * (n // 4 + 2))[skew:skew + n])
+            else:
+                out += bytes(n)
+            self._pos += n
+            size -= n
+        return bytes(out)
+
+    def close(self):
+        self._f.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def open_super(path):
+    """Open an LP super image, transparently unsparsing if needed."""
+    f = open(path, "rb")
+    if f.read(4) == struct.pack("<I", SPARSE_HEADER_MAGIC):
+        return SparseReader(f)
+    f.seek(0)
+    return f
 
 
 def _read_geometry(f):
@@ -70,7 +191,7 @@ def _read_header(f, geo_max_size, slot=0):
 
 
 def list_partitions(super_path):
-    with open(super_path, "rb") as f:
+    with open_super(super_path) as f:
         geo_max_size, _, _ = _read_geometry(f)
         hdr = _read_header(f, geo_max_size, slot=0)
         p_off, p_num, p_size = hdr["partitions"]
@@ -105,7 +226,7 @@ def extract(super_path, partition_name, out_path):
         names = ", ".join(x["name"] for x in parts)
         raise SystemExit(f"partition {partition_name!r} not found in {super_path} "
                          f"(have: {names})")
-    with open(super_path, "rb") as src, open(out_path, "wb") as dst:
+    with open_super(super_path) as src, open(out_path, "wb") as dst:
         for num_sectors, target_type, target_data in p["extents"]:
             if target_type != LP_TARGET_TYPE_LINEAR:
                 raise SystemExit(f"unsupported extent target_type {target_type}")

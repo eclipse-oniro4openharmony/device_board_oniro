@@ -56,8 +56,9 @@ echo "sys_prod.img:  $SP_SZ bytes"
 echo "chip_prod.img: $CP_SZ bytes"
 
 # Halium blobs are optional — graphics-disabled builds skip them and
-# produce an OHOS-only super.img.  Run utils/host/pull-halium-blobs.sh
-# to populate halium-blobs/ when graphics support is wanted.
+# produce an OHOS-only super.img.  Run
+# utils/host/pull-halium-blobs.sh -d x23 to populate halium-blobs/ when
+# graphics support is wanted.
 HALIUM_SYS_IMG="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/halium_system_a.img"
 HALIUM_VEN_IMG="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/halium_vendor_a.img"
 HALIUM_LPMAKE_ARGS=()
@@ -76,7 +77,7 @@ if [[ -f "$HALIUM_SYS_IMG" && -f "$HALIUM_VEN_IMG" ]]; then
     HALIUM_SZ_TOTAL=$(( HSYS_SZ + HVEN_SZ ))
 else
     echo "WARN: halium-blobs/ not populated — building OHOS-only super.img"
-    echo "      run utils/host/pull-halium-blobs.sh to enable native graphics"
+    echo "      run utils/host/pull-halium-blobs.sh -d x23 to enable native graphics"
 fi
 
 # Group budget: room for all _a partitions plus a bit of slack.  The

@@ -10,7 +10,7 @@
 #
 # Inputs:
 #   - halium-blobs/halium_boot_a.img — a pristine Halium boot.img,
-#     produced by utils/host/pull-halium-blobs.sh.
+#     produced by utils/host/pull-halium-blobs.sh -d x23.
 #   - $OHOS_ROOT/device/board/oniro/hybris_generic/launcher/init-chainload.sh
 #
 # Why reuse the Halium ramdisk: it already has parse-android-dynparts,
@@ -39,7 +39,7 @@ OUTPUT="$OHOS_ROOT/out/hybris_generic/boot-chainload.img"
 OHOS_KERNEL_BOOT_IMG="${OHOS_KERNEL_BOOT_IMG:-$KERNEL_TREE/out/boot.img}"
 
 if [[ ! -f "$LIVE_BOOT" ]]; then
-    echo "Error: $LIVE_BOOT missing — run utils/host/pull-halium-blobs.sh first" >&2
+    echo "Error: $LIVE_BOOT missing — run utils/host/pull-halium-blobs.sh -d x23 first" >&2
     exit 1
 fi
 if [[ ! -f "$CHAINLOAD_INIT" ]]; then

@@ -25,8 +25,11 @@
 #       (UT needs AppArmor) — never flash this one under UT.
 #
 # Donors default to the build_kernel.sh outputs (device-proven at the
-# P2 UT gate); the on-device dumps in halium-blobs/ansuz/backups/ are
-# the fallback.
+# P2 UT gate).  Fallbacks, in order: on-device dumps in
+# halium-blobs/ansuz/backups/, then the pristine Halium boot chain that
+# pull-halium-blobs.sh downloads into halium-blobs/ansuz/ut-boot/.
+# Prefer the built pair — a donor vendor_boot carries the kernel modules
+# that must match boot.img's kernel.
 #
 # Unlike the X23 (boot.img = kernel+ramdisk), the splice target here is
 # init_boot (ramdisk only, 8 MiB partition). The donor ramdisk is two
@@ -49,8 +52,10 @@ INIT_BOOT_PART_SIZE=8388608
 
 DONOR_INIT_BOOT="${DONOR_INIT_BOOT:-$KERNEL_TREE/out/init_boot.img}"
 [ -f "$DONOR_INIT_BOOT" ] || DONOR_INIT_BOOT="$BLOBS/backups/init_boot_a.img"
+[ -f "$DONOR_INIT_BOOT" ] || DONOR_INIT_BOOT="$BLOBS/ut-boot/init_boot.img"
 DONOR_VENDOR_BOOT="${DONOR_VENDOR_BOOT:-$KERNEL_TREE/out/vendor_boot.img}"
 [ -f "$DONOR_VENDOR_BOOT" ] || DONOR_VENDOR_BOOT="$BLOBS/backups/vendor_boot_a.img"
+[ -f "$DONOR_VENDOR_BOOT" ] || DONOR_VENDOR_BOOT="$BLOBS/ut-boot/vendor_boot.img"
 
 OHOS_CMDLINE_EXTRA="ohos.boot.hardware=ansuz lsm=selinux"
 

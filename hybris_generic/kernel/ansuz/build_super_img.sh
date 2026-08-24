@@ -14,8 +14,8 @@
 # Inputs:
 #   - $OHOS_ROOT/out/hybris_generic/packages/phone/images/{system,vendor,sys_prod,chip_prod}.img
 #   - halium-blobs/ansuz/halium_{system,vendor,vendor_dlkm,system_dlkm}_a.img
-#     (dumped from the UT-running device — see plinius_recon.md; re-dump
-#     with the adb recipes there if missing)
+#     (fetched host-side, SHA256-pinned, by
+#      utils/host/pull-halium-blobs.sh -d ansuz — no UT install needed)
 #
 # Flash from LK fastboot (raw physical-partition write, no fastbootd):
 #   fastboot flash super out/hybris_generic/super.img
@@ -109,6 +109,7 @@ if [[ -f "$BLOBS/halium_system_a.img" && -f "$BLOBS/halium_vendor_a.img" ]]; the
     add_part halium_apex_a "$APEX_IMG"
 else
     echo "WARN: halium-blobs/ansuz not populated — OHOS-only super (no libhybris graphics)"
+    echo "      run utils/host/pull-halium-blobs.sh -d ansuz to enable native graphics"
 fi
 
 GROUP_SIZE=$(( SUPER_SIZE / 2 - 1024 * 1024 ))
