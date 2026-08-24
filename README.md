@@ -6,7 +6,7 @@ the Oniro Project:
 | Target | Device | Notes |
 |--------|--------|-------|
 | `x86_general` | QEMU virtual device | The **Oniro Emulator** — an `x86_64` build run under QEMU/KVM. Best starting point for app and platform development. |
-| `hybris_generic` | Volla X23 phone | Oniro booting **natively** on MediaTek hardware via libhybris. See [Volla X23](#oniro-on-the-volla-x23-hybris_generic-target). |
+| `hybris_generic` | Volla Phone X23, Volla Phone Plinius | Oniro booting **natively** on MediaTek hardware via libhybris. See [Volla phones](#oniro-on-volla-phones-hybris_generic-target). |
 
 These BSPs enable developers to build and deploy Oniro on supported hardware.
 
@@ -129,14 +129,146 @@ VNC in headless mode).
 
 ---
 
-## Oniro on the Volla X23 (hybris_generic target)
+## Oniro on Volla phones (hybris_generic target)
 
-Oniro runs **natively** on the Volla X23 (MediaTek MT6789, aarch64): the device
-boots straight into Oniro — there is **no Ubuntu Touch host and no LXC
-container**. A Halium boot image chain-loads directly into OHOS `init`, and a
-companion `androidd` process runs the device's Android (Halium) HAL services in
-a child namespace so the OHOS graphics/HAL stack can reach the hardware through
-**libhybris**.
+Oniro runs **natively** on two MediaTek Volla phones — the device boots straight
+into Oniro. A Halium boot image chain-loads directly into OHOS `init`, and a companion `androidd` process
+runs the device's Android (Halium) HAL services in a child mount/PID namespace so
+the OHOS graphics/HAL stack can reach the hardware through **libhybris**.
+
+| Device | Codename | SoC | Halium / kernel | Chainload lives in |
+|---|---|---|---|---|
+| Volla Phone X23 | `vidofnir` | MT6789 (Helio G99) | Halium 12, 5.10 vendor kernel | `boot_a` (header v2) |
+| Volla Phone Plinius | `ansuz` | MT6878 (Dimensity 7300) | Halium 14, android14-6.1 GKI | `init_boot_a` (header v4) |
+
+**One image set serves both devices.** They are told apart at *runtime* by
+`ohos.boot.hardware` (set from the per-device `vendor_boot` cmdline), which selects
+`init.<device>.cfg` / `fstab.<device>` — there is no build-time device switch.
+
+### 📋 Prerequisites
+
+- The phone with an **unlocked bootloader**, and Ubuntu Touch (Halium) installed at
+  least once: the Android `system`/`vendor` blobs and the donor boot images come
+  from that install.
+- **`fastboot`** (Android platform-tools) on whichever host the phone is plugged into.
+- An OHOS source tree and build container — see
+  [Set up the build container](#-set-up-the-build-container) above.
+- **Halium blobs** for the device. They provide the Android HAL runtime; an
+  OHOS-only image builds and boots without them, but has no graphics.
+  - X23: fetched host-side, SHA256-pinned, by
+    `hybris_generic/utils/host/pull-halium-blobs.sh` (once per tree).
+  - Plinius: dumped from the live UT device into
+    `hybris_generic/halium-blobs/ansuz/` as
+    `halium_{system,vendor,vendor_dlkm,system_dlkm}_a.img` — no public download.
+
+### 🛠️ Build
+
+Shared steps first (`do_patch.sh` runs host-side — `git am` needs your git identity;
+without it the build stops with an unknown-product error, since the series is what
+registers `hybris_generic`):
+
+```bash
+# once per fresh checkout
+bash device/board/oniro/system_patch/do_patch.sh
+
+# once — Oniro distribution HAPs (app store, keyboard); needs network + OHOS SDK
+bash vendor/oniro/oniro-haps/build-oniro-haps.sh
+
+# OHOS rootfs: system / vendor / sys_prod / chip_prod
+sudo docker exec -u root -w /home/openharmony/workdir oniro-build \
+     ./build.sh --product-name hybris_generic --ccache
+
+# the container builds as root — take back the dirs the host-side steps write to
+sudo chown "$USER" out out/hybris_generic
+```
+
+Then the device-specific images (host-side; `build_kernel.sh` also clones the port
+repo and downloads the Halium tools — `lpmake`, `mkbootimg` — the later steps need):
+
+```bash
+D=device/board/oniro/hybris_generic
+
+# --- Volla X23 ---
+bash $D/kernel/x23/build_kernel.sh
+bash $D/utils/host/pull-halium-blobs.sh          # once
+bash $D/kernel/x23/build_super_img.sh
+bash $D/kernel/x23/build_boot_img_chainload.sh
+
+# --- Volla Plinius ---
+bash $D/kernel/ansuz/build_kernel.sh
+bash $D/kernel/ansuz/build_super_img.sh
+bash $D/kernel/ansuz/build_init_boot_chainload.sh
+```
+
+Artifacts:
+
+| Device | Images |
+|---|---|
+| X23 | `out/hybris_generic/{super.img, boot-chainload.img}`, `kernel/linux/volla-vidofnir/out/vendor_boot.img` |
+| Plinius | `out/hybris_generic/{super.img, init_boot-chainload.img, vendor_boot-ohos.img}`, `kernel/linux/volla-ansuz/out/boot.img` |
+
+**Kernel notes.** The chainload runs the OHOS-patched kernel (staging drivers:
+`access_tokenid`, `hilog`, `hievent`, binder token-id; the Plinius adds hmdfs,
+sharefs, epfs and the DFX set). Its matching `vendor_boot` must always be flashed
+with it, or the vendor modules fail to load with a vermagic mismatch. On the
+Plinius, `vendor_boot-ohos.img` carries `ohos.boot.hardware=ansuz lsm=selinux` —
+never flash it under Ubuntu Touch.
+
+### ⚡ Flash
+
+Put the device into LK fastboot — from OHOS
+`hdc shell "param set ohos.startup.powerctrl reboot,bootloader"`, or by hand: power
+off, hold **Vol-Down + Power**, pick `fastboot`. Then flash every partition in one
+pass (slot `_a`):
+
+```bash
+bash device/board/oniro/hybris_generic/utils/host/flash-native.sh -d x23     # or: -d ansuz
+```
+
+### 🔌 Verify
+
+~60–70 s after reboot the phone enumerates over USB and answers hdc; the Oniro
+lockscreen renders on the panel.
+
+```bash
+hdc list targets
+hdc shell "uname -a"
+```
+
+### 🧩 Architecture
+
+```
+  MTK LK bootloader
+        │  (loads the chainload image: boot_a on the X23, init_boot_a on the Plinius)
+        ▼
+  Linux kernel  +  Halium ramdisk   (ramdisk /init = init-chainload.sh)
+        │  • modprobe vendor modules  • parse-android-dynparts → /dev/mapper/*
+        │  • mount OHOS system_a at /root, Halium system at /root/android
+        ▼
+  exec env OHOS_NATIVE_BOOT=1 chroot /root /system/bin/init --second-stage
+        │  (kernel keeps PID 1 across exec — OHOS init becomes PID 1)
+        ▼
+  OHOS userspace: samgr, hdf, render_service, launcher …
+        └── androidd → clone() child NS → Halium /system/bin/init
+                        → hwservicemanager, composer@2.x, gralloc@4.0 (Android HALs)
+```
+
+A single custom `super` partition (LP-formatted) carries both worlds:
+`system_a`, `vendor_a`, `sys_prod_a`, `chip_prod_a` (OHOS) plus `halium_system_a`
+and `halium_vendor_a` (Android HAL runtime; the Plinius adds
+`halium_vendor_dlkm_a` and `halium_system_dlkm_a`). Android's `hwbinder`/`vndbinder`
+are shared between the OHOS root namespace and `androidd`'s Halium namespace — that
+shared binder is the bridge over which libhybris-based OHOS services
+(`composer_host`, `allocator_host`) call into the Halium HAL services. libhybris
+loads the Android EGL/HWC2/gralloc `.so`s with an embedded bionic linker and remaps
+`/system`, `/vendor` to `/android/…`.
+
+### 📈 Status
+
+Native boot, USB hdc, display, touch, WiFi and audio work on both phones. The
+Plinius is the actively developed device and additionally has hardware keys,
+sensors, vibrator, camera and cellular (mobile data, SMS, voice) up; Bluetooth,
+NFC and fingerprint are not enabled yet on either.
 
 ---
 
