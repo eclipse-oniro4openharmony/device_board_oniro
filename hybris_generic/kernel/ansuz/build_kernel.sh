@@ -105,14 +105,17 @@ if [ "$MODE" = "--baseline" ]; then
     cp "$KERNEL_OBJ/Module.symvers" "$BASELINE_SYMVERS"
     echo "Baseline Module.symvers recorded ($(wc -l < "$BASELINE_SYMVERS") symbols)."
 else
-    # The authoritative contract is halium-blobs/ansuz/recon/
-    # stock-module-versions.txt — the union of every (crc, symbol) the
-    # stock prebuilt modules' __versions tables expect (vendor_boot
-    # prebuilts + vendor_dlkm + system_dlkm, captured from the device).
-    # Any expectation naming a vmlinux export must match our CRC
-    # exactly; expectations we don't provide are inter-module symbols
-    # (stock modules exporting to each other) and are fine.
-    STOCK_VERS="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/ansuz/recon/stock-module-versions.txt"
+    # The authoritative contract is kmi/stock-module-versions.txt — the
+    # union of every (crc, symbol) the stock prebuilt modules' __versions
+    # tables expect (vendor_boot prebuilts + vendor_dlkm + system_dlkm).
+    # It is tracked in-tree (see kmi/README.md); the gitignored recon
+    # dump is kept as a fallback for older checkouts.  Any expectation
+    # naming a vmlinux export must match our CRC exactly; expectations we
+    # don't provide are inter-module symbols (stock modules exporting to
+    # each other) and are fine.
+    STOCK_VERS="$HERE/kmi/stock-module-versions.txt"
+    [ -f "$STOCK_VERS" ] || \
+        STOCK_VERS="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/ansuz/recon/stock-module-versions.txt"
     if [ ! -f "$STOCK_VERS" ]; then
         echo "WARN: $STOCK_VERS missing — KMI contract unchecked" >&2
     else

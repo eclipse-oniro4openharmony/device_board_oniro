@@ -15,7 +15,7 @@ applied as one additive patch. See
 | `build_kernel.sh` | clone (pinned SHAs) → reset tree → apply `ohos-adaptation.patch` + `hmdfs.patch` + `ohos-fs-staged.patch` + `ohos-dfx-staged.patch` + `config/openharmony.config` → Halium build (`./build.sh -b workdir -k`) → **KMI guard** → artifacts in `kernel/linux/volla-ansuz/out/` |
 | `build_kernel.sh --baseline` | pristine (no-OHOS) build; records `workdir/baseline-Module.symvers`; its images are the UT-compatible set used for the P2 gates |
 | `build_init_boot_chainload.sh` | splices `launcher/init-chainload.sh` (`@HYBRIS_DEVICE@`→`ansuz`, halium init kept as `/init.halium`) into init_boot; repacks vendor_boot with the OHOS cmdline (`ohos.boot.hardware=ansuz lsm=selinux`) |
-| `build_super_img.sh` | lpmake super: OHOS system/vendor/sys_prod/chip_prod + halium system/vendor/**vendor_dlkm/system_dlkm** (EROFS) from `halium-blobs/ansuz/` |
+| `build_super_img.sh` | lpmake super: OHOS system/vendor/sys_prod/chip_prod + halium system/vendor/**vendor_dlkm/system_dlkm** (EROFS) from `halium-blobs/ansuz/`, populated by `utils/host/pull-halium-blobs.sh -d ansuz` |
 | `config/openharmony.config` | stage-1 fragment: ACCESS_TOKENID, HILOG, HIEVENT, BINDER_SENDER_INFO, HMDFS |
 | `patches/kernel-source/ohos-adaptation.patch` | all kernel changes (new drivers + binder token ioctls + wiring); regenerate with `git diff` from the kernel tree |
 | `patches/kernel-source/hmdfs.patch` | `fs/hmdfs/` + two anchor hunks in `fs/Kconfig` / `fs/Makefile`; disjoint from `ohos-adaptation.patch`, which owns only `drivers/` + `include/` |
@@ -41,9 +41,10 @@ contract. Therefore:
   plus two anchor hunks and touches no struct or export a stock module
   sees: 0 CRC changes, only 3 new tracepoint exports (2026-07-30).
 * The guard in `build_kernel.sh` checks our `Module.symvers` against
-  `halium-blobs/ansuz/recon/stock-module-versions.txt` (the dumped
-  union of every stock-module expectation) and fails the build on any
-  mismatch. Re-dump that file if Volla ever ships new stock modules.
+  `kmi/stock-module-versions.txt` (the union of every stock-module
+  expectation — tracked in-tree, see `kmi/README.md`) and fails the
+  build on any mismatch. Regenerate that file only if Volla ever ships
+  new stock modules.
 * Gate P2-G (2026-07-23, PASSED): UT boots on the OHOS-patched kernel
   with all 447 stock modules loaded and `/dev/access_token_id` present.
 
