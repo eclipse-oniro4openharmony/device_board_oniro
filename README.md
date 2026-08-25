@@ -15,22 +15,26 @@ These BSPs enable developers to build and deploy Oniro on supported hardware.
 ## Oniro Emulator (x86_general target)
 
 Step-by-step instructions to **build and run the Oniro Emulator** from the
-`OpenHarmony-6.1-Release` source.
+`OpenHarmony-6.1-LTS` source.
 
 ### 📦 Prerequisites
 
 - A Linux host with [Docker](https://docs.docker.com/engine/install/).
 - For hardware acceleration, KVM (`/dev/kvm` present and accessible). Without
   it the emulator still runs under TCG, just slower.
-- Enough free disk for the source tree, toolchains, and build output (~90 GB).
+- Enough free disk for the source tree, toolchains, and build output — budget
+  ~150 GB.
 - Have followed the [Quick Build Setup](https://docs.oniroproject.org/device-development/building-oniro/)
   guide to prepare your environment.
 
 ### ⬇️ Download the source
 
+This document describes the `OpenHarmony-6.1-LTS` branch — sync the manifest
+branch that matches the branch of this repo you are reading.
+
 ```bash
 repo init -u https://github.com/eclipse-oniro4openharmony/manifest.git \
-     -b OpenHarmony-6.1-Release -m oniro.xml --no-repo-verify
+     -b OpenHarmony-6.1-LTS -m oniro.xml --no-repo-verify
 repo sync -c
 repo forall -c 'git lfs pull'
 ```
@@ -49,17 +53,32 @@ of the upstream image:
 sudo docker build -t oniro-oh-standard:3.2 device/board/oniro/docker
 
 # Start a long-lived container with the source tree mounted at the workdir.
-# Mounting a persistent ccache dir makes rebuilds dramatically faster.
+# Mounting a persistent ccache dir makes rebuilds dramatically faster, and
+# mounting the prebuilts *download cache* (the tree's sibling directory, where
+# build/prebuilts_download.sh keeps its ~10 GB of tarballs) means a new
+# container does not re-download them.
 sudo docker run -d -it --name oniro-build \
      -w /home/openharmony \
      -v "$PWD":/home/openharmony/workdir \
      -v "$HOME/.ccache":/root/.ccache \
+     -v "$(dirname "$PWD")/openharmony_prebuilts":/home/openharmony/openharmony_prebuilts \
      oniro-oh-standard:3.2 /bin/bash
 ```
 
 > The commands below are shown as `docker exec` into that container. You can
 > equally `docker exec -it oniro-build bash` and run them interactively from
 > `/home/openharmony/workdir`.
+
+### 📥 Download the prebuilt toolchains
+
+Once per fresh tree, inside the container — a freshly synced tree has no
+`prebuilts/`, and `build.sh` does not fetch it (it stops with
+*"Please execute the build/prebuilts_download.sh"*):
+
+```bash
+sudo docker exec -u root -w /home/openharmony/workdir oniro-build \
+     ./build/prebuilts_download.sh          # --disable-rich for plain output
+```
 
 ### 🩹 Apply source patches
 
@@ -149,8 +168,17 @@ the OHOS graphics/HAL stack can reach the hardware through **libhybris**.
 
 - The phone with an **unlocked bootloader**. 
 - **`fastboot`** (Android platform-tools) on whichever host the phone is plugged into.
-- An OHOS source tree and build container — see
-  [Set up the build container](#-set-up-the-build-container) above.
+- An OHOS source tree, build container and prebuilts — see
+  [Set up the build container](#-set-up-the-build-container) and
+  [Download the prebuilt toolchains](#-download-the-prebuilt-toolchains) above.
+- **Host tools for the optional HAP step** (it runs outside the container):
+  `hvigorw`, `ohpm`, `node`, `java`, `jq`, and an OpenHarmony SDK in
+  `$OHOS_SDK_HOME` (default `~/setup-ohos-sdk/linux`). The
+  [`oniro-app`](https://www.npmjs.com/package/@oniroproject/oniro-app) CLI
+  installs both into those default locations:
+  `oniro-app sdk install 6.1` and `oniro-app cmdtools install` (put the
+  command-line tools' `bin/` on your `PATH`).
+- Disk: ~180 GB for the whole flow. 
 - **Halium blobs** for the device. They provide the Android HAL runtime; an
   OHOS-only image builds and boots without them, but has no graphics. Both
   devices are served by the same fetcher, once per tree:
@@ -184,10 +212,18 @@ registers `hybris_generic`):
 # once per fresh checkout
 bash device/board/oniro/system_patch/do_patch.sh
 
-# once — Oniro distribution HAPs (app store, keyboard); needs network + OHOS SDK
+# OPTIONAL, once — the Oniro distribution HAPs (app store, keyboard).
+# Host-side; needs network and the SDK / command-line tools from the
+# prerequisites above. Only needed when you opt the set into the image with
+# the gn arg below: the binaries are not committed, so opting in without
+# this step fails ninja on a missing prebuilt_etc `source`. Building them
+# WITHOUT the gn arg is a no-op — the default image ships the stock HAP set.
 bash vendor/oniro/oniro-haps/build-oniro-haps.sh
 
-# OHOS rootfs: system / vendor / sys_prod / chip_prod
+# OHOS rootfs: system / vendor / sys_prod / chip_prod.
+# Append --gn-args "oniro_install_custom_haps=true" to install the HAP set
+# built above (off by default: those apps carry licences of their own — the
+# app store is GPL-3.0-or-later — so opting in makes you their distributor).
 sudo docker exec -u root -w /home/openharmony/workdir oniro-build \
      ./build.sh --product-name hybris_generic --ccache
 
@@ -227,6 +263,15 @@ sharefs, epfs and the DFX set). Its matching `vendor_boot` must always be flashe
 with it, or the vendor modules fail to load with a vermagic mismatch. On the
 Plinius, `vendor_boot-ohos.img` carries `ohos.boot.hardware=ansuz lsm=selinux` —
 never flash it under Ubuntu Touch.
+
+On the Plinius the kernel source is cloned by the Halium build tools as a
+`--depth 1` checkout of the moving `android14-6.1-halium` branch, so a fresh
+tree gets the branch *tip*, not `build_kernel.sh`'s `KERNEL_SHA` pin — the
+script prints `WARN: … at <tip>, pinned <sha>` and carries on. Two trees synced
+weeks apart therefore build different kernels. What actually gates the build is
+the KMI guard that follows it: it diffs the new `Module.symvers` against
+`kernel/ansuz/kmi/stock-module-versions.txt` and fails if any symbol the stock
+MTK modules expect changed CRC.
 
 ### ⚡ Flash
 
