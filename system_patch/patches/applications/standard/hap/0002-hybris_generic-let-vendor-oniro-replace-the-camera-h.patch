@@ -1,0 +1,64 @@
+From 0f696939179b9a3a0d8b2a4b5ed4dbefde69cb23 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 26 Aug 2026 20:39:15 +0000
+Subject: [PATCH] hybris_generic: let vendor/oniro replace the camera hap
+
+With the Oniro HAP set opted in (oniro_install_custom_haps), com.ohos.camera
+ships from vendor/oniro instead of from here: a rebuild of
+//applications/standard/camera that fixes the viewfinder controls and the saved
+JPEG being 90/180 degrees out of true.  The camera app reaches the image only as
+a prebuilt hap and is never built from source by the platform build, so a source
+fix cannot take effect without shipping a rebuilt hap.
+
+Both targets install app/com.ohos.camera/Camera.hap, so exactly one of them must
+be active or ninja sees two rules writing the same file.  The arg is false by
+default, so out of the box this changes nothing and the stock hap still ships --
+a plain build needs no extra step.
+
+Scope the removal to this product instead of deleting the dep outright: the
+watchos branch already does `deps -= camera_hap`, and gn errors when subtracting
+an item that is not in the list.  The import sits inside the branch so products
+and trees without vendor/oniro never evaluate it.
+
+cameraPicker_hap is untouched -- it installs a differently named file into the
+same directory and does not collide.
+
+Drop this branch once the rotation fix lands upstream and the prebuilt is
+refreshed.
+
+Change-Id: I6ff6be05e7a0cab0f063fb6d67ae694ef0efafe9
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 7f28bb2..991473b 100755
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -489,5 +489,22 @@ group("hap") {
+   } else if (defined(product_name) && product_name == "ohos-arm64") {
+     deps +=
+         [ "//applications/standard/admin_provisioning:adminprovisioning_hap" ]
++  } else if (defined(product_name) && product_name == "hybris_generic") {
++    # With the Oniro HAP set opted in, com.ohos.camera ships from vendor/oniro
++    # instead: a rebuild of //applications/standard/camera that fixes the
++    # viewfinder and the saved JPEG being 90/180 degrees out. Both install
++    # app/com.ohos.camera/Camera.hap, so exactly one must be active or ninja
++    # sees two rules writing the same file.
++    #
++    # The arg is false by default, so out of the box nothing changes here and
++    # the stock hap still ships. The import sits inside the branch so products
++    # and trees without vendor/oniro never evaluate it.
++    #
++    # Drop this whole branch once the rotation fix lands upstream and the
++    # prebuilt is refreshed. See vendor/oniro/oniro-haps/.
++    import("//vendor/oniro/oniro-haps/oniro_haps.gni")
++    if (oniro_install_custom_haps) {
++      deps -= [ "//applications/standard/hap:camera_hap" ]
++    }
+   }
+ }
+-- 
+2.50.1
+
