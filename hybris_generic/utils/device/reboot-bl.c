@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 /* reboot-bl — issue reboot(LINUX_REBOOT_CMD_RESTART2, "bootloader") via raw
  * syscalls, no libc.  busybox `reboot` can't pass the RESTART2 argument, but
  * the MT6878 syscon-reboot-mode driver needs it to write the LK fastboot

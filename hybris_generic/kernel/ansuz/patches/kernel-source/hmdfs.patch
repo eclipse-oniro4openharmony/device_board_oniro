@@ -14982,7 +14982,7 @@ index 000000000..b7a679c8a
 +/*
 + * fs/hmdfs/hmdfs_compat.h
 + *
-+ * Copyright (c) 2026 Oniro / Hybris Generic.
++ * Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
 + *
 + * Build the OHOS linux-6.6 hmdfs sources against an older kernel.  The
 + * Makefile force-includes this ahead of every hmdfs translation unit, so

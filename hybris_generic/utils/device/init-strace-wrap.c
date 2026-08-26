@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 /* init-strace-wrap — bound over /system/bin/init via androidd's halium-debug
  * overlay.  Execs Halium's own /system/bin/strace on a copy of the real init
  * (/data/halium-debug/init.real), forwarding the original envp (androidd

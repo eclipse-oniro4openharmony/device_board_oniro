@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Copyright (C) 2025 Huawei Inc.
+# Copyright (c) 2025 Eclipse Oniro for OpenHarmony contributors.
 # Copyright (c) 2024 zhanglin <849679859@qq.com>
+# SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at

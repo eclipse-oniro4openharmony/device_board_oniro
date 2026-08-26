@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
 # SPDX-License-Identifier: Apache-2.0
 #
 # hyperhold_patch.sh — graft OpenHarmony HYPERHOLD onto the MT6789 kernel.

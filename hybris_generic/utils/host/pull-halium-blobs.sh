@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# Copyright (C) 2026 Oniro / Hybris Generic.
+# Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
+# SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (the "License").
 #
 # Fetch + extract the Halium blobs the hybris_generic super image is
