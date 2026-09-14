@@ -1,4 +1,4 @@
-From 749c2323494b02f4845464e30a59078c42cb4165 Mon Sep 17 00:00:00 2001
+From dea44d4c451d73cf652a352eb45cc1157038914d Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 14 Sep 2026 13:49:02 +0000
 Subject: [PATCH] surface: don't report missing metadata support as an error
@@ -20,14 +20,14 @@ failures are untouched: still logged, still GSERROR_HDI_ERROR.
 Change-Id: I26b8f7bc6020e88e90addb0b0150baed4172bb2a
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
 ---
- surface/src/surface_buffer_impl.cpp | 8 ++++++++
- 1 file changed, 8 insertions(+)
+ surface/src/surface_buffer_impl.cpp | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
 
 diff --git a/surface/src/surface_buffer_impl.cpp b/surface/src/surface_buffer_impl.cpp
-index 955d56d..48c845c 100644
+index 955d56d..989fa31 100644
 --- a/surface/src/surface_buffer_impl.cpp
 +++ b/surface/src/surface_buffer_impl.cpp
-@@ -711,6 +711,14 @@ GSError SurfaceBufferImpl::SetMetadata(uint32_t key, const std::vector<uint8_t>&
+@@ -711,6 +711,16 @@ GSError SurfaceBufferImpl::SetMetadata(uint32_t key, const std::vector<uint8_t>&
          }
          return GSERROR_OK;
      }
@@ -35,7 +35,9 @@ index 955d56d..48c845c 100644
 +    // reference implementation in display/buffer/vdi_base does exactly that.
 +    // That is an answer, not a failure, and callers set metadata on every
 +    // composed buffer, so reporting it as an error logs from the render thread
-+    // on every frame. Treat it the way RegisterBuffer above already does.
++    // on every frame. RegisterBuffer above already declines to treat the same
++    // answer as an error; report it distinctly here rather than as OK, so a
++    // caller that cares can tell "no metadata support" from "stored nothing".
 +    if (dRet == GRAPHIC_DISPLAY_NOT_SUPPORT) {
 +        return GSERROR_NOT_SUPPORT;
 +    }
