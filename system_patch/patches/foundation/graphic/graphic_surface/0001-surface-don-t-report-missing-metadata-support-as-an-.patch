@@ -1,0 +1,47 @@
+From 749c2323494b02f4845464e30a59078c42cb4165 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 14 Sep 2026 13:49:02 +0000
+Subject: [PATCH] surface: don't report missing metadata support as an error
+
+SurfaceBufferImpl::SetMetadata treated DISPLAY_NOT_SUPPORT as a failure:
+a BLOGE per call, and GSERROR_HDI_ERROR handed back to the caller. But a
+display buffer VDI with no metadata channel answers NOT_SUPPORT to every
+call - the reference implementation in display/buffer/vdi_base does
+exactly that - and RSUniRenderComposerAdapter::SetBufferColorSpace sets
+metadata on every composed buffer. So this logged from the render thread
+on every frame, for the life of the device. Measured on the Plinius at
+57 lines/s; together with the two logs it triggers either side of it,
+86% of everything reaching hilog.
+
+Return GSERROR_NOT_SUPPORT without logging, which is how RegisterBuffer
+in this same file already handles the identical answer. Genuine HDI
+failures are untouched: still logged, still GSERROR_HDI_ERROR.
+
+Change-Id: I26b8f7bc6020e88e90addb0b0150baed4172bb2a
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ surface/src/surface_buffer_impl.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/surface/src/surface_buffer_impl.cpp b/surface/src/surface_buffer_impl.cpp
+index 955d56d..48c845c 100644
+--- a/surface/src/surface_buffer_impl.cpp
++++ b/surface/src/surface_buffer_impl.cpp
+@@ -711,6 +711,14 @@ GSError SurfaceBufferImpl::SetMetadata(uint32_t key, const std::vector<uint8_t>&
+         }
+         return GSERROR_OK;
+     }
++    // A VDI with no metadata channel answers NOT_SUPPORT to every call - the
++    // reference implementation in display/buffer/vdi_base does exactly that.
++    // That is an answer, not a failure, and callers set metadata on every
++    // composed buffer, so reporting it as an error logs from the render thread
++    // on every frame. Treat it the way RegisterBuffer above already does.
++    if (dRet == GRAPHIC_DISPLAY_NOT_SUPPORT) {
++        return GSERROR_NOT_SUPPORT;
++    }
+     BLOGE("SetMetadata Failed with %{public}d", dRet);
+     return GSERROR_HDI_ERROR;
+ }
+-- 
+2.50.1
+

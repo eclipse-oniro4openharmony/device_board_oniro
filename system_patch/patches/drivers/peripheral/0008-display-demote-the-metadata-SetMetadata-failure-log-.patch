@@ -1,0 +1,43 @@
+From e1c62092f10e329a718865dbc882983027837c5e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 14 Sep 2026 13:49:10 +0000
+Subject: [PATCH] display: demote the metadata SetMetadata failure log to debug
+
+MetadataService::SetMetadata logged a bare " fail" - colour-escaped, with
+no key and no return code - for any non-success answer from the VDI. The
+common non-success answer is DISPLAY_NOT_SUPPORT from a VDI that has no
+metadata channel, which is an answer rather than a failure, and callers
+set metadata once per composed buffer. On the Plinius that put 57
+error lines/s into the log for the life of the device.
+
+The code is returned to the caller untouched and the caller has the
+context to judge it, so log at debug, and include the code so the line is
+worth something when it is read.
+
+Change-Id: I7972a28c0f62d09d6b38353b6f10f23e9cb98111
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ display/buffer/hdi_service/src/metadata_service.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/display/buffer/hdi_service/src/metadata_service.cpp b/display/buffer/hdi_service/src/metadata_service.cpp
+index 4af569a7d..1bd5126d8 100644
+--- a/display/buffer/hdi_service/src/metadata_service.cpp
++++ b/display/buffer/hdi_service/src/metadata_service.cpp
+@@ -133,7 +133,12 @@ int32_t MetadataService::SetMetadata(const sptr<NativeBuffer>& handle, uint32_t
+     BufferHandle* buffer = handle->GetBufferHandle();
+     CHECK_NULLPOINTER_RETURN_VALUE(buffer, HDF_FAILURE);
+     int32_t ret = vdiImpl_->SetMetadata(*buffer, key, value);
+-    DISPLAY_CHK_RETURN(ret != HDF_SUCCESS, ret, DISPLAY_LOGE(" fail"));
++    // Debug, not error: DISPLAY_NOT_SUPPORT is the documented answer from a
++    // VDI with no metadata channel (see display/buffer/vdi_base), and callers
++    // set metadata on every composed buffer, so an error here lands in the log
++    // at frame rate forever. The code is returned to the caller either way,
++    // and the caller is the one with the context to judge it.
++    DISPLAY_CHK_RETURN(ret != HDF_SUCCESS, ret, DISPLAY_LOGD(" fail, ret %{public}d", ret));
+     return HDF_SUCCESS;
+ }
+ 
+-- 
+2.50.1
+

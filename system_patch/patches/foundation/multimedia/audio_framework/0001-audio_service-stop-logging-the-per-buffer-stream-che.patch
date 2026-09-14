@@ -1,0 +1,44 @@
+From 362432660581538daa0712216b2b70d712220b1e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 14 Sep 2026 13:49:28 +0000
+Subject: [PATCH] audio_service: stop logging the per-buffer stream-check skip
+ as an error
+
+RendererInServer::UpdateStreamInfo runs once per buffer from
+OnWriteDataFinish, and CHECK_AND_RETURN_LOG put "the stream had been
+already checked" into the log at error level every time checkCount_ had
+passed audioCheckFreq_ - which happens about a second after a stream
+starts and then stays true for the whole of playback. Measured on the
+Plinius at 53 lines/s, a quarter of all log traffic while audio played.
+
+AudioProcessInServer::UpdateStreamInfo - the same function for the other
+stream class - already uses the silent CHECK_AND_RETURN for the identical
+condition. Match it.
+
+Change-Id: Idab9ec832bf89d41c246cd712e93657fb96d8d36
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/audio_service/server/src/renderer_in_server.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/services/audio_service/server/src/renderer_in_server.cpp b/services/audio_service/server/src/renderer_in_server.cpp
+index 7485c63624..6ddf3d3e5b 100644
+--- a/services/audio_service/server/src/renderer_in_server.cpp
++++ b/services/audio_service/server/src/renderer_in_server.cpp
+@@ -102,7 +102,12 @@ RendererInServer::~RendererInServer()
+ 
+ void RendererInServer::UpdateStreamInfo()
+ {
+-    CHECK_AND_RETURN_LOG(checkCount_ <= audioCheckFreq_, "the stream had been already checked");
++    // Past the check window is the steady state of every stream, reached
++    // within a second of starting and then true for the rest of playback.
++    // This runs once per buffer from OnWriteDataFinish, so logging it put an
++    // error in the log at buffer rate for the whole of playback. Silent, as
++    // AudioProcessInServer::UpdateStreamInfo already does it.
++    CHECK_AND_RETURN(checkCount_ <= audioCheckFreq_);
+ 
+     if ((audioCheckFreq_ == checkCount_) || (checkCount_ == 0)) {
+         AudioStreamConcurrencyDetector::GetInstance().UpdateWriteTime(processConfig_, streamIndex_);
+-- 
+2.50.1
+

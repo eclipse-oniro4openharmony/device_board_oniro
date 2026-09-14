@@ -1,0 +1,43 @@
+From ab0cac4ed596f0a00a4d306bbe89b5e43039a01d Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 14 Sep 2026 13:49:19 +0000
+Subject: [PATCH] render_service: don't log unsupported colour-space metadata
+ per frame
+
+SetBufferColorSpace logged an error whenever
+MetadataHelper::SetColorSpaceType returned anything but GSERROR_OK. On a
+device whose display buffer VDI has no metadata channel, that is every
+buffer of every frame, and the answer never changes - 14 lines/s of pure
+noise on the Plinius, from the render thread.
+
+Split the not-supported case out to debug. Genuine failures still log at
+error level.
+
+Change-Id: Ic90a6ad29867a48bc188107feffa6e39fab72e7f
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../render_thread/rs_uni_render_composer_adapter.cpp      | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/rosen/modules/render_service/core/pipeline/render_thread/rs_uni_render_composer_adapter.cpp b/rosen/modules/render_service/core/pipeline/render_thread/rs_uni_render_composer_adapter.cpp
+index 065af7ca7f..e369cc6c89 100644
+--- a/rosen/modules/render_service/core/pipeline/render_thread/rs_uni_render_composer_adapter.cpp
++++ b/rosen/modules/render_service/core/pipeline/render_thread/rs_uni_render_composer_adapter.cpp
+@@ -322,7 +322,13 @@ void RSUniRenderComposerAdapter::SetBufferColorSpace(DrawableV2::RSScreenRenderN
+         colorSpace = CM_COLORSPACE_NONE;
+     }
+ 
+-    if (MetadataHelper::SetColorSpaceType(buffer, colorSpace) != GSERROR_OK) {
++    auto ret = MetadataHelper::SetColorSpaceType(buffer, colorSpace);
++    if (ret == GSERROR_NOT_SUPPORT) {
++        // No metadata channel on this device's display buffer VDI. That is a
++        // fixed property, answered the same way for every buffer, so an error
++        // per composed buffer would be pure noise.
++        RS_LOGD("RSUniRenderComposerAdapter::SetBufferColorSpace color space metadata not supported");
++    } else if (ret != GSERROR_OK) {
+         RS_LOGE("RSUniRenderComposerAdapter::SetBufferColorSpace set color space fail");
+     }
+ }
+-- 
+2.50.1
+
