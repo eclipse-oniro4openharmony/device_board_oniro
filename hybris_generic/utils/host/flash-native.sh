@@ -49,6 +49,14 @@
 #          (super's UT rootfs lives in system_a, which we overwrite — a full
 #           UT restore additionally needs the channel rootfs push, plan P9)
 #
+# Wiping /data (-w/--wipe) erases the `userdata` partition rather than
+# writing an image to it; OHOS reformats it on the next boot, because
+# fstab.<device> marks /data `formattable` and init falls back to a format
+# once e2fsck cannot repair the erased partition.  Use it for a clean-slate
+# factory reset, or when coming from stock VollaOS / UT — their f2fs + FBE
+# /data cannot be mounted by OHOS at all.  `--wipe=userdata,metadata` also
+# clears Android's FBE key blob, which a later stock restore expects empty.
+#
 # Host prerequisites: `fastboot` (Android platform-tools) on whichever host
 # the phone is plugged into — this one, or the `--remote` ssh host.
 #
@@ -65,6 +73,8 @@ REMOTE="${FLASH_REMOTE:-}"                       # empty = phone on this host
 REMOTE_DIR="${FLASH_REMOTE_DIR:-/tmp/flash-native}"
 SERIAL=""
 ONLY=""
+WIPE=0
+WIPE_PARTS="userdata"
 REBOOT=1
 DRY_RUN=0
 declare -a IMAGE_OVERRIDES=()
@@ -90,8 +100,14 @@ Options:
                            (default: /tmp/flash-native; cleaned up afterwards)
   -s, --serial SERIAL      pass `-s SERIAL` to fastboot (several devices attached)
       --only LIST          comma-separated partitions to flash, e.g.
-                           --only boot_a,init_boot_a  (skips the 3 GB super)
+                           --only boot_a,init_boot_a  (skips the 3 GB super);
+                           --only none flashes nothing — pair it with --wipe
       --image PART=PATH    override the image flashed to PART (repeatable)
+  -w, --wipe               wipe /data: erase the `userdata` partition before
+                           flashing (OHOS reformats it on the next boot).
+                           A factory reset — ALL user data is lost.
+      --wipe=LIST          wipe those partitions instead of just `userdata`,
+                           e.g. --wipe=userdata,metadata
       --no-reboot          leave the device in fastboot when done
   -n, --dry-run            print the commands instead of running them
   -h, --help               this text
@@ -105,6 +121,12 @@ Examples:
 
   # kernel-only rebuild: skip super, keep the device in fastboot
   ./flash-native.sh -d x23 --only boot_a --no-reboot
+
+  # reflash everything and start from a clean /data
+  ./flash-native.sh -d ansuz --wipe
+
+  # factory reset only: wipe /data, flash nothing
+  ./flash-native.sh -d ansuz --only none --wipe
 EOF
 }
 
@@ -126,6 +148,8 @@ while [[ $# -gt 0 ]]; do
         --only=*)        ONLY="${1#*=}"; shift ;;
         --image)         need_val "$@"; IMAGE_OVERRIDES+=("$2"); shift 2 ;;
         --image=*)       IMAGE_OVERRIDES+=("${1#*=}"); shift ;;
+        -w|--wipe)       WIPE=1; shift ;;
+        --wipe=*)        WIPE=1; WIPE_PARTS="${1#*=}"; shift ;;
         --no-reboot)     REBOOT=0; shift ;;
         -n|--dry-run)    DRY_RUN=1; shift ;;
         -h|--help)       usage; exit 0 ;;
@@ -177,8 +201,10 @@ for ov in ${IMAGE_OVERRIDES[@]+"${IMAGE_OVERRIDES[@]}"}; do
     (( found )) || die "--image: '$ov_part' is not a partition of $DEVICE (${PART[*]})"
 done
 
-# --only LIST filter
-if [[ -n "$ONLY" ]]; then
+# --only LIST filter.  `--only none` selects nothing — for a wipe-only run.
+if [[ "$ONLY" == "none" ]]; then
+    PART=(); IMG=(); REQ=()
+elif [[ -n "$ONLY" ]]; then
     IFS=',' read -r -a want <<< "$ONLY"
     for w in "${want[@]}"; do
         [[ " ${PART[*]} " == *" $w "* ]] \
@@ -193,19 +219,32 @@ if [[ -n "$ONLY" ]]; then
     PART=("${sel_part[@]}"); IMG=("${sel_img[@]}"); REQ=("${sel_req[@]}")
 fi
 
+# --wipe LIST.  These are erased, not written, so they need no image and are
+# not slotted (`userdata`, not `userdata_a`).
+declare -a WIPE_LIST=()
+if (( WIPE )); then
+    IFS=',' read -r -a WIPE_LIST <<< "$WIPE_PARTS"
+    (( ${#WIPE_LIST[@]} )) || die "--wipe: empty partition list"
+    for w in "${WIPE_LIST[@]}"; do
+        [[ "$w" =~ ^[A-Za-z0-9_.-]+$ ]] || die "--wipe: '$w' is not a partition name"
+    done
+fi
+
 # Drop missing optional images; a missing required one is fatal.
 declare -a keep_part=() keep_img=()
-for i in "${!PART[@]}"; do
-    if [[ -f "${IMG[$i]}" ]]; then
-        keep_part+=("${PART[$i]}"); keep_img+=("${IMG[$i]}")
-    elif [[ "${REQ[$i]}" == "required" ]]; then
-        die "${IMG[$i]} missing (needed for ${PART[$i]}) — build it first"
-    else
-        echo "Note: ${IMG[$i]} not present — skipping ${PART[$i]}"
-    fi
-done
-(( ${#keep_part[@]} )) || die "nothing to flash"
-PART=("${keep_part[@]}"); IMG=("${keep_img[@]}")
+if (( ${#PART[@]} )); then
+    for i in "${!PART[@]}"; do
+        if [[ -f "${IMG[$i]}" ]]; then
+            keep_part+=("${PART[$i]}"); keep_img+=("${IMG[$i]}")
+        elif [[ "${REQ[$i]}" == "required" ]]; then
+            die "${IMG[$i]} missing (needed for ${PART[$i]}) — build it first"
+        else
+            echo "Note: ${IMG[$i]} not present — skipping ${PART[$i]}"
+        fi
+    done
+fi
+(( ${#keep_part[@]} || WIPE )) || die "nothing to flash"
+PART=(${keep_part[@]+"${keep_part[@]}"}); IMG=(${keep_img[@]+"${keep_img[@]}"})
 
 # ---------------------------------------------------------------------------
 # Command plumbing — everything below runs either locally or over ssh.
@@ -293,18 +332,38 @@ if [[ -n "$REMOTE" ]]; then
 else
     echo "fastboot: local — phone plugged into this host${SERIAL:+ [-s $SERIAL]}"
 fi
-echo "Flashing:"
-for i in "${!PART[@]}"; do
-    printf '  %-14s <- %s (%s)\n' "${PART[$i]}" "${IMG[$i]}" "$(human "${IMG[$i]}")"
-done
+if (( WIPE )); then
+    echo "Wiping:   ${WIPE_LIST[*]} — ALL user data on the device is lost"
+fi
+if (( ${#PART[@]} )); then
+    echo "Flashing:"
+    for i in "${!PART[@]}"; do
+        printf '  %-14s <- %s (%s)\n' "${PART[$i]}" "${IMG[$i]}" "$(human "${IMG[$i]}")"
+    done
+else
+    echo "Flashing: nothing (--only none)"
+fi
 echo
+
+# ---------------------------------------------------------------------------
+# Wipe.  Before the flash: LK refuses `erase` on some partitions, and finding
+# that out after a 3 GB super upload wastes several minutes.  /data is left
+# unformatted — OHOS init formats it on the next boot (`formattable` in
+# fstab.<device>).
+# ---------------------------------------------------------------------------
+if (( WIPE )); then
+    for w in "${WIPE_LIST[@]}"; do
+        echo "==> Erasing $w"
+        fb erase "$w"
+    done
+fi
 
 # ---------------------------------------------------------------------------
 # Remote mode: stage the images on the relay host first.  fastboot can only
 # flash from a local file, so each image is scp'd to $REMOTE_DIR/<part>.img.
 # ---------------------------------------------------------------------------
-declare -a SRC=("${IMG[@]}")
-if [[ -n "$REMOTE" ]]; then
+declare -a SRC=(${IMG[@]+"${IMG[@]}"})
+if [[ -n "$REMOTE" ]] && (( ${#PART[@]} )); then
     declare -a stale=()
     for i in "${!PART[@]}"; do
         SRC[$i]="$REMOTE_DIR/${PART[$i]}.img"
@@ -322,13 +381,15 @@ fi
 # Flash
 # ---------------------------------------------------------------------------
 n=${#PART[@]}
-for i in "${!PART[@]}"; do
-    echo "==> [$((i + 1))/$n] Flashing ${PART[$i]}"
-    fb flash "${PART[$i]}" "${SRC[$i]}"
-done
+if (( n )); then
+    for i in "${!PART[@]}"; do
+        echo "==> [$((i + 1))/$n] Flashing ${PART[$i]}"
+        fb flash "${PART[$i]}" "${SRC[$i]}"
+    done
 
-if [[ -n "$REMOTE" ]]; then
-    sh_remote rm -f "${SRC[@]}"          # the relay's /tmp is usually tmpfs
+    if [[ -n "$REMOTE" ]]; then
+        sh_remote rm -f "${SRC[@]}"      # the relay's /tmp is usually tmpfs
+    fi
 fi
 
 if (( REBOOT )); then
