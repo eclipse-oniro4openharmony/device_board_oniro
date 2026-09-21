@@ -64,6 +64,10 @@ push() {
             [ -f "$p" ] || continue
             $HDC file send "$p" "$DEVICE_DIR/patches/$(basename "$p")"
         done
+        # composer-service is bind-mounted over an executable; hdc lands it
+        # 0644, and init then fails to exec the composer on every restart
+        # (hwcomposer-2-1 "restarting", SurfaceFlinger never finds IComposer).
+        $HDC shell "chmod 755 $DEVICE_DIR/patches/composer-service"
     fi
     $HDC shell "ls -la $DEVICE_DIR $DEVICE_DIR/images"
 }
