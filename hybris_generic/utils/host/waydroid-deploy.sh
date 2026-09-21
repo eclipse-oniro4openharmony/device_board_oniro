@@ -3,9 +3,9 @@
 #
 # All code and configuration of the Waydroid stack ships in system.img, built
 # when the product sets hybris_generic_soc_feature_waydroid (it does for
-# hybris_generic): compositor, waydroidd, supervisor, the patch table, the prop
-# and hosthals files, the gralloc graft, the "Android Apps" front-end.  What a
-# device still needs is DATA, and that is all this script provides:
+# hybris_generic): compositor, waydroidd, supervisor, the prop and hosthals
+# files, the gralloc graft, the "Android Apps" front-end.  What a device still
+# needs is DATA, and that is all this script provides:
 #
 #   /data/waydroid/images/{system,vendor}.img   the two sha256-pinned upstream
 #                                               images, pushed unmodified
@@ -18,9 +18,8 @@
 # brings the container up at boot and keeps it, for an instant first open at
 # the price of its RAM.
 #
-# data.img is created by waydroidd on first start; the binary patches are
-# derived by waydroidd on every start; the graft is assembled by the supervisor
-# on every start.  Nothing is compiled or patched on this host.
+# data.img is created by waydroidd on first start and the graft is assembled by
+# the supervisor on every start.  Nothing is compiled or patched on this host.
 #
 # Usage:
 #   waydroid-deploy.sh              # everything (first run: ~7 min, 2 GB push)
@@ -29,6 +28,10 @@
 #                                   # device "Android Apps" offers the download
 #   waydroid-deploy.sh --no-verify  # don't open the app and wait for Android
 #   waydroid-deploy.sh --autostart  # start at boot instead of on demand
+#   waydroid-deploy.sh --wipe-data  # also drop the container's /data (data.img).
+#                                   # REQUIRED when the image pin crosses an
+#                                   # Android major version: an A13 container
+#                                   # /data under an A16 image boot-loops.
 #   waydroid-deploy.sh --disable    # switch it off again (keeps the data)
 #
 # Env: HDC (default `hdc`).
@@ -38,13 +41,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEV=/data/waydroid
 HDC="${HDC:-hdc}"
 
-do_images=1; do_verify=1; do_disable=0; autostart=0
+do_images=1; do_verify=1; do_disable=0; autostart=0; wipe_data=0
 for a in "$@"; do case "$a" in
     --no-images) do_images=0 ;;
     --no-verify) do_verify=0 ;;
     --disable) do_disable=1 ;;
     --autostart) autostart=1 ;;
-    -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+    --wipe-data) wipe_data=1 ;;
+    -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
     *) echo "unknown option $a" >&2; exit 2 ;;
 esac; done
 
@@ -63,14 +67,12 @@ if [ "$do_disable" = 1 ]; then
     exit 0
 fi
 
-dsh "[ -x /system/bin/waydroidd ] && [ -f /system/etc/waydroid/patches.conf ] && echo present" |
+dsh "[ -x /system/bin/waydroidd ] && [ -f /system/etc/waydroid/images.manifest ] && echo present" |
     grep -q present || die "this image has no Android app support — build the
 product with hybris_generic_soc_feature_waydroid = true (vendor config.json) and flash it"
 
 step "fetching + verifying the pinned container images"
 bash "$SCRIPT_DIR/waydroid-images.sh" fetch >/dev/null
-step "checking patches.conf against them"
-bash "$SCRIPT_DIR/waydroid-patches.sh"
 
 if [ "$do_images" = 1 ]; then
     step "pushing container images (~2 GB, several minutes)"
@@ -83,6 +85,13 @@ fi
 step "removing pre-image-era leftovers from $DEV"
 dsh "rm -rf $DEV/waydroidd $DEV/patches $DEV/waydroid.prop $DEV/hosthals.xml \
             $DEV/bin/tcprelay $DEV/bin/waydroidd; rmdir $DEV/bin 2>/dev/null; true" >/dev/null
+
+if [ "$wipe_data" = 1 ]; then
+    step "wiping the container's /data (data.img)"
+    dsh "rm -f $DEV/data.img" >/dev/null
+    echo "waydroidd recreates it on the next start; everything installed"
+    echo "inside the container is gone"
+fi
 
 step "installing the Android Apps front-end"
 # Preinstalled (removable) on first boot of a fresh /data; on a device whose

@@ -4,13 +4,12 @@
 #
 # The pin is device/soc/oniro/hybris_generic/waydroid/data/images.manifest:
 #   <zip-filename> <sha256>
-# lines; system zips match *-system.zip, vendor zips *-vendor.zip.  The same
-# file is installed on the device as /system/etc/waydroid/images.manifest.
-# Zips come from the Waydroid OTA channel (sourceforge mirrors).
+# lines; system zips match *system*.zip, vendor zips *vendor*.zip, and they are
+# fetched from <base-url>/<zip>.  The same file is installed on the device as
+# /system/etc/waydroid/images.manifest.
 #
 # The two images are ALL the device needs under /data/waydroid: they are pushed
-# unmodified.  The binary patches are applied by waydroidd on every start
-# (patches.conf) and the prop / hosthals / graft files ship in system.img.
+# unmodified.  The prop / hosthals / graft files ship in system.img.
 #
 # Usage:
 #   waydroid-images.sh fetch          # download + verify + extract locally
@@ -25,10 +24,9 @@ MANIFEST="$TREE_ROOT/device/soc/oniro/hybris_generic/waydroid/data/images.manife
 DEVICE_DIR="/data/waydroid"
 HDC="${HDC:-hdc}"
 
-SF_SYSTEM="https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_arm64"
-SF_VENDOR="https://sourceforge.net/projects/waydroid/files/images/vendor/waydroid_arm64"
-
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+base_url() { awk '!/^#/ && $1=="base-url" {print $2}' "$MANIFEST"; }
 
 # Only the zips: the manifest also pins the images inside them (for waydroidd)
 # and names the download base.
@@ -36,17 +34,15 @@ manifest_entries() { awk '!/^#/ && NF==2 && $1 ~ /\.zip$/ {print $1, $2}' "$MANI
 
 fetch() {
     [ -f "$MANIFEST" ] || die "no manifest at $MANIFEST"
+    base="$(base_url)"
+    [ -n "$base" ] || die "no base-url line in $MANIFEST"
     mkdir -p "$BLOB_DIR"
     cd "$BLOB_DIR"
     while read -r zip sha; do
         if [ ! -f "$zip" ]; then
-            case "$zip" in
-                *-system.zip) url="$SF_SYSTEM/$zip/download" ;;
-                *-vendor.zip) url="$SF_VENDOR/$zip/download" ;;
-                *) die "unrecognized zip name $zip" ;;
-            esac
             echo "downloading $zip ..."
-            curl -sL -o "$zip" "$url"
+            curl -fL --progress-bar -o "$zip" "$base/$zip" ||
+                die "download of $zip failed"
         fi
         echo "$sha  $zip" | sha256sum -c - || die "sha256 mismatch for $zip"
         unzip -o -q "$zip"
