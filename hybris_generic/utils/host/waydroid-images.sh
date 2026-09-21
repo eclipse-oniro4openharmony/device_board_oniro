@@ -2,22 +2,26 @@
 # waydroid-images.sh — fetch, verify and deploy the pinned Waydroid
 # container images for hybris_generic (plan: android_app_compat_plan.md).
 #
-# The pin lives in <tree>/halium-blobs/waydroid/images.manifest as
+# The pin is device/soc/oniro/hybris_generic/waydroid/data/images.manifest:
 #   <zip-filename> <sha256>
-# lines; system zips match *-system.zip, vendor zips *-vendor.zip.
+# lines; system zips match *-system.zip, vendor zips *-vendor.zip.  The same
+# file is installed on the device as /system/etc/waydroid/images.manifest.
 # Zips come from the Waydroid OTA channel (sourceforge mirrors).
+#
+# The two images are ALL the device needs under /data/waydroid: they are pushed
+# unmodified.  The binary patches are applied by waydroidd on every start
+# (patches.conf) and the prop / hosthals / graft files ship in system.img.
 #
 # Usage:
 #   waydroid-images.sh fetch          # download + verify + extract locally
-#   waydroid-images.sh push           # hdc-push images + prop + hosthals
+#   waydroid-images.sh push           # hdc-push the two images
 #   waydroid-images.sh all            # fetch && push
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TREE_ROOT="$(cd "$SCRIPT_DIR/../../../../../.." && pwd)"
 BLOB_DIR="$TREE_ROOT/halium-blobs/waydroid"   # download cache (untracked)
-DATA_DIR="$SCRIPT_DIR/waydroid-data"          # the tracked source of truth
-MANIFEST="$DATA_DIR/images.manifest"
+MANIFEST="$TREE_ROOT/device/soc/oniro/hybris_generic/waydroid/data/images.manifest"
 DEVICE_DIR="/data/waydroid"
 HDC="${HDC:-hdc}"
 
@@ -53,25 +57,7 @@ push() {
     $HDC shell "mkdir -p $DEVICE_DIR/images"
     $HDC file send "$BLOB_DIR/system.img" "$DEVICE_DIR/images/system.img"
     $HDC file send "$BLOB_DIR/vendor.img" "$DEVICE_DIR/images/vendor.img"
-    # Generated once for this device family and tracked in waydroid-data/ —
-    # see that directory's README for what each file is and how to redo it.
-    for extra in waydroid.prop hosthals.xml; do
-        $HDC file send "$DATA_DIR/$extra" "$DEVICE_DIR/$extra"
-    done
-    # Binary patches bind-mounted over image files by waydroidd (see
-    # patches/README).
-    if [ -d "$BLOB_DIR/patches" ]; then
-        $HDC shell "mkdir -p $DEVICE_DIR/patches"
-        for p in "$BLOB_DIR"/patches/*; do
-            [ -f "$p" ] || continue
-            $HDC file send "$p" "$DEVICE_DIR/patches/$(basename "$p")"
-        done
-        # composer-service is bind-mounted over an executable; hdc lands it
-        # 0644, and init then fails to exec the composer on every restart
-        # (hwcomposer-2-1 "restarting", SurfaceFlinger never finds IComposer).
-        $HDC shell "chmod 755 $DEVICE_DIR/patches/composer-service"
-    fi
-    $HDC shell "ls -la $DEVICE_DIR $DEVICE_DIR/images"
+    $HDC shell "ls -la $DEVICE_DIR/images"
 }
 
 case "${1:-all}" in
