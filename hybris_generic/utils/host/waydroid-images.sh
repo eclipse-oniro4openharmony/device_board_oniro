@@ -30,7 +30,9 @@ SF_VENDOR="https://sourceforge.net/projects/waydroid/files/images/vendor/waydroi
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-manifest_entries() { awk '!/^#/ && NF==2 {print $1, $2}' "$MANIFEST"; }
+# Only the zips: the manifest also pins the images inside them (for waydroidd)
+# and names the download base.
+manifest_entries() { awk '!/^#/ && NF==2 && $1 ~ /\.zip$/ {print $1, $2}' "$MANIFEST"; }
 
 fetch() {
     [ -f "$MANIFEST" ] || die "no manifest at $MANIFEST"
@@ -49,7 +51,12 @@ fetch() {
         echo "$sha  $zip" | sha256sum -c - || die "sha256 mismatch for $zip"
         unzip -o -q "$zip"
     done < <(manifest_entries)
-    ls -la "$BLOB_DIR"/*.img
+    # What waydroidd will check on the device — fail here, not after a 2 GB push.
+    for img in system.img vendor.img; do
+        want=$(awk -v n="$img" '!/^#/ && $1==n {print $2}' "$MANIFEST")
+        [ -n "$want" ] || die "no pin for $img in $MANIFEST"
+        echo "$want  $img" | sha256sum -c - || die "sha256 mismatch for $img"
+    done
 }
 
 push() {

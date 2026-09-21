@@ -24,7 +24,9 @@
 #
 # Usage:
 #   waydroid-deploy.sh              # everything (first run: ~7 min, 2 GB push)
-#   waydroid-deploy.sh --no-images  # images are already on the device
+#   waydroid-deploy.sh --no-images  # they are already there — or you want the
+#                                   # app to fetch them itself: with none on the
+#                                   # device "Android Apps" offers the download
 #   waydroid-deploy.sh --no-verify  # don't open the app and wait for Android
 #   waydroid-deploy.sh --autostart  # start at boot instead of on demand
 #   waydroid-deploy.sh --disable    # switch it off again (keeps the data)
@@ -42,7 +44,7 @@ for a in "$@"; do case "$a" in
     --no-verify) do_verify=0 ;;
     --disable) do_disable=1 ;;
     --autostart) autostart=1 ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
     *) echo "unknown option $a" >&2; exit 2 ;;
 esac; done
 
@@ -101,6 +103,12 @@ step "opening Android Apps and waiting for Android to boot in the container"
 # Opening the app is the on-demand trigger (and harmless under --autostart).
 dsh "power-shell wakeup >/dev/null 2>&1
      aa start -b org.oniroproject.androidapps -a EntryAbility" | tail -1
+APP_IMAGES=/data/app/el2/100/base/org.oniroproject.androidapps/haps/entry/files/images
+if ! dsh "[ -f $DEV/images/system.img ] || [ -f $APP_IMAGES/system.img ] && echo have" | grep -q have; then
+    echo "no images on the device: \"Android Apps\" is now offering the one-time download"
+    echo "(~950 MB).  Tap Download there, or re-run this script without --no-images."
+    exit 0
+fi
 booted=0
 for i in $(seq 1 36); do
     sleep 5
