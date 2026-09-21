@@ -1,0 +1,5 @@
+# Waydroid image pins (W0, 2026-08-07)
+# system: lineage-20.0 (Android 13) VANILLA arm64
+lineage-20.0-20260403-VANILLA-waydroid_arm64-system.zip c4b45fad36bee7c0db8a1d9315a5be0035520c53d3d005a807735ae9b7ee79cf
+# vendor: HALIUM_13 arm64 (no HALIUM_14 published; host is Halium 14 - W0 tests this mismatch)
+lineage-20.0-20260403-HALIUM_13-waydroid_arm64-vendor.zip fc7311d2358aa6fd846d60cfa4b1b2ef8237f805c4a172fd83502cdf6d65dca5

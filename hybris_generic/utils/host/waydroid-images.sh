@@ -15,8 +15,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TREE_ROOT="$(cd "$SCRIPT_DIR/../../../../../.." && pwd)"
-BLOB_DIR="$TREE_ROOT/halium-blobs/waydroid"
-MANIFEST="$BLOB_DIR/images.manifest"
+BLOB_DIR="$TREE_ROOT/halium-blobs/waydroid"   # download cache (untracked)
+DATA_DIR="$SCRIPT_DIR/waydroid-data"          # the tracked source of truth
+MANIFEST="$DATA_DIR/images.manifest"
 DEVICE_DIR="/data/waydroid"
 HDC="${HDC:-hdc}"
 
@@ -29,6 +30,7 @@ manifest_entries() { awk '!/^#/ && NF==2 {print $1, $2}' "$MANIFEST"; }
 
 fetch() {
     [ -f "$MANIFEST" ] || die "no manifest at $MANIFEST"
+    mkdir -p "$BLOB_DIR"
     cd "$BLOB_DIR"
     while read -r zip sha; do
         if [ ! -f "$zip" ]; then
@@ -51,10 +53,10 @@ push() {
     $HDC shell "mkdir -p $DEVICE_DIR/images"
     $HDC file send "$BLOB_DIR/system.img" "$DEVICE_DIR/images/system.img"
     $HDC file send "$BLOB_DIR/vendor.img" "$DEVICE_DIR/images/vendor.img"
+    # Generated once for this device family and tracked in waydroid-data/ —
+    # see that directory's README for what each file is and how to redo it.
     for extra in waydroid.prop hosthals.xml; do
-        if [ -f "$BLOB_DIR/$extra" ]; then
-            $HDC file send "$BLOB_DIR/$extra" "$DEVICE_DIR/$extra"
-        fi
+        $HDC file send "$DATA_DIR/$extra" "$DEVICE_DIR/$extra"
     done
     # Binary patches bind-mounted over image files by waydroidd (see
     # patches/README).

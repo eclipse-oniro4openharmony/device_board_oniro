@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Waydroid (Android app compatibility) overlay for a fresh tree.
+
+  The public Oniro manifest pins the BSP repos to the Eclipse repositories on
+  their release branches, which carry no Waydroid work.  Drop this file in as
+  .repo/local_manifests/waydroid.xml before `repo sync` and the four repos
+  that carry the stack come from the private forks on their
+  android_app_compat branch instead, plus the two vendored libraries the
+  compositor links (libwayland-server and libffi), which exist in no upstream
+  manifest.
+
+  The forks are private, so `gh auth login` first; `gh auth setup-git` makes
+  git over HTTPS work for them (swap the fetch URL for git@github.com: if you
+  prefer ssh).  The bootstrap commands, and the whole first-boot walkthrough
+  (build, flash, provision /data/waydroid), are in
+  device/board/oniro/docs/hybris_generic/fresh_tree_waydroid.md
+-->
+<manifest>
+  <remote name="frankplus" fetch="https://github.com/frankplus"/>
+
+  <!-- BSP repos: same paths, private forks, Waydroid branch. -->
+  <remove-project name="device_board_oniro"/>
+  <remove-project name="device_soc_oniro"/>
+  <remove-project name="vendor_oniro"/>
+  <remove-project name="libhybris"/>
+
+  <project name="device_board_oniro_private" path="device/board/oniro"
+           remote="frankplus" revision="android_app_compat"
+           groups="default,ohos:mini,ohos:small,ohos:standard,ohos:chipset"/>
+  <project name="device_soc_oniro_private" path="device/soc/oniro"
+           remote="frankplus" revision="android_app_compat"
+           groups="default,ohos:standard,ohos:chipset"/>
+  <project name="vendor_oniro_private" path="vendor/oniro"
+           remote="frankplus" revision="android_app_compat"
+           groups="default,ohos:mini,ohos:standard,ohos:chipset"/>
+  <!-- Enables the always-present server_wlegl sources (WANT_WAYLAND) and
+       exports libhybris-platformcommon as an inner_kit. -->
+  <project name="libhybris_private" path="third_party/libhybris"
+           remote="frankplus" revision="android_app_compat"
+           groups="default,ohos:standard,ohos:chipset"/>
+
+  <!-- Vendored for the Waydroid display bridge; no upstream OHOS component
+       exists.  Protocol code is pregenerated, so no scanner runs at build
+       time.  See each repo's BUILD.gn / regenerate.sh. -->
+  <project name="wayland_private" path="third_party/wayland"
+           remote="frankplus" revision="master"
+           groups="default,ohos:standard,ohos:chipset"/>
+  <project name="libffi_private" path="third_party/libffi"
+           remote="frankplus" revision="master"
+           groups="default,ohos:standard,ohos:chipset"/>
+</manifest>

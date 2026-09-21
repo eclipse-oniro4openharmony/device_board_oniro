@@ -1,0 +1,26 @@
+<!-- Trimmed host-HAL passthrough for hybris_generic (plan D11):
+     keep buffer allocation + codecs, drop every HAL the OHOS side
+     already owns a client of (camera, drm, power, thermal, vibrator,
+     gnss, nfc, ...) to avoid double-client contention. -->
+<hosthals version="1.0">
+    <hal>
+        <name>android.hardware.graphics.allocator</name>
+        <priority>true</priority>
+    </hal>
+    <hal>
+        <name>android.hardware.graphics.mapper</name>
+        <priority>true</priority>
+    </hal>
+    <hal>
+        <name>android.hardware.memtrack</name>
+        <priority>true</priority>
+    </hal>
+    <hal>
+        <name>android.hardware.media.c2</name>
+        <priority>true</priority>
+    </hal>
+    <hal>
+        <name>vendor.mediatek.hardware.mms</name>
+        <priority>true</priority>
+    </hal>
+</hosthals>
