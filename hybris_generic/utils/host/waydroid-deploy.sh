@@ -123,8 +123,10 @@ for i in $(seq 1 36); do
     sleep 5
     CPID=$($HDC shell "cat $DEV/container.pid 2>/dev/null" 2>/dev/null | tr -dc 0-9)
     [ -z "$CPID" ] && continue
-    $HDC shell "timeout 8 nsenter -t $CPID -m -p -- /system/bin/getprop sys.boot_completed \
-                > /data/local/tmp/wd_bc 2>&1; cat /data/local/tmp/wd_bc" 2>/dev/null |
+    # wdctl asks Android itself (IPlatform over the container's binder); it
+    # needs the container thawed, which the open app keeps it.  No nsenter:
+    # a hung one wedges hdcd.
+    $HDC shell "wdctl -t 3000 getprop sys.boot_completed 2>/dev/null" 2>/dev/null |
         grep -q '^1' && { echo "container $CPID: Android booted after ~$((i * 5))s"; booted=1; break; }
 done
 $HDC shell "cat $DEV/supervisor.log" 2>/dev/null | tail -5
