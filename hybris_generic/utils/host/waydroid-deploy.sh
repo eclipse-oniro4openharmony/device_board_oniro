@@ -4,7 +4,7 @@
 # All code and configuration of the Waydroid stack ships in system.img, built
 # when the product sets hybris_generic_soc_feature_waydroid (it does for
 # hybris_generic): compositor, waydroidd, supervisor, the prop and hosthals
-# files, the gralloc graft, the "Android Apps" front-end.  What a device still
+# files, the gralloc graft, the Waydroid front-end.  What a device still
 # needs is DATA, and that is all this script provides:
 #
 #   /data/waydroid/images/{system,vendor}.img   the two sha256-pinned upstream
@@ -25,7 +25,7 @@
 #   waydroid-deploy.sh              # everything (first run: ~7 min, 2 GB push)
 #   waydroid-deploy.sh --no-images  # they are already there — or you want the
 #                                   # app to fetch them itself: with none on the
-#                                   # device "Android Apps" offers the download
+#                                   # device Waydroid offers the download
 #   waydroid-deploy.sh --no-verify  # don't open the app and wait for Android
 #   waydroid-deploy.sh --autostart  # start at boot instead of on demand
 #   waydroid-deploy.sh --wipe-data  # also drop the container's /data (data.img).
@@ -93,7 +93,7 @@ if [ "$wipe_data" = 1 ]; then
     echo "inside the container is gone"
 fi
 
-step "installing the Android Apps front-end"
+step "installing the Waydroid front-end"
 # Preinstalled (removable) on first boot of a fresh /data; on a device whose
 # /data predates this image BMS does not rescan, so install it by hand.
 # -r: also replaces an older copy — the front-end and the compositor speak a
@@ -108,13 +108,13 @@ dsh "param set persist.waydroid.autostart $autostart
 
 [ "$do_verify" = 0 ] && { echo; echo "deployed (verification skipped)"; exit 0; }
 
-step "opening Android Apps and waiting for Android to boot in the container"
+step "opening Waydroid and waiting for Android to boot in the container"
 # Opening the app is the on-demand trigger (and harmless under --autostart).
 dsh "power-shell wakeup >/dev/null 2>&1
      aa start -b org.oniroproject.androidapps -a EntryAbility" | tail -1
 APP_IMAGES=/data/app/el2/100/base/org.oniroproject.androidapps/haps/entry/files/images
 if ! dsh "[ -f $DEV/images/system.img ] || [ -f $APP_IMAGES/system.img ] && echo have" | grep -q have; then
-    echo "no images on the device: \"Android Apps\" is now offering the one-time download"
+    echo "no images on the device: Waydroid is now offering the one-time download"
     echo "(~950 MB).  Tap Download there, or re-run this script without --no-images."
     exit 0
 fi
@@ -132,4 +132,4 @@ done
 $HDC shell "cat $DEV/supervisor.log" 2>/dev/null | tail -5
 [ $booted = 1 ] || die "Android did not boot — see $DEV/supervisor.log and $DEV/waydroidd.log"
 echo
-echo "done.  Android Apps is open on the device."
+echo "done.  Waydroid is open on the device."
