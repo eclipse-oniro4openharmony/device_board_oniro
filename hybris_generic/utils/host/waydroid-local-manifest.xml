@@ -4,11 +4,15 @@
 
   The public Oniro manifest pins the BSP repos to the Eclipse repositories on
   their release branches, which carry no Waydroid work.  Drop this file in as
-  .repo/local_manifests/waydroid.xml before `repo sync` and the four repos
-  that carry the stack come from the private forks on their
+  .repo/local_manifests/waydroid.xml before `repo sync` and the three BSP
+  repos that carry the stack come from the private forks on their
   android_app_compat branch instead, plus the two vendored libraries the
   compositor links (libwayland-server and libffi), which exist in no upstream
   manifest.
+
+  libhybris is no longer overridden: its `server_wlegl` build wiring landed on
+  the public OpenHarmony-6.1-LTS branch (2026-09-22), which is what the
+  upstream manifest already pins, and the wiring is gated off by default.
 
   The forks are private, so `gh auth login` first; `gh auth setup-git` makes
   git over HTTPS work for them (swap the fetch URL for git@github.com: if you
@@ -23,7 +27,6 @@
   <remove-project name="device_board_oniro"/>
   <remove-project name="device_soc_oniro"/>
   <remove-project name="vendor_oniro"/>
-  <remove-project name="libhybris"/>
 
   <project name="device_board_oniro_private" path="device/board/oniro"
            remote="frankplus" revision="android_app_compat"
@@ -34,11 +37,6 @@
   <project name="vendor_oniro_private" path="vendor/oniro"
            remote="frankplus" revision="android_app_compat"
            groups="default,ohos:mini,ohos:standard,ohos:chipset"/>
-  <!-- Enables the always-present server_wlegl sources (WANT_WAYLAND) and
-       exports libhybris-platformcommon as an inner_kit. -->
-  <project name="libhybris_private" path="third_party/libhybris"
-           remote="frankplus" revision="android_app_compat"
-           groups="default,ohos:standard,ohos:chipset"/>
 
   <!-- Vendored for the Waydroid display bridge; no upstream OHOS component
        exists.  Protocol code is pregenerated, so no scanner runs at build
