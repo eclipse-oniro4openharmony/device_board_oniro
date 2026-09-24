@@ -45,3 +45,23 @@ Caveat: under strace, init is not PID 1 of the NS — `CgroupSetup()`
 ("can be done only by init process") and everything downstream of it
 fails, so service starts break.  Use it to debug init's own early
 crashes only; remove the overlay to test service bring-up.
+
+## screencast/
+
+Live screen mirroring for demos: `screencast_agent.cpp` is a uitest
+extension that serves the display as MJPEG over HTTP (`GET /` viewer page,
+`GET /stream[?scale=0.1..0.9]`).  It drives uitest's own screen-copy engine
+(`test/testfwk/arkxtest/uitest/addon/screen_copy.cpp`: screenshot polling,
+change detection, libjpeg), which is reachable only from a library that
+`uitest start-daemon singleness --extension-name <so>` dlopen()s from
+`/data/local/tmp`.  libc-only, built with the plain SDK NDK.
+
+Everything (build, push, start, port forward) is `utils/host/screencast.sh`
+(`--remote <relay>` when the hdc server is elsewhere, `--wifi` to serve on
+the phone's WiFi address instead of loopback, `--stop`).  Open the printed
+URL in a browser; double-click for fullscreen.  Measured on the Plinius:
+28–31 fps during continuous animation at scale 0.3–0.7 (the device
+screenshot is the ceiling, not the link — 23 Mbit/s at 0.7 through the Pi
+relay was fine), first frame ~0.3 s after connecting.  Frames are only sent
+when the screen changes.  The agent logs to `/data/local/tmp/screencast.log`
+(uitest's printLog goes to the LOG_APP hilog type, which is not shown).
