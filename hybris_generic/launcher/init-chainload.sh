@@ -410,6 +410,32 @@ mount -o bind /sys  /root/sys
 mount -o bind /dev  /root/dev
 
 # ---------------------------------------------------------------------------
+# Stage 5b — hand the bootloader serial to OHOS init as ohos.boot.sn.
+# OHOS derives the device UDID (const.product.devUdid) from ohos.boot.sn,
+# which it only takes from /proc/cmdline or an eMMC cid — neither exists
+# here (UFS, and LK passes the serial as androidboot.serialno in
+# bootconfig on ansuz / cmdline on the X23).  Without a UDID softbus never
+# enables networking, so no distributed feature (device discovery,
+# pairing, KV sync, cross-device abilities) works.  Shadow the chroot's
+# /proc/cmdline with a copy that carries the serial.
+# ---------------------------------------------------------------------------
+if ! grep -q 'ohos.boot.sn=' /proc/cmdline; then
+    serial=$(sed -n 's/^androidboot\.serialno = "\(.*\)"$/\1/p' /proc/bootconfig 2>/dev/null)
+    [ -n "$serial" ] || \
+        serial=$(sed -n 's/.*androidboot\.serialno=\([^ ]*\).*/\1/p' /proc/cmdline)
+    if [ -n "$serial" ]; then
+        # Prepend: init's tokenizer keeps the file's trailing newline in
+        # the LAST value, and a value with '\n' is rejected by WriteParam.
+        echo "ohos.boot.sn=$serial $(cat /proc/cmdline)" > /dev/.ohos-cmdline
+        mount -o bind,ro /dev/.ohos-cmdline /root/proc/cmdline \
+            && echo "[init-chainload] ohos.boot.sn=$serial" \
+            || echo "[init-chainload] cmdline shadow failed — no UDID (non-fatal)"
+    else
+        echo "[init-chainload] no androidboot.serialno — no UDID (non-fatal)"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Stage 6 — exec OHOS init.  PID 1 is preserved by exec.
 #
 # Use `chroot`, not busybox `switch_root`.  switch_root deletes the old
