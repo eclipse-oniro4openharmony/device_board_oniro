@@ -59,7 +59,10 @@ change detection, libjpeg), which is reachable only from a library that
 Everything (build, push, start, port forward) is `utils/host/screencast.sh`
 (`--remote <relay>` when the hdc server is elsewhere, `--wifi` to serve on
 the phone's WiFi address instead of loopback, `--stop`).  Open the printed
-URL in a browser; double-click for fullscreen.  Measured on the Plinius:
+URL in a browser; double-click for fullscreen.  `screencast.sh --pack DIR` writes
+`DIR/oniro-screencast.tar.gz` (script + prebuilt agent + README) for a
+presentation laptop with only bash and hdc: no tree, no NDK.  `--no-push`
+reuses an agent already on the device.  Measured on the Plinius:
 28–31 fps during continuous animation at scale 0.3–0.7 (the device
 screenshot is the ceiling, not the link — 23 Mbit/s at 0.7 through the Pi
 relay was fine), first frame ~0.3 s after connecting.  Frames are only sent
