@@ -1,0 +1,43 @@
+From 70020d601deb9326b409477f8d60c975b9140c11 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 9 Oct 2026 10:14:09 +0000
+Subject: [PATCH] hybris_generic: let vendor/oniro replace the settingsdata hap
+
+With the Oniro HAP set opted in (oniro_install_custom_haps),
+com.ohos.settingsdata ships from vendor/oniro instead of from here: a build of
+//applications/standard/settings_data whose default_settings.json turns
+SceneBoard's lock/unlock sounds off.  The app seeds its database from that
+file, a rawfile inside the hap, and reads defaults from nowhere else, so a
+different default needs a different hap.
+
+Both targets install app/com.ohos.settingsdata/SettingsData.hap, so exactly
+one of them must be active.  The arg is false by default, so out of the box
+the stock hap still ships.
+
+Change-Id: I8f604d8da6ad9098961706d9ec563ee2717b8f9b
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 991473b..e83be4a 100755
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -506,5 +506,13 @@ group("hap") {
+     if (oniro_install_custom_haps) {
+       deps -= [ "//applications/standard/hap:camera_hap" ]
+     }
++
++    # Likewise com.ohos.settingsdata: vendor/oniro builds it from
++    # //applications/standard/settings_data with Oniro defaults in its
++    # default_settings.json (lock screen sounds off). Both install
++    # app/com.ohos.settingsdata/SettingsData.hap.
++    if (oniro_install_custom_haps) {
++      deps -= [ "//applications/standard/hap:settingsData_hap" ]
++    }
+   }
+ }
+-- 
+2.50.1
+
