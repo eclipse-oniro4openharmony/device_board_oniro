@@ -2,8 +2,8 @@
 # waydroid-deploy.sh — provision Android app support on a flashed device.
 #
 # All code and configuration of the Waydroid stack ships in system.img, built
-# when the product sets hybris_generic_soc_feature_waydroid (it does for
-# hybris_generic): compositor, waydroidd, supervisor, the prop and hosthals
+# when the product sets hybris_generic_soc_feature_waydroid (off by default;
+# see device/soc/oniro/hybris_generic/waydroid/README.md): compositor, waydroidd, supervisor, the prop and hosthals
 # files, the gralloc graft, the Waydroid front-end.  What a device still
 # needs is DATA, and that is all this script provides:
 #

@@ -21,7 +21,7 @@
   Both are public forks: the upstream release tag plus one commit that only
   adds the OpenHarmony build files.  The whole first-boot walkthrough
   (build, flash, provision /data/waydroid) is in
-  device/board/oniro/docs/hybris_generic/fresh_tree_waydroid.md
+  device/soc/oniro/hybris_generic/waydroid/README.md
 -->
 <manifest>
   <remote name="frankplus" fetch="https://github.com/frankplus"/>

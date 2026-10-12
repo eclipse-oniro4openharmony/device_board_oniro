@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # waydroid-adb.sh — wire workstation adb (and scrcpy) to the Waydroid
-# container on the device (android_app_compat_plan.md §W4).
+# container on the device (device/soc/oniro/hybris_generic/waydroid/README.md).
 #
 # Chain: adb → [ssh -L] → Pi hdc fport → device tcprelay (127.0.0.1:15555,
 # spawned by waydroidd) → veth → container adbd (192.168.240.2:5555).

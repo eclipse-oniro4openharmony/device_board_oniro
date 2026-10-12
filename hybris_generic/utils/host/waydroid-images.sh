@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # waydroid-images.sh — fetch, verify and deploy the pinned Waydroid
-# container images for hybris_generic (plan: android_app_compat_plan.md).
+# container images for hybris_generic (overview:
+# device/soc/oniro/hybris_generic/waydroid/README.md).
 #
 # The pin is device/soc/oniro/hybris_generic/waydroid/data/images.manifest:
 #   <zip-filename> <sha256>
