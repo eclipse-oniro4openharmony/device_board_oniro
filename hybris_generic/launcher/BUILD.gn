@@ -23,10 +23,12 @@ ohos_executable("androidd") {
 # Phase N9.2 — native-boot replacement for the Android `wmt_loader`
 # connsys chip-detect step.  Runs the /dev/wmtdetect ioctl sequence that
 # fires the kernel's WMT_init(); without it the MTK WiFi/BT function-on
-# path is dead.  Pure C, libc only.  See phase_n9_firmware_peripherals.md.
+# path is dead.  Pure C; libbegetutil only to publish ohos.hybris.wifi_armed.
+# See phase_n9_firmware_peripherals.md.
 ohos_executable("wmtdetect_init") {
   sources = [ "wmtdetect-init.c" ]
   output_name = "wmtdetect-init"
+  external_deps = [ "init:libbegetutil" ]
   cflags = [
     "-Wall",
     "-Wextra",

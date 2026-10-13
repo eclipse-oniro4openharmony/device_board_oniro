@@ -52,6 +52,13 @@
 // failing "Could not set interface wlan0 flags (UP): No such device".
 // It gates on whether the interface can actually be brought UP instead.
 //
+// The outcome is published as ohos.hybris.wifi_armed ("1" or "failed").
+// A device whose init cfg sets it to "0" before starting `wmtwifi-on`
+// (ansuz) gets the vendor wifi HAL holding the framework's STA start until
+// it changes -- device/soc/oniro/hybris_generic/hardware/wlan/
+// wifi_hal_hybris.cpp.  That, not the retry cadence below, is what closes
+// the boot race; the cadence still decides how *soon* WiFi comes up.
+//
 // See phase_n9_firmware_peripherals.md N9.2 and phase_p8_wifi_audio.md.
 
 #include <errno.h>
@@ -64,6 +71,8 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "parameter.h"
 
 // From kernel drivers/misc/mediatek/connectivity/common/common_detect/
 // wmt_detect.h.  Magic 'w', payload sizeof(int).
@@ -125,6 +134,8 @@
 // first diagnosis of the boot race.  The file is truncated per run, so
 // it always holds exactly the last bring-up and never grows.
 #define WIFI_ON_LOG "/data/log/wmtdetect-init.log"
+
+#define WIFI_ARMED_PARAM "ohos.hybris.wifi_armed"
 
 static FILE *g_log;
 
@@ -354,6 +365,7 @@ static int do_wifi_on(void)
 
 		if (poll_for(wlan0_ready, WIFI_ON_SETTLE_MS)) {
 			trace("wifi-on OK on attempt %d", i);
+			SetParameter(WIFI_ARMED_PARAM, "1");
 			return 0;
 		}
 		trace("try %d: wrote %zd but wlan0 still not armed", i, w);
@@ -361,6 +373,7 @@ static int do_wifi_on(void)
 	}
 
 	trace("wifi-on gave up after %d attempts", WIFI_ON_MAX_RETRY);
+	SetParameter(WIFI_ARMED_PARAM, "failed");
 	return 1;
 }
 

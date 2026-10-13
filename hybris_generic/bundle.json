@@ -12,7 +12,8 @@
       "features": [],
       "deps": {
         "components": [
-          "hilog"
+          "hilog",
+          "init"
         ],
         "third_party": [
           "alsa-lib",
