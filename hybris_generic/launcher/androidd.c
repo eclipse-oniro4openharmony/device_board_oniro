@@ -37,6 +37,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <netdb.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -49,11 +50,16 @@
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/socket.h>
 #include <sys/sysmacros.h>
 #include <sys/types.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #include <linux/android/binderfs.h>
 #include <linux/loop.h>
@@ -586,6 +592,137 @@ static void nv_attach(void)
     }
 }
 
+/* -------------------------------------------------------------------------
+ * Persistent corners of the Halium /data
+ * -------------------------------------------------------------------------
+ * The guest's /data is a tmpfs (see child_main), which is right for almost
+ * everything the HALs write there — but not for MediaTek's GNSS engine.
+ * mnld keeps its learned state in /data/vendor/gps (mtkgps.dat: almanac,
+ * ephemeris, last position and time; plus the downloaded EPO/QEPO
+ * prediction files), and mtk_agpsd its SUPL state in
+ * /data/vendor/agps_supl.  On a tmpfs every boot's first fix is a factory
+ * cold start.
+ *
+ * So these few directories are bind-mounted from the OHOS /data, which is
+ * a real, persistent filesystem on native boot (the modem NV images above
+ * live there too).  Halium init's own `mkdir <dir> <mode> <user> <group>`
+ * for each still runs and fixes up mode and ownership on the bound dir.
+ * ---------------------------------------------------------------------- */
+
+#define PERSIST_DATA_DIR "/data/vendor/halium-data"
+
+static const char *const g_persist_dirs[] = {
+    "vendor/gps",
+    "vendor/agps_supl",
+};
+#define PERSIST_DIR_COUNT ((int)(sizeof g_persist_dirs / sizeof g_persist_dirs[0]))
+
+/* Child side, pre-pivot: OHOS paths and ANDROID_ROOT are both visible, and
+ * ANDROID_ROOT/data is the fresh tmpfs.  Best-effort — a failed bind just
+ * leaves that directory volatile, as it always was. */
+static void persist_attach(void)
+{
+    for (int i = 0; i < PERSIST_DIR_COUNT; i++) {
+        char src[PATH_MAX], dst[PATH_MAX];
+        snprintf(src, sizeof src, "%s/%s", PERSIST_DATA_DIR, g_persist_dirs[i]);
+        snprintf(dst, sizeof dst, "%s/data/%s", ANDROID_ROOT, g_persist_dirs[i]);
+        if (mkdir_p(src, 0770) < 0 || mkdir_p(dst, 0770) < 0) {
+            logmsg("persist: mkdir for %s: %s (non-fatal)", g_persist_dirs[i],
+                   strerror(errno));
+            continue;
+        }
+        if (mount(src, dst, NULL, MS_BIND, NULL) < 0) {
+            logmsg("persist: bind %s -> %s: %s (non-fatal)", src, dst, strerror(errno));
+            continue;
+        }
+        logmsg("persist: /data/%s backed by %s", g_persist_dirs[i], src);
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * A CA store for the guest's libcurl
+ * -------------------------------------------------------------------------
+ * The VNDK libcurl the MTK GNSS daemons use (EPO/QEPO/MTKNAV downloads over
+ * https) has CURLOPT_CAPATH compiled in as /system/etc/security/cacerts.
+ * Android 14 moved the system trust store into the conscrypt APEX, and the
+ * Halium system image ships no /system/etc/security/cacerts at all, so
+ * every TLS handshake ended in curl's "peer certificate cannot be
+ * authenticated" (60).
+ *
+ * OHOS keeps its roots in /system/etc/security/certificates in exactly the
+ * layout CAPATH wants (one PEM per root, named <subject-hash>.0).  The
+ * guest's /system is read-only, so its /system/etc/security is replaced
+ * by a tmpfs holding the original entries (re-bound through an O_PATH fd
+ * kept from before the overmount) plus `cacerts`, bound read-only from the
+ * OHOS store.  Images that do ship cacerts are left alone.
+ * ---------------------------------------------------------------------- */
+
+#define GUEST_SECURITY_DIR ANDROID_ROOT "/system/etc/security"
+#define OHOS_CA_DIR        "/system/etc/security/certificates"
+
+/* Child side, pre-pivot.  Best-effort: on any failure the guest simply has
+ * no CA store, as before. */
+static void cacerts_attach(void)
+{
+    struct stat st;
+    if (stat(GUEST_SECURITY_DIR "/cacerts", &st) == 0 ||
+        stat(OHOS_CA_DIR, &st) < 0 || !S_ISDIR(st.st_mode))
+        return;
+
+    int orig = open(GUEST_SECURITY_DIR, O_PATH | O_DIRECTORY | O_CLOEXEC);
+    DIR *d = opendir(GUEST_SECURITY_DIR);
+    if (orig < 0 || d == NULL) {
+        logmsg("cacerts: open %s: %s (non-fatal)", GUEST_SECURITY_DIR, strerror(errno));
+        if (d) closedir(d);
+        if (orig >= 0) close(orig);
+        return;
+    }
+    /* Read the listing before the overmount hides it. */
+    char names[16][NAME_MAX + 1];
+    unsigned char types[16];
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL && n < 16) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        snprintf(names[n], sizeof names[n], "%s", e->d_name);
+        types[n++] = e->d_type;
+    }
+    if (e != NULL)
+        logmsg("cacerts: more than %d entries in %s, the rest are hidden", n,
+               GUEST_SECURITY_DIR);
+    closedir(d);
+
+    if (mount("tmpfs", GUEST_SECURITY_DIR, "tmpfs", MS_NOSUID | MS_NODEV,
+              "size=64k,mode=755") < 0) {
+        logmsg("cacerts: tmpfs on %s: %s (non-fatal)", GUEST_SECURITY_DIR, strerror(errno));
+        close(orig);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        char src[PATH_MAX], dst[PATH_MAX];
+        snprintf(src, sizeof src, "/proc/self/fd/%d/%s", orig, names[i]);
+        snprintf(dst, sizeof dst, GUEST_SECURITY_DIR "/%s", names[i]);
+        if (types[i] == DT_DIR) {
+            mkdir(dst, 0755);
+        } else {
+            int fd = open(dst, O_CREAT | O_WRONLY | O_CLOEXEC, 0644);
+            if (fd >= 0) close(fd);
+        }
+        if (mount(src, dst, NULL, MS_BIND | MS_REC, NULL) < 0)
+            logmsg("cacerts: re-bind %s: %s (non-fatal)", names[i], strerror(errno));
+    }
+    close(orig);
+
+    const char *ca = GUEST_SECURITY_DIR "/cacerts";
+    if (mkdir(ca, 0755) < 0 ||
+        mount(OHOS_CA_DIR, ca, NULL, MS_BIND, NULL) < 0 ||
+        mount(NULL, ca, NULL, MS_REMOUNT | MS_BIND | MS_RDONLY, NULL) < 0) {
+        logmsg("cacerts: bind %s: %s (non-fatal)", OHOS_CA_DIR, strerror(errno));
+        return;
+    }
+    logmsg("cacerts: guest /system/etc/security/cacerts backed by %s", OHOS_CA_DIR);
+}
+
 /* Track which apex modules we successfully bound, so apex_info_list_write()
  * below can emit a matching apex-info-list.xml.  Linkerconfig reads that
  * XML to discover the apex namespaces it needs to emit in ld.config.txt;
@@ -902,18 +1039,21 @@ static int child_main(void *arg)
      * guest's /vendor (what the rc files under /system/etc/init/
      * reference: /vendor/lib64, /vendor/bin/hw, ...).  No bind here. */
 
-    /* Per-NS /data for Android — fresh tmpfs.  OHOS doesn't currently
-     * have a separate userdata partition mounted (fstab.x23 only mounts
-     * misc + persist), so /data on OHOS is just an RO subdir of
-     * system_a.  Halium init expects /data writable, so we back it
-     * with a tmpfs that lives only for the lifetime of this NS.
-     * Trade-off: anything Halium writes to /data is lost across
-     * reboots — fine for HALs, would matter only if we wanted Android
-     * userspace apps (we don't). */
+    /* Per-NS /data for Android — fresh tmpfs, living only as long as this
+     * NS.  The OHOS userdata partition is a different filesystem with its
+     * own layout and owners, so the guest gets a private scratch /data.
+     * Trade-off: anything Halium writes to /data is lost across reboots —
+     * fine for HALs, with the exceptions persist_attach() carves out. */
     if (mkdir(ANDROID_ROOT "/data", 0771) < 0 && errno != EEXIST) { }
     if (mount("tmpfs", ANDROID_ROOT "/data", "tmpfs", 0,
               "size=64M,mode=771,uid=0,gid=0") < 0)
         die("mount tmpfs on %s/data: %s", ANDROID_ROOT, strerror(errno));
+
+    /* ...except the GNSS engine's learned state.  See persist_attach(). */
+    persist_attach();
+
+    /* And give the guest's libcurl a trust store.  See cacerts_attach(). */
+    cacerts_attach();
 
     /* Debug overlay: if the OHOS-side directory /module_update/halium-debug/
      * exists, bind it into the Halium NS at /data/halium-debug/ so we can
@@ -1383,6 +1523,276 @@ static void watchdog(pid_t child_pid)
 }
 
 /* -------------------------------------------------------------------------
+ * dnsproxyd — name resolution for the Halium guest
+ * -------------------------------------------------------------------------
+ * Bionic resolves names by asking netd: getaddrinfo()/gethostbyname()
+ * write a command to the stream socket /dev/socket/dnsproxyd and read a
+ * serialised answer back (bionic libc/dns/net/getaddrinfo.c and
+ * gethnamaddr.c, android_getaddrinfo_proxy / android_read_hostent).  The
+ * guest runs no netd, so every lookup in the container failed — MTK's GNSS
+ * stack was the visible casualty: mnld's EPO/QEPO/MTKNAV downloads ended
+ * in curl's "couldn't resolve host" and mtk_agpsd could not look up a
+ * SUPL server, so every fix was unassisted.
+ *
+ * The guest shares OHOS's network namespace, so answering in its place is
+ * a matter of protocol, not routing: a forked child of the parent (OHOS
+ * namespace, where musl's resolver works) binds the socket *inside the
+ * guest's /dev* through /proc/<init>/root, and answers each command with
+ * the OHOS resolver.  Only the two lookup commands bionic's libc sends are
+ * served; anything else gets the generic failure code, which bionic maps
+ * to EAI_NODATA / HOST_NOT_FOUND.
+ * ---------------------------------------------------------------------- */
+
+#define DNSPROXY_SOCKET        "/dev/socket/dnsproxyd"
+#define DNSPROXY_RESULT_OK     "222"   /* DnsProxyQueryResult */
+#define DNSPROXY_RESULT_FAIL   "401"   /* OperationFailed */
+#define DNSPROXY_WAIT_SEC      300
+
+/* Bionic's (NetBSD's) AI_* values, which differ from musl's above
+ * AI_NUMERICHOST.  Only the flags with a musl counterpart are kept. */
+#define BIONIC_AI_PASSIVE      0x00000001
+#define BIONIC_AI_CANONNAME    0x00000002
+#define BIONIC_AI_NUMERICHOST  0x00000004
+#define BIONIC_AI_NUMERICSERV  0x00000008
+#define BIONIC_AI_ADDRCONFIG   0x00000400
+
+static int bionic_to_musl_ai_flags(int f)
+{
+    int out = 0;
+    if (f & BIONIC_AI_PASSIVE)     out |= AI_PASSIVE;
+    if (f & BIONIC_AI_CANONNAME)   out |= AI_CANONNAME;
+    if (f & BIONIC_AI_NUMERICHOST) out |= AI_NUMERICHOST;
+    if (f & BIONIC_AI_NUMERICSERV) out |= AI_NUMERICSERV;
+    if (f & BIONIC_AI_ADDRCONFIG)  out |= AI_ADDRCONFIG;
+    return out;
+}
+
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const char *p = buf;
+    while (len > 0) {
+        ssize_t n = write(fd, p, len);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        p += n;
+        len -= (size_t)n;
+    }
+    return 0;
+}
+
+static int write_be32(int fd, uint32_t v)
+{
+    uint32_t be = htonl(v);
+    return write_all(fd, &be, sizeof be);
+}
+
+/* Length-prefixed blob, as netd's sendLenAndData. */
+static int write_blob(int fd, const void *data, uint32_t len)
+{
+    if (write_be32(fd, len) < 0) return -1;
+    return len ? write_all(fd, data, len) : 0;
+}
+
+static int write_code(int fd, const char *code)
+{
+    return write_all(fd, code, 4);   /* three digits + NUL */
+}
+
+/* Bionic reads (and ignores) one 32-bit word after a failure code. */
+static void dns_fail(int fd)
+{
+    if (write_code(fd, DNSPROXY_RESULT_FAIL) == 0)
+        (void)write_be32(fd, 0);
+}
+
+static const char *caret_null(const char *s)
+{
+    return (s == NULL || strcmp(s, "^") == 0) ? NULL : s;
+}
+
+/* "getaddrinfo <host> <serv> <flags> <family> <socktype> <protocol> <netid>" */
+static void dns_getaddrinfo(int fd, char **argv, int argc)
+{
+    if (argc < 7) { dns_fail(fd); return; }
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    int flags = atoi(argv[3]);
+    hints.ai_flags    = flags == -1 ? 0 : bionic_to_musl_ai_flags(flags);
+    hints.ai_family   = atoi(argv[4]) == -1 ? AF_UNSPEC : atoi(argv[4]);
+    hints.ai_socktype = atoi(argv[5]) == -1 ? 0 : atoi(argv[5]);
+    hints.ai_protocol = atoi(argv[6]) == -1 ? 0 : atoi(argv[6]);
+
+    struct addrinfo *res = NULL;
+    int rc = getaddrinfo(caret_null(argv[1]), caret_null(argv[2]), &hints, &res);
+    if (rc != 0 || res == NULL) {
+        dns_fail(fd);
+        return;
+    }
+    if (write_code(fd, DNSPROXY_RESULT_OK) < 0) goto out;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        /* sockaddr_in/_in6 are laid out identically by bionic and musl. */
+        if (write_be32(fd, 1) < 0 ||
+            write_be32(fd, (uint32_t)flags) < 0 ||
+            write_be32(fd, (uint32_t)ai->ai_family) < 0 ||
+            write_be32(fd, (uint32_t)ai->ai_socktype) < 0 ||
+            write_be32(fd, (uint32_t)ai->ai_protocol) < 0 ||
+            write_blob(fd, ai->ai_addr, ai->ai_addrlen) < 0)
+            goto out;
+        uint32_t nlen = ai->ai_canonname ? (uint32_t)strlen(ai->ai_canonname) + 1 : 0;
+        if (write_blob(fd, ai->ai_canonname, nlen) < 0) goto out;
+    }
+    (void)write_be32(fd, 0);
+out:
+    freeaddrinfo(res);
+}
+
+/* "gethostbyname <netid> <name> <af>" */
+static void dns_gethostbyname(int fd, char **argv, int argc)
+{
+    if (argc < 4 || caret_null(argv[2]) == NULL) { dns_fail(fd); return; }
+    int af = atoi(argv[3]);
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = af;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(argv[2], NULL, &hints, &res) != 0 || res == NULL) {
+        dns_fail(fd);
+        return;
+    }
+    /* hostent as netd's sendhostent: name, aliases (none), type, length,
+     * then each address, every list closed by a zero length. */
+    uint32_t alen = af == AF_INET6 ? 16 : 4;
+    if (write_code(fd, DNSPROXY_RESULT_OK) < 0 ||
+        write_blob(fd, argv[2], (uint32_t)strlen(argv[2]) + 1) < 0 ||
+        write_be32(fd, 0) < 0 ||
+        write_be32(fd, (uint32_t)af) < 0 ||
+        write_be32(fd, alen) < 0)
+        goto out;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        const void *a = NULL;
+        if (ai->ai_family == AF_INET && af == AF_INET)
+            a = &((struct sockaddr_in *)ai->ai_addr)->sin_addr;
+        else if (ai->ai_family == AF_INET6 && af == AF_INET6)
+            a = &((struct sockaddr_in6 *)ai->ai_addr)->sin6_addr;
+        if (a && write_blob(fd, a, alen) < 0) goto out;
+    }
+    (void)write_be32(fd, 0);
+out:
+    freeaddrinfo(res);
+}
+
+/* One connection = one NUL-terminated command = one answer. */
+static void dns_serve_client(int fd)
+{
+    char cmd[1024];
+    size_t len = 0;
+    while (len < sizeof cmd - 1) {
+        ssize_t n = read(fd, cmd + len, 1);
+        if (n <= 0) return;
+        if (cmd[len] == '\0') break;
+        len++;
+    }
+    cmd[len] = '\0';
+
+    char *argv[12];
+    int argc = 0;
+    for (char *save = NULL, *tok = strtok_r(cmd, " ", &save);
+         tok && argc < (int)(sizeof argv / sizeof argv[0]);
+         tok = strtok_r(NULL, " ", &save))
+        argv[argc++] = tok;
+    if (argc == 0) return;
+
+    if (strcmp(argv[0], "getaddrinfo") == 0)
+        dns_getaddrinfo(fd, argv, argc);
+    else if (strcmp(argv[0], "gethostbyname") == 0)
+        dns_gethostbyname(fd, argv, argc);
+    else
+        dns_fail(fd);
+}
+
+static void dnsproxy_main(pid_t guest_init)
+{
+    char dir[PATH_MAX], path[PATH_MAX];
+    snprintf(dir, sizeof dir, "/proc/%d/root/dev/socket", (int)guest_init);
+    snprintf(path, sizeof path, "/proc/%d/root" DNSPROXY_SOCKET, (int)guest_init);
+
+    /* /proc/<init>/root only leads into the guest's /dev once child_main
+     * has switched its root to ANDROID_ROOT (it creates dev/socket there
+     * first); OHOS itself has no /dev/socket, so until then the stat
+     * fails.  Wait for it rather than race the clone. */
+    struct stat st;
+    int waited = 0;
+    while (stat(dir, &st) < 0 || !S_ISDIR(st.st_mode)) {
+        if (waited++ >= DNSPROXY_WAIT_SEC * 5) {
+            logmsg("dnsproxy: %s never appeared — giving up", dir);
+            _exit(1);
+        }
+        usleep(200000);
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof addr);
+    addr.sun_family = AF_UNIX;
+    if (strlen(path) >= sizeof addr.sun_path) {
+        logmsg("dnsproxy: socket path too long: %s", path);
+        _exit(1);
+    }
+    strcpy(addr.sun_path, path);
+
+    int srv = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (srv < 0) {
+        logmsg("dnsproxy: socket: %s", strerror(errno));
+        _exit(1);
+    }
+    unlink(path);
+    if (bind(srv, (struct sockaddr *)&addr, sizeof addr) < 0 ||
+        chmod(path, 0666) < 0 || listen(srv, 16) < 0) {
+        logmsg("dnsproxy: bind/listen %s: %s", path, strerror(errno));
+        _exit(1);
+    }
+    logmsg("dnsproxy: serving %s for the guest", DNSPROXY_SOCKET);
+
+    /* A lookup can take seconds; serve each in its own child so one slow
+     * name never stalls the rest.  SIG_IGN on SIGCHLD reaps them. */
+    signal(SIGCHLD, SIG_IGN);
+    for (;;) {
+        int c = accept4(srv, NULL, NULL, SOCK_CLOEXEC);
+        if (c < 0) {
+            if (errno == EINTR) continue;
+            logmsg("dnsproxy: accept: %s", strerror(errno));
+            usleep(100000);
+            continue;
+        }
+        pid_t p = fork();
+        if (p == 0) {
+            close(srv);
+            dns_serve_client(c);
+            close(c);
+            _exit(0);
+        }
+        close(c);
+    }
+}
+
+/* Parent side, right after the clone.  Dies with androidd. */
+static void dnsproxy_start(pid_t guest_init)
+{
+    pid_t p = fork();
+    if (p < 0) {
+        logmsg("dnsproxy: fork: %s (guest DNS unavailable)", strerror(errno));
+        return;
+    }
+    if (p == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        prctl(PR_SET_NAME, "androidd-dns");
+        dnsproxy_main(guest_init);
+        _exit(0);
+    }
+}
+
+/* -------------------------------------------------------------------------
  * Main
  * ------------------------------------------------------------------------- */
 
@@ -1441,6 +1851,9 @@ int main(int argc, char **argv)
         die("clone: %s", strerror(errno));
 
     logmsg("Halium NS launched as host PID %d", child);
+
+    /* The guest has no netd; answer its name lookups.  See dnsproxy_main(). */
+    dnsproxy_start(child);
 
     /* Watchdog runs synchronously in the parent.  After it returns
      * (success or timeout), we just waitpid the child — if Halium init
