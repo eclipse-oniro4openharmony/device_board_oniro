@@ -1,0 +1,39 @@
+From fc7f2f9923a5711b19600ee674fc608402cf1c39 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 16:29:43 +0000
+Subject: [PATCH 6/8] deps_guard: whitelist the codec manager's dlopen of
+ libOMX_Core
+
+deps_guard derives dependencies from strings(1), so the
+dlopen("libOMX_Core.z.so") in libcodec_component_manager_service_4.0
+counts as a dependency.  Products without a vendor OMX IL core
+(x86_general) do not ship that library and the check fails with
+"depends on libOMX_Core.z.so which is unknown so type".  Whitelist it
+the same way upstream already whitelists libomx_audio_codec.z.so.
+
+Change-Id: Ib1c391f220fa101e13ee74017a4ca443346d396c
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ tools/deps_guard/rules/chipsetsdk_dep_whitelist.json | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+index 0f0d561..04ad344 100644
+--- a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
++++ b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+@@ -14284,5 +14284,12 @@
+         "dep_file_name": "libGLESv1_CM.so.1.1.0",
+         "dep_file_path": "vendor/lib64/chipsetsdk/libGLESv1_CM.so.1.1.0",
+         "description": "Oniro graphic_2d opengl_wrapper bridges system libEGL.so to vendor chipsetsdk libGLESv1_CM.so.1.1.0"
++    },
++    {
++        "so_file_name": "libcodec_component_manager_service_4.0.z.so",
++        "so_file_path": "vendor/lib/passthrough/libcodec_component_manager_service_4.0.z.so",
++        "dep_file_name": "libOMX_Core.z.so",
++        "dep_file_path": "",
++        "description": "Oniro x86: libcodec_component_manager_service_4.0.z.so dlopens the vendor libOMX_Core.z.so, which products without an OMX IL core do not ship"
+     }
+ ]
+-- 
+2.50.1
+

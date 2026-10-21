@@ -1,0 +1,31 @@
+From 6935bb87d69ea0a397ea46da31736559158237ed Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 16:06:14 +0000
+Subject: [PATCH 3/3] toybox: suppress -Wunused-function on non-selinux builds
+
+id.c defines oh_getpwuid() under TOYBOX_OH_ADAPT but nothing calls it.
+SELinux builds pass -w and the !support_jsapi branch already adds
+-Wno-unused-function, so only a jsapi product without SELinux (e.g.
+x86_general) hits -Werror on it.
+
+Change-Id: I35ce7becc93e951d005ca6b089c78f378c4490c2
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index bb0e8b6..5336603 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -733,6 +733,7 @@ if (defined(ohos_lite)) {
+       "-Wno-tautological-constant-compare",
+       "-Wno-string-conversion",
+       "-Wno-unused-but-set-variable",
++      "-Wno-unused-function",
+     ]
+ 
+     if (!support_jsapi) {
+-- 
+2.50.1
+

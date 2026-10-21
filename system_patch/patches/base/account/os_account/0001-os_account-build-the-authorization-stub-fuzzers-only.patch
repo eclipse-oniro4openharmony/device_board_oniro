@@ -1,0 +1,54 @@
+From 3750dcd7921021b666192673c9a80bcb970cdece Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 12:43:25 +0000
+Subject: [PATCH] os_account: build the authorization stub fuzzers only with
+ authorization
+
+The authorization_stub fuzzers link tee_client:libteec unconditionally,
+so gn gen fails on any product that does not ship the tee_client
+component (x86_general).  The authorization stubs they exercise are
+themselves only meaningful with os_account_support_authorization, which
+is also what gates the tee_client dependency of accountmgr and of the
+account_iam unit tests, so gate the fuzzers on the same flag.
+
+Change-Id: Ie904bc5727fe8f4494f9e0f26132531c3231db64
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ test/fuzztest/authorization_stub/BUILD.gn | 18 ++++++++++++------
+ 1 file changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/test/fuzztest/authorization_stub/BUILD.gn b/test/fuzztest/authorization_stub/BUILD.gn
+index 161a259f6..96071ab97 100644
+--- a/test/fuzztest/authorization_stub/BUILD.gn
++++ b/test/fuzztest/authorization_stub/BUILD.gn
+@@ -11,15 +11,21 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
++import("../../../os_account.gni")
++
+ group("fuzztest") {
+   testonly = true
+   deps = []
+ 
+-  deps += [
+-    # deps file
+-    "checkauthorizationstub_fuzzer:CheckAuthorizationStubFuzzTest",
+-    "checkauthorizationtokenstub_fuzzer:CheckAuthorizationTokenStubFuzzTest",
+-    "releaseauthorizationstub_fuzzer:ReleaseAuthorizationStubFuzzTest",
+-  ]
++  # The authorization stubs, and the TEE client these fuzzers link, only
++  # exist when the product enables account authorization.
++  if (os_account_support_authorization) {
++    deps += [
++      # deps file
++      "checkauthorizationstub_fuzzer:CheckAuthorizationStubFuzzTest",
++      "checkauthorizationtokenstub_fuzzer:CheckAuthorizationTokenStubFuzzTest",
++      "releaseauthorizationstub_fuzzer:ReleaseAuthorizationStubFuzzTest",
++    ]
++  }
+ 
+ }
+-- 
+2.50.1
+

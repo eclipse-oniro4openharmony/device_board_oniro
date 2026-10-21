@@ -1,0 +1,48 @@
+From f0218d7d413313ec47e33e18d733961406449150 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 16:07:16 +0000
+Subject: [PATCH] flashd: define UPDATER_MODE regardless of SELinux
+
+flashd builds hdc's daemon_unity.cpp and shell.cpp, which select the
+updater bundle-path check and DEBUG_BUNDLE_PATH with UPDATER_MODE.  The
+define was only added together with SURPPORT_SELINUX, so an updater
+built without SELinux takes the system-image path, which calls
+HdcDaemonBase::CheckBundlePath() from daemon_base.cpp, a file flashd
+does not compile: the updater fails to link.
+
+UPDATER_MODE describes the build, not the security policy: always
+define it.
+
+Change-Id: Iabc8001a9b94988307b4985693a73c47f0d41196
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/flashd/BUILD.gn | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/services/flashd/BUILD.gn b/services/flashd/BUILD.gn
+index b264fd94..1faa6c32 100644
+--- a/services/flashd/BUILD.gn
++++ b/services/flashd/BUILD.gn
+@@ -99,6 +99,7 @@ ohos_static_library("flashd_deamon") {
+   defines = [
+     "HARMONY_PROJECT",
+     "OPENSSL_SUPPRESS_DEPRECATED",
++    "UPDATER_MODE",
+   ]
+ 
+   configs = [ ":flashd_hdc_config" ]
+@@ -139,10 +140,7 @@ ohos_static_library("flashd_deamon") {
+ 
+   if (build_selinux) {
+     external_deps += [ "selinux:libselinux_static" ]
+-    defines += [
+-      "SURPPORT_SELINUX",
+-      "UPDATER_MODE",
+-    ]
++    defines += [ "SURPPORT_SELINUX" ]
+   }
+ 
+   if (build_variant == "user") {
+-- 
+2.50.1
+

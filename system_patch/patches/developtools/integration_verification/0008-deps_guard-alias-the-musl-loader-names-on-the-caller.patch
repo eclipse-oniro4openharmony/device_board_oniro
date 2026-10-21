@@ -1,0 +1,54 @@
+From d7bb7e512a5ea97dc14b674fe33f112ad50fbbe7 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 17:06:44 +0000
+Subject: [PATCH 8/8] deps_guard: alias the musl loader names on the caller
+ side too
+
+The whitelist aliasing only expanded dep_file_name, so entries whose
+so_file_name is a loader (ld-musl-arm.so.1 / ld-musl-aarch64.so.1, e.g.
+its dlopen of libmemleak_tracker.so) still missed ld-musl-x86_64.so.1:
+"system only module ld-musl-x86_64.so.1 depends on libmemleak_tracker.so
+which is unknown so type".  Expand both sides.
+
+Change-Id: Idcff8b4e4c16eca81352f9ef4306b902b5ff8839
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ tools/deps_guard/rules_checker/base_rule.py | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/tools/deps_guard/rules_checker/base_rule.py b/tools/deps_guard/rules_checker/base_rule.py
+index ee93532..e99628b 100755
+--- a/tools/deps_guard/rules_checker/base_rule.py
++++ b/tools/deps_guard/rules_checker/base_rule.py
+@@ -124,8 +124,8 @@ class BaseRule(object):
+             # The ld-musl loader GN target is named "ld-musl-arm.so.1" for
+             # historical reasons but produces an arch-specific file
+             # (ld-musl-x86_64.so.1, ld-musl-aarch64.so.1, ld-musl-riscv64.so.1).
+-            # Treat all four as equivalent so a single whitelist entry covers
+-            # every supported arch.
++            # Treat all four as equivalent, on both sides of an entry, so a
++            # single whitelist entry covers every supported arch.
+             musl_loaders = {
+                 "ld-musl-arm.so.1",
+                 "ld-musl-aarch64.so.1",
+@@ -135,11 +135,13 @@ class BaseRule(object):
+             for so in json_data:
+                 so_file_name = so.get("so_file_name")
+                 dep_file_name = so.get("dep_file_name")
++                so_names = {so_file_name} | (musl_loaders if so_file_name in musl_loaders else set())
+                 dep_names = {dep_file_name} | (musl_loaders if dep_file_name in musl_loaders else set())
+-                for name in dep_names:
+-                    so_dict = {so_file_name: name}
+-                    if so_dict not in res:
+-                        res.append(so_dict)
++                for so_name in so_names:
++                    for name in dep_names:
++                        so_dict = {so_name: name}
++                        if so_dict not in res:
++                            res.append(so_dict)
+ 
+         return res
+ 
+-- 
+2.50.1
+

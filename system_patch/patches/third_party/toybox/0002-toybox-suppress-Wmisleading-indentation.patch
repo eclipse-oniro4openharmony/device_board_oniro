@@ -1,7 +1,7 @@
-From 12e57016d63189b1399deea9adba72d8819ba0c4 Mon Sep 17 00:00:00 2001
+From 64029e0e34ad3ccc701e17cda90093e1d063f92f Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 11:59:06 +0200
-Subject: [PATCH 2/2] toybox: suppress -Wmisleading-indentation
+Subject: [PATCH 2/3] toybox: suppress -Wmisleading-indentation
 
 Recent clang treats some toybox source as -Wmisleading-indentation, which the OH compile-standard escalates to error. Silence the warning to keep upstream sources unmodified.
 

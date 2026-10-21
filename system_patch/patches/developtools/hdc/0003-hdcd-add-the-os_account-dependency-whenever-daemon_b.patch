@@ -1,0 +1,64 @@
+From 31848e79bee3957667625505dad2bf166a6f2b1c Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 14:44:50 +0000
+Subject: [PATCH 3/3] hdcd: add the os_account dependency whenever daemon_base
+ uses it
+
+daemon_base.cpp includes os_account_manager.h and queries the active
+account unless HDC_NO_ACCOUNT is defined, which only happens without
+support_jsapi.  The os_account dependency that provides the header is
+however only added when build_selinux is also on, so a system image
+built without SELinux (x86_general, hybris_generic) fails with
+"'os_account_manager.h' file not found".
+
+The account query has nothing to do with SELinux: derive both the define
+and the dependency from the same condition, without build_selinux, and
+forward image_name to the source set unconditionally since that condition
+now reads it.
+
+Change-Id: I9d3c99eecc49640b9fb3ebaf46cf1ea187cdf925
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 6157bb2e..23785708 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -110,7 +110,11 @@ template("hdcd_source_set") {
+       "MEMORY_POOL_ENABLE"
+     ]
+ 
+-    if (!support_jsapi) {
++    # daemon_base.cpp queries the active OS account unless HDC_NO_ACCOUNT;
++    # keep the define in step with the os_account dependency below.
++    _hdcd_with_account =
++        image_name == "system" && product_name != "ohos-sdk" && support_jsapi
++    if (!_hdcd_with_account) {
+       defines += [ "HDC_NO_ACCOUNT" ]
+     }
+ 
+@@ -158,7 +162,7 @@ template("hdcd_source_set") {
+       "openssl:libssl_shared",
+     ]
+ 
+-    if (build_selinux && image_name == "system" && product_name != "ohos-sdk" && support_jsapi) {
++    if (_hdcd_with_account) {
+       external_deps += [
+         "ipc:ipc_single",
+         "os_account:os_account_innerkits",
+@@ -278,9 +282,7 @@ template("build_hdc") {
+   forward_variables_from(invoker, "*")
+   image_name = target_name
+   hdcd_source_set("hdcd_${image_name}_source") {
+-    if (build_selinux) {
+-      image_name = image_name
+-    }
++    image_name = image_name
+ 
+     subsystem_name = "developtools"
+     part_name = "hdc"
+-- 
+2.50.1
+

@@ -1,22 +1,22 @@
-From b63293b595563d6bef0131d653c9ed55934edb3d Mon Sep 17 00:00:00 2001
+From 80a15c63866fd9c4a2160b143baed087f55ca39c Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:27 +0200
-Subject: [PATCH] runtime_core: x86_64 codegen support (asmjit/zydis deps,
+Subject: [PATCH 1/2] runtime_core: x86_64 codegen support (asmjit/zydis deps,
  zycore path, irtoc)
 
 Wire up x86_64 codegen into the static-core build:
 - bundle.json declares asmjit and zydis as third_party rom_dependencies so they build before runtime_core
 - arkencoder and aotdump BUILD.gns point at the canonical 'zydis/dependencies/zycore/include' (the submodule path) instead of the legacy 'zydis/zycore/include' that no longer exists in our checkout
-- libarkruntime_set_static_host links in the irtoc-generated .o files when enable_irtoc is on, matching how the device variant pulls them in.
+- libarkruntime_set_static_host links in the modular irtoc objects (fastpath, interpreter, ets_fastpath) when enable_irtoc is on, matching how the device variant pulls them in.
 
 Change-Id: I66e7936544558d61639ebb797d564d1076413c1f
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
 ---
- bundle.json                                        |  2 +-
- .../compiler/optimizer/code_generator/BUILD.gn     |  4 ++--
- static_core/compiler/tools/aotdump/BUILD.gn        |  2 +-
- static_core/runtime/BUILD.gn                       | 14 ++++++++++++++
- 4 files changed, 18 insertions(+), 4 deletions(-)
+ bundle.json                                   |  2 +-
+ .../optimizer/code_generator/BUILD.gn         |  4 ++--
+ static_core/compiler/tools/aotdump/BUILD.gn   |  2 +-
+ static_core/runtime/BUILD.gn                  | 23 +++++++++++++++++++
+ 4 files changed, 27 insertions(+), 4 deletions(-)
 
 diff --git a/bundle.json b/bundle.json
 index 2662e347a1..5eec24bf63 100644
@@ -67,10 +67,10 @@ index c56169c359..2dcdce7b27 100644
  
      #target: aarch64
 diff --git a/static_core/runtime/BUILD.gn b/static_core/runtime/BUILD.gn
-index e8ad52aaf5..c75389a9db 100644
+index e8ad52aaf5..4fb587ebc6 100644
 --- a/static_core/runtime/BUILD.gn
 +++ b/static_core/runtime/BUILD.gn
-@@ -612,6 +612,16 @@ ohos_source_set("libarkruntime_set_static_host") {
+@@ -612,6 +612,29 @@ ohos_source_set("libarkruntime_set_static_host") {
    deps = []
    defines = []
  
@@ -78,26 +78,28 @@ index e8ad52aaf5..c75389a9db 100644
 +  # product itself targets x86_64 - the irtoc binary of an arm64 product
 +  # rejects --compiler-cross-arch x64.
 +  if (enable_irtoc && target_cpu == "x86_64") {
-+    sources += [ "$ark_root_gen_dir/generated/irtoc_lib.o" ]
++    deps += [
++      "$ark_root/irtoc:irtoc_fastpath",
++      "$ark_root/irtoc:irtoc_interpreter",
++      "$ark_root/irtoc:irtoc_ets_fastpath(${host_toolchain})",
++    ]
++    sources += [
++      "$ark_root_gen_dir/irtoc_ets_fastpath.o",
++      "$ark_root_gen_dir/irtoc_fastpath.o",
++      "$ark_root_gen_dir/irtoc_interpreter.o",
++    ]
 +    if (is_llvm_interpreter || is_llvm_fastpath) {
-+      sources += [ "$ark_root_gen_dir/generated/irtoc_llvm_lib.o" ]
++      sources += [
++        "$ark_root_gen_dir/irtoc_ets_fastpath_llvm.o",
++        "$ark_root_gen_dir/irtoc_fastpath_llvm.o",
++        "$ark_root_gen_dir/irtoc_interpreter_llvm.o",
++      ]
 +    }
 +  }
 +
    public_configs = _libarkruntime_calculated_configs
    public_configs += [ "$ark_root:ark_host_config" ]
  
-@@ -622,6 +632,10 @@ ohos_source_set("libarkruntime_set_static_host") {
-     "$ark_root/compiler:libarktscompiler_host",
-   ]
- 
-+  if (enable_irtoc && target_cpu == "x86_64") {
-+    deps += [ "$ark_root/irtoc:irtoc_generate" ]
-+  }
-+
-   external_deps = _libarkruntime_calculated_external_deps
-   defines += _libarkruntime_calculated_defines
-   include_dirs = _libarkruntime_calculated_include_dirs
 -- 
 2.50.1
 

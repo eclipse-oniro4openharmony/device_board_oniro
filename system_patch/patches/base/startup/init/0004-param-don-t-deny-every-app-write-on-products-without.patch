@@ -1,0 +1,45 @@
+From d33e982e5b74aeffe34dd0328c4dea2ec9b71b9f Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 18:29:34 +0000
+Subject: [PATCH 4/4] param: don't deny every app write on products without
+ SELinux
+
+OpenHarmony-7.0 added, for builds without PARAM_SUPPORT_SELINUX, a
+blanket PARAM_CODE_PERMISSION_DENIED for any caller with
+uid >= PUBLIC_APP_BEGIN_UID.  Apps are not DAC-checked (their uids are
+per-bundle), so with SELinux the policy is the only gate; without
+SELinux there is no gate at all and the new rule turns every app write
+into a refusal.
+
+That breaks boot on such products: SystemUI's screen lock and the
+launcher announce themselves through bootevent.lockscreen.ready and
+bootevent.launcher.ready, init logs "Forbid to set parameter ...", and
+bootevent.boot.completed is never set.
+
+Restore the OpenHarmony-6.1 behaviour for non-SELinux builds; SELinux
+builds are unchanged.
+
+Change-Id: I6be081981f65e537bd74544f676965a49d00539b
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/param/base/param_base.c | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/services/param/base/param_base.c b/services/param/base/param_base.c
+index 4d22b520e..c40f7726b 100644
+--- a/services/param/base/param_base.c
++++ b/services/param/base/param_base.c
+@@ -609,10 +609,6 @@ static int CheckParamPermission_(const ParamLabelIndex *labelIndex,
+     if (ret == DAC_RESULT_PERMISSION) {
+         ret = SelinuxCheckParamPermission(labelIndex, srcLabel, name, mode);
+     }
+-#else
+-    if (srcLabel->cred.uid >= PUBLIC_APP_BEGIN_UID) {
+-        ret = PARAM_CODE_PERMISSION_DENIED;
+-    }
+ #endif
+     return ret;
+ }
+-- 
+2.50.1
+

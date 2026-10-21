@@ -1,7 +1,7 @@
-From cdc6c00d681d6e1283da62dffe93897f4fc4aa67 Mon Sep 17 00:00:00 2001
+From 36dd085ef99c01382c64d37ee2c91ef8b087165b Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Tue, 19 May 2026 16:37:12 +0000
-Subject: [PATCH 3/3] init: skip securebits lock for androidd and
+Subject: [PATCH 3/4] init: skip securebits lock for androidd and
  waydroid_supervisor
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

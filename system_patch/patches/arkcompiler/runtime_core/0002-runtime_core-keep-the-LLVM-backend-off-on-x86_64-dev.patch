@@ -1,0 +1,49 @@
+From b435c184c18637939e862e0349d225a6b16cb4f8 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 12:50:37 +0000
+Subject: [PATCH 2/2] runtime_core: keep the LLVM backend off on x86_64 device
+ products
+
+OpenHarmony-7.0 narrowed the x86_64 LLVM backend opt-out to is_emulator.
+x86_general is an x86_64 device product built with is_emulator = false,
+so it now takes the LLVM irtoc path, whose interpreter_inline.bc step
+runs llvm-link from prebuilts/ark_tools/llvm_aot/aot_gn_ohos -- a
+prebuilt that only carries headers and libLLVM, so ninja stops with
+"missing and no known rule to make it".
+
+Restore the OpenHarmony-6.1 behaviour of disabling the LLVM backend for
+non-standalone x86_64 builds.
+
+Change-Id: I48a6b326880ed84f443c3f9785e0b55c6af188ff
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ static_core/ark_config.gni | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/static_core/ark_config.gni b/static_core/ark_config.gni
+index 7bd4cbf98c..98a6be63c6 100644
+--- a/static_core/ark_config.gni
++++ b/static_core/ark_config.gni
+@@ -228,6 +228,19 @@ if (target_cpu == "arm64") {
+   is_llvm_aot = false
+ }
+ 
++# The LLVM backend is only exercised on x86_64 by emulator builds, which
++# disable it above; an x86_64 device product (is_emulator = false) would
++# otherwise need an llvm-link from aot_gn_ohos, which only ships headers
++# and libLLVM.  OpenHarmony-6.1 disabled it for every non-standalone x86_64
++# build; keep doing so.
++if (!ark_static_standalone_build &&
++    (target_cpu == "x64" || target_cpu == "x86_64")) {
++  is_llvmbackend = false
++  is_llvm_interpreter = false
++  is_llvm_fastpath = false
++  is_llvm_aot = false
++}
++
+ if (panda_runtime_sdk_build) {
+   is_llvmbackend = false
+   is_llvm_interpreter = false
+-- 
+2.50.1
+

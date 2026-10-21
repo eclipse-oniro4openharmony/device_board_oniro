@@ -1,7 +1,7 @@
-From be728ed39da99ac46e570f43441602612aa9c377 Mon Sep 17 00:00:00 2001
+From f0beb19c2eee35eca626f37536be0889c399ea2a Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 20 May 2026 20:50:36 +0000
-Subject: [PATCH 2/2] hdc daemon: cap USB bulk writes to stable size for hybris
+Subject: [PATCH 2/3] hdc daemon: cap USB bulk writes to stable size for hybris
  devices
 
 Companion to the existing OnUSBRead 61KB cap for the Volla X23

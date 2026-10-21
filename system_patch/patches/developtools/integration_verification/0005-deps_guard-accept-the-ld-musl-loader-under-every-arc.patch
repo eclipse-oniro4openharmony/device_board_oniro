@@ -1,7 +1,7 @@
-From f35d637e74972770565f295f9234f1f3d46e4d82 Mon Sep 17 00:00:00 2001
+From 5e85850263109db02ed4e9c7b55d160868228617 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 3 Aug 2026 17:30:35 +0000
-Subject: [PATCH 5/5] deps_guard: accept the ld-musl loader under every arch
+Subject: [PATCH 5/8] deps_guard: accept the ld-musl loader under every arch
  name
 
 base_innerapi_rule exempts base libraries by exact so name but only

@@ -1,0 +1,36 @@
+From 0fc8ceb48cbc0b3729276fcca07755ffa5bd0e09 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 16:47:06 +0000
+Subject: [PATCH 7/8] deps_guard: list the x86_64 musl loader as LLNDK
+
+//build/common/musl:ld-musl-arm.so.1 produces ld-musl-x86_64.so.1 on
+x86_64, but llndk_info.json only names the arm and aarch64 files, so the
+LLndk rule rejects an x86_64 product with "so file ld-musl-x86_64.so.1
+... should be add in file llndk_info.json".
+
+Change-Id: I213c20b28a19702a8eef737d0aeeef1f37eaabcd
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ tools/deps_guard/rules/LLndk/llndk_info.json | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/tools/deps_guard/rules/LLndk/llndk_info.json b/tools/deps_guard/rules/LLndk/llndk_info.json
+index 1ed7c81..5326143 100755
+--- a/tools/deps_guard/rules/LLndk/llndk_info.json
++++ b/tools/deps_guard/rules/LLndk/llndk_info.json
+@@ -17,6 +17,12 @@
+         "path": "//build/common/musl:ld-musl-arm.so.1",
+         "headers": []
+     },
++    {
++        "name": "build_framework:ld-musl-arm.so.1",
++        "so_file_name": "ld-musl-x86_64.so.1",
++        "path": "//build/common/musl:ld-musl-arm.so.1",
++        "headers": []
++    },
+     {
+         "name": "build_framework:ld-musl-arm.so.1",
+         "so_file_name": "libc.so",
+-- 
+2.50.1
+
