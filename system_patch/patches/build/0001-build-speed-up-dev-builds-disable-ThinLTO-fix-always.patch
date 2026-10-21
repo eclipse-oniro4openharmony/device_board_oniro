@@ -1,4 +1,4 @@
-From 3075590b1ee424234dcf31b8955b9f54077a2e2e Mon Sep 17 00:00:00 2001
+From 223f75f3a07fb9bae0a8a815671a8c9131dacda9 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Sun, 17 May 2026 09:18:20 +0000
 Subject: [PATCH 1/5] =?UTF-8?q?build:=20speed=20up=20dev=20builds=20?=
@@ -37,7 +37,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  5 files changed, 42 insertions(+), 11 deletions(-)
 
 diff --git a/config/compiler/compiler.gni b/config/compiler/compiler.gni
-index 4cdc956d..09921896 100755
+index 4cdc956db..09921896f 100755
 --- a/config/compiler/compiler.gni
 +++ b/config/compiler/compiler.gni
 @@ -28,7 +28,10 @@ declare_args() {
@@ -66,7 +66,7 @@ index 4cdc956d..09921896 100755
  
    # Tell VS to create a PDB that references information in .obj files rather
 diff --git a/config/components/idl_tool/idl.gni b/config/components/idl_tool/idl.gni
-index 72427f95..61c2105c 100644
+index 72427f953..61c2105ce 100644
 --- a/config/components/idl_tool/idl.gni
 +++ b/config/components/idl_tool/idl.gni
 @@ -213,12 +213,11 @@ template("idl_gen_interface") {
@@ -104,7 +104,7 @@ index 72427f95..61c2105c 100644
      sources_proxy += [ "${target_gen_dir}/" + out_full_name + ".cpp" ]
      sources_stub += [ "${target_gen_dir}/" + out_full_name + ".cpp" ]
 diff --git a/ohos/notice/collect_module_notice_file.py b/ohos/notice/collect_module_notice_file.py
-index af841a5f..157a3c6f 100755
+index af841a5fc..157a3c6fd 100755
 --- a/ohos/notice/collect_module_notice_file.py
 +++ b/ohos/notice/collect_module_notice_file.py
 @@ -203,6 +203,15 @@ def do_collect_notice_files(options, depfiles: list):
@@ -124,10 +124,10 @@ index af841a5f..157a3c6f 100755
  
  def write_file_content(notice_files, options, output, notice_info_json, module_notice_info_list, depfiles):
 diff --git a/ohos/sdk/parse_interface_sdk.py b/ohos/sdk/parse_interface_sdk.py
-index 36785126..fb8a6cae 100755
+index 35ec1350c..9f37736b0 100755
 --- a/ohos/sdk/parse_interface_sdk.py
 +++ b/ohos/sdk/parse_interface_sdk.py
-@@ -190,11 +190,22 @@ def main():
+@@ -208,11 +208,22 @@ def main():
      parser.add_argument('--build-sdk-path', required=True)
      parser.add_argument('--sdk-check-level', required=True)
      parser.add_argument('--sdk-api-version', required=True)
@@ -151,10 +151,10 @@ index 36785126..fb8a6cae 100755
  if __name__ == '__main__':
      sys.exit(main())
 diff --git a/scripts/build_js_assets.py b/scripts/build_js_assets.py
-index 075e77f9..04a337f2 100755
+index 265ef9c4e..e4614f879 100755
 --- a/scripts/build_js_assets.py
 +++ b/scripts/build_js_assets.py
-@@ -253,6 +253,11 @@ def main(args):
+@@ -256,6 +256,11 @@ def main(args):
          else:
              cmd.extend(['--env', 'compilerType=ark',
                          'arkFrontendDir={}'.format(ark_es2abc_dir), 'nodeJs={}'.format(node_js)])

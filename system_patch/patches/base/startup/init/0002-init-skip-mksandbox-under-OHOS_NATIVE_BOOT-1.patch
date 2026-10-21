@@ -1,4 +1,4 @@
-From c633f3832fb9c82191244bbc8716ebd89eb4ffc8 Mon Sep 17 00:00:00 2001
+From 3f557a523063738e9177ba8df6e71dec7cb00e46 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Tue, 19 May 2026 16:36:07 +0000
 Subject: [PATCH 2/3] init: skip mksandbox under OHOS_NATIVE_BOOT=1
@@ -24,10 +24,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 12 insertions(+)
 
 diff --git a/services/init/standard/init_cmds.c b/services/init/standard/init_cmds.c
-index 08da2516..1633681d 100755
+index 2abf33945..6baeca35a 100755
 --- a/services/init/standard/init_cmds.c
 +++ b/services/init/standard/init_cmds.c
-@@ -963,6 +963,18 @@ static void DoSwapon(const struct CmdArgs *ctx)
+@@ -1357,6 +1357,18 @@ static void DoSwapon(const struct CmdArgs *ctx)
  
  static void DoMkSandbox(const struct CmdArgs *ctx)
  {

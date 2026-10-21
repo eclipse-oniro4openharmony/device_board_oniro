@@ -1,4 +1,4 @@
-From 224437dc68da55bb6ed4edcd559f7bd9aa6ef4d1 Mon Sep 17 00:00:00 2001
+From c3495d701cb177fd8027611d9def86e80a988c5e Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:35:46 +0000
 Subject: [PATCH] android-headers: bump ANDROID_VERSION_MAJOR to 12 for Halium

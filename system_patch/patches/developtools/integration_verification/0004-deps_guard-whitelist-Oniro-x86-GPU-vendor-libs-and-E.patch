@@ -1,4 +1,4 @@
-From 314d0dc806a1416fe2a0a94c658fa806d9432521 Mon Sep 17 00:00:00 2001
+From 8c6f431c921951de84086ebc2967112d9f77d5b1 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:22 +0200
 Subject: [PATCH 4/5] deps_guard: whitelist Oniro x86 GPU vendor libs and EGL
@@ -16,13 +16,13 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 70 insertions(+)
 
 diff --git a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
-index 8b532e5..0580730 100644
+index e3ba6f2..0f0d561 100644
 --- a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
 +++ b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
-@@ -10658,5 +10658,75 @@
-         "dep_file_name": "libv8_shared.so",
-         "dep_file_path": "system/lib64/libv8_shared.so",
-         "description": "libunwinder.so with innerapi_tags [chipsetsdk_sp_indirect,platformsdk_indirect] cannot depend system only file libv8_shared.so with //arkcompiler/jsvm:libv8"
+@@ -14214,5 +14214,75 @@
+         "dep_file_name": "libhuks_engine_core_standard.z.so",
+         "dep_file_path": "system/lib/libhuks_engine_core_standard.z.so",
+         "description": "libhuks_hdi_service_1.2.z.so with innerapi_tags [passthrough] cannot depend system only file libhuks_engine_core_standard.z.so with //base/security/huks/services/huks_standard/huks_engine/main/core:huks_engine_core_standard"
 +    },
 +    {
 +        "so_file_name": "libdisplay_buffer_vdi_impl.z.so",

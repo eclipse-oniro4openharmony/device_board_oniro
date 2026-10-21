@@ -1,4 +1,4 @@
-From 710474be4a6406d031d57d35ae07fd09b0047514 Mon Sep 17 00:00:00 2001
+From 50892007aeabbf64f8c31217665783bd941cf997 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Sun, 17 May 2026 09:18:34 +0000
 Subject: [PATCH] sdk-js: create the ohos_base_split timestamp output
@@ -15,7 +15,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 2 insertions(+)
 
 diff --git a/BUILD.gn b/BUILD.gn
-index df0c82239..5fb61a023 100644
+index 716a72d81e..30af987b7c 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
 @@ -58,6 +58,8 @@ action("ohos_base_split") {

@@ -1,8 +1,8 @@
-From ab0cac4ed596f0a00a4d306bbe89b5e43039a01d Mon Sep 17 00:00:00 2001
+From bb52f5274b8c9df01c7b71d86b8172e372633285 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 14 Sep 2026 13:49:19 +0000
-Subject: [PATCH] render_service: don't log unsupported colour-space metadata
- per frame
+Subject: [PATCH 9/9] render_service: don't log unsupported colour-space
+ metadata per frame
 
 SetBufferColorSpace logged an error whenever
 MetadataHelper::SetColorSpaceType returned anything but GSERROR_OK. On a
@@ -20,10 +20,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/rosen/modules/render_service/core/pipeline/render_thread/rs_uni_render_composer_adapter.cpp b/rosen/modules/render_service/core/pipeline/render_thread/rs_uni_render_composer_adapter.cpp
-index 065af7ca7f..e369cc6c89 100644
+index 96a9b820498..5cfd01edba0 100644
 --- a/rosen/modules/render_service/core/pipeline/render_thread/rs_uni_render_composer_adapter.cpp
 +++ b/rosen/modules/render_service/core/pipeline/render_thread/rs_uni_render_composer_adapter.cpp
-@@ -322,7 +322,13 @@ void RSUniRenderComposerAdapter::SetBufferColorSpace(DrawableV2::RSScreenRenderN
+@@ -337,7 +337,13 @@ void RSUniRenderComposerAdapter::SetBufferColorSpace(DrawableV2::RSScreenRenderN
          colorSpace = CM_COLORSPACE_NONE;
      }
  

@@ -1,8 +1,8 @@
-From 22e6860dfb0ef7c6448090a1c3e8425c037414e0 Mon Sep 17 00:00:00 2001
+From 84f21f29d1e61a911a2900f8a1e0649115e08310 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Sat, 25 Jul 2026 01:10:47 +0000
-Subject: [PATCH 04/10] graphic_2d: bail out of GPU context creation when no
- EGL context is current
+Subject: [PATCH 3/9] graphic_2d: bail out of GPU context creation when no EGL
+ context is current
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -29,7 +29,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  3 files changed, 22 insertions(+)
 
 diff --git a/rosen/modules/render_service/core/feature/uifirst/rs_sub_thread.cpp b/rosen/modules/render_service/core/feature/uifirst/rs_sub_thread.cpp
-index d7588f1bd2..c6244355bd 100644
+index 0fac4717d38..5ebdea526fe 100644
 --- a/rosen/modules/render_service/core/feature/uifirst/rs_sub_thread.cpp
 +++ b/rosen/modules/render_service/core/feature/uifirst/rs_sub_thread.cpp
 @@ -23,6 +23,7 @@
@@ -40,7 +40,7 @@ index d7588f1bd2..c6244355bd 100644
  #include "GLES3/gl3.h"
  #include "include/core/SkCanvas.h"
  #include "memory/rs_memory_manager.h"
-@@ -237,6 +238,14 @@ std::shared_ptr<Drawing::GPUContext> RSSubThread::CreateShareGrContext()
+@@ -241,6 +242,14 @@ std::shared_ptr<Drawing::GPUContext> RSSubThread::CreateShareGrContext()
  #ifdef RS_ENABLE_GL
      if (RSSystemProperties::GetGpuApiType() == GpuApiType::OPENGL) {
          renderContext_->CreateShareContext();
@@ -56,7 +56,7 @@ index d7588f1bd2..c6244355bd 100644
          Drawing::GPUContextOptions options;
          auto handler = std::make_shared<MemoryHandler>();
 diff --git a/rosen/modules/render_service_base/src/common/rs_background_thread.cpp b/rosen/modules/render_service_base/src/common/rs_background_thread.cpp
-index 86b5a626a9..d9b1598ac4 100644
+index 86b5a626a9b..d9b1598ac41 100644
 --- a/rosen/modules/render_service_base/src/common/rs_background_thread.cpp
 +++ b/rosen/modules/render_service_base/src/common/rs_background_thread.cpp
 @@ -100,6 +100,12 @@ std::shared_ptr<Drawing::GPUContext> RSBackgroundThread::CreateShareGPUContext()
@@ -73,18 +73,18 @@ index 86b5a626a9..d9b1598ac4 100644
          Drawing::GPUContextOptions options = {};
          auto handler = std::make_shared<MemoryHandler>();
 diff --git a/rosen/modules/render_service_base/src/feature/color_picker/rs_color_picker_thread.cpp b/rosen/modules/render_service_base/src/feature/color_picker/rs_color_picker_thread.cpp
-index e7d144714c..4d82ad9c34 100644
+index d309053a759..5c18b223547 100644
 --- a/rosen/modules/render_service_base/src/feature/color_picker/rs_color_picker_thread.cpp
 +++ b/rosen/modules/render_service_base/src/feature/color_picker/rs_color_picker_thread.cpp
-@@ -17,6 +17,7 @@
+@@ -16,6 +16,7 @@
+ #include "feature/color_picker/rs_color_picker_thread.h"
  
- #include <chrono>
- 
+ #include "common/rs_optional_trace.h"
 +#include "EGL/egl.h"
  #include "platform/common/rs_log.h"
  #include "platform/common/rs_system_properties.h"
  
-@@ -142,6 +143,12 @@ std::shared_ptr<Drawing::GPUContext> RSColorPickerThread::CreateShareGPUContext(
+@@ -124,6 +125,12 @@ std::shared_ptr<Drawing::GPUContext> RSColorPickerThread::CreateShareGPUContext(
              return nullptr;
          }
          renderContext_->CreateShareContext();

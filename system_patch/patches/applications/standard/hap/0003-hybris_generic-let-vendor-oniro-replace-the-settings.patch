@@ -1,7 +1,8 @@
-From 70020d601deb9326b409477f8d60c975b9140c11 Mon Sep 17 00:00:00 2001
+From 439a335f73e6a9cc7ed8837eabb8d6a3c65eecad Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Fri, 9 Oct 2026 10:14:09 +0000
-Subject: [PATCH] hybris_generic: let vendor/oniro replace the settingsdata hap
+Subject: [PATCH 3/3] hybris_generic: let vendor/oniro replace the settingsdata
+ hap
 
 With the Oniro HAP set opted in (oniro_install_custom_haps),
 com.ohos.settingsdata ships from vendor/oniro instead of from here: a build of
@@ -21,10 +22,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 8 insertions(+)
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 991473b..e83be4a 100755
+index b884166a..73d57532 100755
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -506,5 +506,13 @@ group("hap") {
+@@ -562,5 +562,13 @@ group("hap") {
      if (oniro_install_custom_haps) {
        deps -= [ "//applications/standard/hap:camera_hap" ]
      }

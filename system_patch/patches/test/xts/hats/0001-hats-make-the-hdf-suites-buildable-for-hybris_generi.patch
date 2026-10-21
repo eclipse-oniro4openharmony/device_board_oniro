@@ -1,4 +1,4 @@
-From 30d977b47b3deb5bbe20023c9150b95c6eab471b Mon Sep 17 00:00:00 2001
+From 421f31fb975a74379db1d6fc75dded532693820e Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Tue, 28 Jul 2026 11:08:33 +0000
 Subject: [PATCH] hats: make the hdf suites buildable for hybris_generic

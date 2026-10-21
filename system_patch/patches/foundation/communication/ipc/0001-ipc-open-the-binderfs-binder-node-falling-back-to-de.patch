@@ -1,4 +1,4 @@
-From 8ac642c8439287bbde11ef1709c5031625c716f8 Mon Sep 17 00:00:00 2001
+From 5b554faa044b307cf0d67296f0ebddddeae36893 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Fri, 24 Jul 2026 21:23:58 +0000
 Subject: [PATCH] ipc: open the binderfs binder node, falling back to
@@ -59,7 +59,7 @@ index bd97e64c..69cfed13 100644
          RPC_LOG_ERROR("Open liteipc driver failed error %d.", errno);
          goto OPEN_ERR;
 diff --git a/ipc/native/src/core/invoker/source/binder_connector.cpp b/ipc/native/src/core/invoker/source/binder_connector.cpp
-index 86c698ef..bc7a5c47 100644
+index b9a94801..e0cd3213 100644
 --- a/ipc/native/src/core/invoker/source/binder_connector.cpp
 +++ b/ipc/native/src/core/invoker/source/binder_connector.cpp
 @@ -21,6 +21,7 @@
@@ -90,7 +90,7 @@ index 86c698ef..bc7a5c47 100644
  static constexpr const char *TOKENID_DEVNODE = "/dev/access_token_id";
  BinderConnector *BinderConnector::instance_ = nullptr;
  
-@@ -232,7 +244,8 @@ BinderConnector *BinderConnector::GetInstance()
+@@ -244,7 +256,8 @@ BinderConnector *BinderConnector::GetInstance()
      if (instance_ == nullptr) {
          std::lock_guard<std::mutex> lockGuard(skeletonMutex);
          if (instance_ == nullptr) {

@@ -1,4 +1,4 @@
-From 3cac26b4a7d51ec6ae995a380b1b9b9217782288 Mon Sep 17 00:00:00 2001
+From 52c36e9f4e1d75c7be5d83e3745d93cd0c946527 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:36:05 +0000
 Subject: [PATCH 2/5] build: register oniro_soc_products (hybris_generic) as a
@@ -17,10 +17,10 @@ Change-Id: I5ee93d102fc702080f542d98e763d26005dbaac0
  1 file changed, 4 insertions(+)
 
 diff --git a/subsystem_config.json b/subsystem_config.json
-index e73b9ac6..88702925 100644
+index abda76574..aab4ed87a 100644
 --- a/subsystem_config.json
 +++ b/subsystem_config.json
-@@ -234,5 +234,9 @@
+@@ -242,5 +242,9 @@
    "soc_p7885": {
      "path": "device/soc/unisoc/p7885",
      "name": "soc_p7885"

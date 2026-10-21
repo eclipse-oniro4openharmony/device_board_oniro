@@ -1,4 +1,4 @@
-From 204588733439ff09b5544aee56a00b423a4bcfcf Mon Sep 17 00:00:00 2001
+From b63293b595563d6bef0131d653c9ed55934edb3d Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:27 +0200
 Subject: [PATCH] runtime_core: x86_64 codegen support (asmjit/zydis deps,
@@ -19,10 +19,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  4 files changed, 18 insertions(+), 4 deletions(-)
 
 diff --git a/bundle.json b/bundle.json
-index 9f9f6f3498..4e0a7d56dd 100644
+index 2662e347a1..5eec24bf63 100644
 --- a/bundle.json
 +++ b/bundle.json
-@@ -50,7 +50,7 @@
+@@ -53,7 +53,7 @@
                  "qos_manager",
                  "ffrt"
              ],
@@ -32,7 +32,7 @@ index 9f9f6f3498..4e0a7d56dd 100644
          "build": {
              "sub_component": [
 diff --git a/static_core/compiler/optimizer/code_generator/BUILD.gn b/static_core/compiler/optimizer/code_generator/BUILD.gn
-index 7c651700a9..589dd8e1c7 100644
+index 897a64c1cf..28279eda42 100644
 --- a/static_core/compiler/optimizer/code_generator/BUILD.gn
 +++ b/static_core/compiler/optimizer/code_generator/BUILD.gn
 @@ -71,7 +71,7 @@ if (enable_codegen) {
@@ -44,7 +44,7 @@ index 7c651700a9..589dd8e1c7 100644
          ]
          deps += [
            "$ark_third_party_root/asmjit:libasmjit",
-@@ -168,7 +168,7 @@ if (enable_codegen) {
+@@ -164,7 +164,7 @@ if (enable_codegen) {
          include_dirs = [
            "$ark_third_party_root/asmjit/src",
            "$ark_third_party_root/zydis/include",
@@ -67,10 +67,10 @@ index c56169c359..2dcdce7b27 100644
  
      #target: aarch64
 diff --git a/static_core/runtime/BUILD.gn b/static_core/runtime/BUILD.gn
-index 00a3bce1f0..7066980491 100644
+index e8ad52aaf5..c75389a9db 100644
 --- a/static_core/runtime/BUILD.gn
 +++ b/static_core/runtime/BUILD.gn
-@@ -639,6 +639,16 @@ ohos_source_set("libarkruntime_set_static_host") {
+@@ -612,6 +612,16 @@ ohos_source_set("libarkruntime_set_static_host") {
    deps = []
    defines = []
  
@@ -87,7 +87,7 @@ index 00a3bce1f0..7066980491 100644
    public_configs = _libarkruntime_calculated_configs
    public_configs += [ "$ark_root:ark_host_config" ]
  
-@@ -653,6 +663,10 @@ ohos_source_set("libarkruntime_set_static_host") {
+@@ -622,6 +632,10 @@ ohos_source_set("libarkruntime_set_static_host") {
      "$ark_root/compiler:libarktscompiler_host",
    ]
  

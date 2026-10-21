@@ -1,4 +1,4 @@
-From 362432660581538daa0712216b2b70d712220b1e Mon Sep 17 00:00:00 2001
+From 6e2a6f27ff075f3a214810e32739157d3b28f764 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 14 Sep 2026 13:49:28 +0000
 Subject: [PATCH] audio_service: stop logging the per-buffer stream-check skip
@@ -22,10 +22,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/services/audio_service/server/src/renderer_in_server.cpp b/services/audio_service/server/src/renderer_in_server.cpp
-index 7485c63624..6ddf3d3e5b 100644
+index 681b600142..f13f20614c 100644
 --- a/services/audio_service/server/src/renderer_in_server.cpp
 +++ b/services/audio_service/server/src/renderer_in_server.cpp
-@@ -102,7 +102,12 @@ RendererInServer::~RendererInServer()
+@@ -165,7 +165,12 @@ RendererInServer::~RendererInServer()
  
  void RendererInServer::UpdateStreamInfo()
  {

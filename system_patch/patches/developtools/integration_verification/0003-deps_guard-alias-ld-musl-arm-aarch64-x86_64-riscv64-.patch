@@ -1,4 +1,4 @@
-From 002709eca3f7ab374f53551d51a57db41a3bf7cb Mon Sep 17 00:00:00 2001
+From caaa848470e4a2b032e1b65974ac503e150d0951 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:17 +0200
 Subject: [PATCH 3/5] deps_guard: alias ld-musl-{arm,aarch64,x86_64,riscv64}
@@ -13,10 +13,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 16 insertions(+), 3 deletions(-)
 
 diff --git a/tools/deps_guard/rules_checker/base_rule.py b/tools/deps_guard/rules_checker/base_rule.py
-index 4ea6766..a6a0ae5 100755
+index c84ec7e..ee93532 100755
 --- a/tools/deps_guard/rules_checker/base_rule.py
 +++ b/tools/deps_guard/rules_checker/base_rule.py
-@@ -114,12 +114,25 @@ class BaseRule(object):
+@@ -121,12 +121,25 @@ class BaseRule(object):
              if not contents:
                  self.log("****system/vendor only whitelist.json {} is null****".format(whitelist_file))
              json_data = json.loads(contents)

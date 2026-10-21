@@ -1,4 +1,4 @@
-From f96222097de6f1b277ae7ef3d63156682ade043b Mon Sep 17 00:00:00 2001
+From f35d637e74972770565f295f9234f1f3d46e4d82 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 3 Aug 2026 17:30:35 +0000
 Subject: [PATCH 5/5] deps_guard: accept the ld-musl loader under every arch
@@ -17,7 +17,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/tools/deps_guard/rules_checker/base_innerapi_rule.py b/tools/deps_guard/rules_checker/base_innerapi_rule.py
-index 978697b..325cb78 100644
+index 4d1cf6c..167aa0d 100644
 --- a/tools/deps_guard/rules_checker/base_innerapi_rule.py
 +++ b/tools/deps_guard/rules_checker/base_innerapi_rule.py
 @@ -32,7 +32,7 @@ class BaseInnerapiRule(BaseRule):
@@ -27,8 +27,8 @@ index 978697b..325cb78 100644
 -        self.__base_sofiles = ["libc.so", "libutils.z.so", "ld-musl-aarch64.so.1", "libconfiguration.z.so", "libusbmanager.z.so", 
 +        self.__base_sofiles = ["libc.so", "libutils.z.so", "ld-musl-arm.so.1", "ld-musl-aarch64.so.1", "ld-musl-x86_64.so.1", "ld-musl-riscv64.so.1", "libconfiguration.z.so", "libusbmanager.z.so", 
                                 "libsms.z.so"]
+         self.load_lists()
  
-     def check(self):
 -- 
 2.50.1
 

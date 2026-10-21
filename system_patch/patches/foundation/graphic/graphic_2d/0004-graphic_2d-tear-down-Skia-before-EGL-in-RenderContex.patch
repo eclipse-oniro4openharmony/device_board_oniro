@@ -1,8 +1,7 @@
-From 5108cfe087868649846809c65e217699768bc1ab Mon Sep 17 00:00:00 2001
+From 666d99c8169f8c3b743caaae40808043e2424d29 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 27 Jul 2026 10:43:29 +0000
-Subject: [PATCH 06/10] graphic_2d: tear down Skia before EGL in
- ~RenderContextGL
+Subject: [PATCH 4/9] graphic_2d: tear down Skia before EGL in ~RenderContextGL
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -32,7 +31,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 29 insertions(+)
 
 diff --git a/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp b/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp
-index e700a0f99a..0b0b33f101 100644
+index 062422ee7bc..c6e142f4057 100644
 --- a/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp
 +++ b/rosen/modules/2d_graphics/src/render_context/new_render_context/render_context_gl.cpp
 @@ -18,6 +18,7 @@

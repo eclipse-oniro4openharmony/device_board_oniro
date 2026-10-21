@@ -1,4 +1,4 @@
-From dea44d4c451d73cf652a352eb45cc1157038914d Mon Sep 17 00:00:00 2001
+From 0595b46c751e16deff8473d0ce1bf04f11eedc19 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 14 Sep 2026 13:49:02 +0000
 Subject: [PATCH] surface: don't report missing metadata support as an error
@@ -24,10 +24,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 10 insertions(+)
 
 diff --git a/surface/src/surface_buffer_impl.cpp b/surface/src/surface_buffer_impl.cpp
-index 955d56d..989fa31 100644
+index 08c97d7..9b8ea5f 100644
 --- a/surface/src/surface_buffer_impl.cpp
 +++ b/surface/src/surface_buffer_impl.cpp
-@@ -711,6 +711,16 @@ GSError SurfaceBufferImpl::SetMetadata(uint32_t key, const std::vector<uint8_t>&
+@@ -798,6 +798,16 @@ GSError SurfaceBufferImpl::SetMetadata(uint32_t key, const std::vector<uint8_t>&
          }
          return GSERROR_OK;
      }

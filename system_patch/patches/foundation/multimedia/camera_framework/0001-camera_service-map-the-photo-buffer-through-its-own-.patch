@@ -1,4 +1,4 @@
-From 684f4bcc6eace2a69660cc9d56cdc6f45130e44d Mon Sep 17 00:00:00 2001
+From 5d5d802e2c2a57cf0f44238754a7c28203d63c2d Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 30 Jul 2026 12:19:45 +0000
 Subject: [PATCH] camera_service: map the photo buffer through its own
@@ -22,12 +22,12 @@ which path produced the pointer.
 Change-Id: If0f1a4a3d115ecfc4c0aec2749957efe29d22b03
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
 ---
- common/utils/camera_server_photo_proxy.cpp | 45 ++++++++++++++++++----
+ common/utils/camera_server_photo_proxy.cpp | 47 +++++++++++++++++-----
  common/utils/camera_server_photo_proxy.h   |  4 ++
- 2 files changed, 41 insertions(+), 8 deletions(-)
+ 2 files changed, 42 insertions(+), 9 deletions(-)
 
 diff --git a/common/utils/camera_server_photo_proxy.cpp b/common/utils/camera_server_photo_proxy.cpp
-index 3fc5456c6..66c4e9b2f 100644
+index 7ad871bb4..8ac45bbd5 100644
 --- a/common/utils/camera_server_photo_proxy.cpp
 +++ b/common/utils/camera_server_photo_proxy.cpp
 @@ -201,6 +201,7 @@ void CameraServerPhotoProxy::GetServerPhotoProxyInfo(sptr<SurfaceBuffer>& surfac
@@ -38,18 +38,17 @@ index 3fc5456c6..66c4e9b2f 100644
      CHECK_RETURN_ELOG(bufferHandle == nullptr, "invalid bufferHandle");
      format_ = bufferHandle->format;
      std::string imageIdStr = std::to_string(CameraSurfaceBufferUtil::GetImageId(surfaceBuffer));
-@@ -277,15 +278,35 @@ void* CameraServerPhotoProxy::GetFileDataAddr()
+@@ -277,18 +278,38 @@ void* CameraServerPhotoProxy::GetFileDataAddr()
      std::lock_guard<std::mutex> lock(mutex_);
      CHECK_RETURN_RET_ELOG(
          bufferHandle_ == nullptr, fileDataAddr_, "CameraServerPhotoProxy::GetFileDataAddr bufferHandle_ is nullptr");
 -    if (!isMmaped_) {
 -        MEDIA_INFO_LOG("CameraServerPhotoProxy::GetFileDataAddr mmap");
 -        fileDataAddr_ = mmap(nullptr, bufferHandle_->size, PROT_READ, MAP_SHARED, bufferHandle_->fd, 0);
--        CHECK_RETURN_RET_ELOG(
--            fileDataAddr_ == MAP_FAILED, fileDataAddr_, "CameraServerPhotoProxy::GetFileDataAddr mmap failed");
--        isMmaped_ = true;
--    } else {
--        MEDIA_ERR_LOG("CameraServerPhotoProxy::GetFileDataAddr mmap failed");
+-        if (fileDataAddr_ == MAP_FAILED) {
+-            MEDIA_ERR_LOG("CameraServerPhotoProxy::GetFileDataAddr mmap failed");
+-            fileDataAddr_ = nullptr;
+-            return nullptr;
 +    if (isMmaped_ || mappedBySurfaceBuffer_) {
 +        return fileDataAddr_;
 +    }
@@ -65,7 +64,9 @@ index 3fc5456c6..66c4e9b2f 100644
 +        void *virAddr = surfaceBuffer_->GetVirAddr();
 +        if (virAddr == nullptr && surfaceBuffer_->Map() == GSERROR_OK) {
 +            virAddr = surfaceBuffer_->GetVirAddr();
-+        }
+         }
+-        isMmaped_ = true;
+-    } else {
 +        if (virAddr != nullptr) {
 +            MEDIA_INFO_LOG("CameraServerPhotoProxy::GetFileDataAddr mapped via SurfaceBuffer");
 +            fileDataAddr_ = virAddr;
@@ -73,16 +74,19 @@ index 3fc5456c6..66c4e9b2f 100644
 +            return fileDataAddr_;
 +        }
 +        MEDIA_WARNING_LOG("CameraServerPhotoProxy::GetFileDataAddr SurfaceBuffer map failed, trying fd mmap");
-     }
++    }
 +    MEDIA_INFO_LOG("CameraServerPhotoProxy::GetFileDataAddr mmap");
 +    fileDataAddr_ = mmap(nullptr, bufferHandle_->size, PROT_READ, MAP_SHARED, bufferHandle_->fd, 0);
-+    CHECK_RETURN_RET_ELOG(
-+        fileDataAddr_ == MAP_FAILED, fileDataAddr_, "CameraServerPhotoProxy::GetFileDataAddr mmap failed");
++    if (fileDataAddr_ == MAP_FAILED) {
+         MEDIA_ERR_LOG("CameraServerPhotoProxy::GetFileDataAddr mmap failed");
++        fileDataAddr_ = nullptr;
++        return nullptr;
+     }
 +    isMmaped_ = true;
      return fileDataAddr_;
  }
  
-@@ -325,6 +346,14 @@ void CameraServerPhotoProxy::Release()
+@@ -328,6 +349,14 @@ void CameraServerPhotoProxy::Release()
  {
      // LCOV_EXCL_START
      MEDIA_INFO_LOG("CameraServerPhotoProxy release enter");

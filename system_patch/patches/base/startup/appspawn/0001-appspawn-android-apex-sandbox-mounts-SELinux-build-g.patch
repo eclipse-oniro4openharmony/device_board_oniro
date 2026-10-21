@@ -1,4 +1,4 @@
-From 515407b6a9db9104839ff032b5190c80b6c43053 Mon Sep 17 00:00:00 2001
+From 774da6ac222681a1fe6136cceed9bed4f259d53c Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:36:01 +0000
 Subject: [PATCH] appspawn: /android+/apex sandbox mounts, SELinux build guards
@@ -29,10 +29,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  2 files changed, 23 insertions(+)
 
 diff --git a/appdata-sandbox.json b/appdata-sandbox.json
-index b0df2499..72c9ae64 100644
+index cc0771ea..712f2167 100644
 --- a/appdata-sandbox.json
 +++ b/appdata-sandbox.json
-@@ -213,6 +213,21 @@
+@@ -208,6 +208,21 @@
                      "sandbox-path" : "/data/storage/el2/media",
                      "sandbox-flags" : [ "bind", "rec" ],
                      "check-action-status": "false"
@@ -55,7 +55,7 @@ index b0df2499..72c9ae64 100644
                      "src-path" : "/vendor/etc/passthrough",
                      "sandbox-path" : "/vendor/etc/passthrough",
 diff --git a/modules/common/appspawn_adapter.cpp b/modules/common/appspawn_adapter.cpp
-index aa5504c8..f602d7f5 100644
+index a2483e6d..41f769a9 100644
 --- a/modules/common/appspawn_adapter.cpp
 +++ b/modules/common/appspawn_adapter.cpp
 @@ -44,8 +44,10 @@ using GetPermissionFunc = int32_t (*)(void *, const char *);
@@ -69,7 +69,7 @@ index aa5504c8..f602d7f5 100644
  
  int SetAppAccessToken(const AppSpawnMgr *content, const AppSpawningCtx *property)
  {
-@@ -278,7 +280,11 @@ int32_t SetEnvInfo(const AppSpawnMgr *content, const AppSpawningCtx *property)
+@@ -283,7 +285,11 @@ int32_t SetEnvInfo(const AppSpawnMgr *content, const AppSpawningCtx *property)
  
  int LoadSeLinuxConfig(void)
  {
@@ -81,7 +81,7 @@ index aa5504c8..f602d7f5 100644
  }
  
  uint32_t GetHostId(const AppSpawningCtx *property)
-@@ -299,6 +305,7 @@ uint32_t GetHostId(const AppSpawningCtx *property)
+@@ -304,6 +310,7 @@ uint32_t GetHostId(const AppSpawningCtx *property)
      return hostId;
  }
  
@@ -89,7 +89,7 @@ index aa5504c8..f602d7f5 100644
  void CheckSpecialSpawnMode(const AppSpawnMgr *content, const AppSpawningCtx *property,
      HapDomainInfo *hapDomainInfo)
  {
-@@ -318,3 +325,4 @@ void CheckSpecialSpawnMode(const AppSpawnMgr *content, const AppSpawningCtx *pro
+@@ -323,3 +330,4 @@ void CheckSpecialSpawnMode(const AppSpawnMgr *content, const AppSpawningCtx *pro
          hapDomainInfo->hapFlags |= SELINUX_HAP_ISOLATED_RENDER;
      }
  }

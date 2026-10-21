@@ -1,7 +1,7 @@
-From ec16f727ba985aa601aa36600d60cd3f7f266356 Mon Sep 17 00:00:00 2001
+From 095efb02f6df7777ab22cfaca2fadc2e3adf99b3 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 4 Jun 2026 12:13:32 +0000
-Subject: [PATCH 02/10] graphic_2d: fix RSWindowAnimationController crash when
+Subject: [PATCH 2/9] graphic_2d: fix RSWindowAnimationController crash when
  registered off the main runner
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -40,7 +40,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  2 files changed, 52 insertions(+), 48 deletions(-)
 
 diff --git a/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.cpp b/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.cpp
-index f122e05fb7..6c81778d10 100644
+index f122e05fb7b..6c81778d10d 100644
 --- a/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.cpp
 +++ b/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.cpp
 @@ -20,6 +20,7 @@
@@ -212,7 +212,7 @@ index f122e05fb7..6c81778d10 100644
      if (jsControllerValue == nullptr) {
          WALOGE("jsControllerValue is null!");
 diff --git a/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.h b/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.h
-index 8a01c8e67f..39001f99f9 100644
+index 8a01c8e67fc..39001f99f9d 100644
 --- a/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.h
 +++ b/interfaces/kits/napi/graphic/animation/window_animation_manager/rs_window_animation_controller.h
 @@ -90,8 +90,19 @@ private:

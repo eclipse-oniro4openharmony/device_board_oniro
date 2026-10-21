@@ -1,7 +1,7 @@
-From a85e365845dc6084c34f1b70d80b25b61484a9c3 Mon Sep 17 00:00:00 2001
+From 4eb9eba89a498dcb1fde63c1f4ef5fdb3ad9d293 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 11:59:45 +0200
-Subject: [PATCH 7/7] usb_ddk: null-guard listener callback, lazy-init listener
+Subject: [PATCH 7/8] usb_ddk: null-guard listener callback, lazy-init listener
  mgr
 
 Two robustness fixes in DdkListenerMgr: guard listener->callBack with NULL check before invocation (raced into a null on Bind/Init reorder), and lazy-init the listener list in DdkListenerMgrAdd so Bind can run before DdkListenerMgrInit without crashing.
@@ -13,7 +13,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 18 insertions(+)
 
 diff --git a/usb/ddk/host/src/ddk_pnp_listener_mgr.c b/usb/ddk/host/src/ddk_pnp_listener_mgr.c
-index 0b3c9c6af..c877230af 100644
+index 0b3c9c6af3..c877230af6 100644
 --- a/usb/ddk/host/src/ddk_pnp_listener_mgr.c
 +++ b/usb/ddk/host/src/ddk_pnp_listener_mgr.c
 @@ -97,6 +97,11 @@ static int32_t DdkListenerMgrNotifyOne(const struct UsbPnpNotifyMatchInfoTable *

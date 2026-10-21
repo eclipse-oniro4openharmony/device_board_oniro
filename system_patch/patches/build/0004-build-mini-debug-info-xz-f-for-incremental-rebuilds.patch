@@ -1,4 +1,4 @@
-From 95ab53c76daacb31e1a8a9a4b01d1cee9e8bd17d Mon Sep 17 00:00:00 2001
+From 13aa7b221255e413c8df667735370b42a6c5dd21 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:01:28 +0200
 Subject: [PATCH 4/5] build: mini-debug-info xz -f for incremental rebuilds
@@ -12,10 +12,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/toolchain/mini_debug_info.py b/toolchain/mini_debug_info.py
-index 964ab1f1..9eafdd53 100755
+index f1a60a063..4726506d4 100755
 --- a/toolchain/mini_debug_info.py
 +++ b/toolchain/mini_debug_info.py
-@@ -88,7 +88,7 @@ def create_mini_debug_info(binary_path, stripped_binary_path, root_path, clang_b
+@@ -91,7 +91,7 @@ def create_mini_debug_info(binary_path, stripped_binary_path, root_path, clang_b
          " --only-keep-debug " + binary_path + " " + debug_path
      gen_mini_debug_cmd = llvm_objcopy_path + " -S --remove-section .gdb_index --remove-section .comment --keep-symbols=" + \
          keep_path + " " + debug_path + " " + mini_debug_path

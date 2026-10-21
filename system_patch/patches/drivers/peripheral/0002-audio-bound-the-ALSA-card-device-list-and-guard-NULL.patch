@@ -1,7 +1,7 @@
-From 953e9d8d9bf05b5821d66750fe32b566a0cb5646 Mon Sep 17 00:00:00 2001
+From 2704a5838f863408555c26017f98684ef5b71b5b Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Sat, 25 Jul 2026 11:14:39 +0000
-Subject: [PATCH 2/7] audio: bound the ALSA card device list and guard NULL
+Subject: [PATCH 2/8] audio: bound the ALSA card device list and guard NULL
  pcm/card ids
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -27,7 +27,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 17 insertions(+)
 
 diff --git a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
-index ebc5de406..093905613 100644
+index ebc5de4063..0939056138 100644
 --- a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
 +++ b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
 @@ -350,9 +350,26 @@ static int32_t DevSaveCardPcmInfo(snd_ctl_t *handle, snd_pcm_stream_t stream,

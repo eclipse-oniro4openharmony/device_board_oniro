@@ -1,4 +1,4 @@
-From 6a0baff018aca70f61fd98052311d6d141e6b671 Mon Sep 17 00:00:00 2001
+From f680a613b474be8180a09b78a5bc5304800b988e Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 11:59:26 +0200
 Subject: [PATCH] app_domain_verify: guard SELinux restorecon with WITH_SELINUX
@@ -30,7 +30,7 @@ index 13a6d79..5495b71 100644
    sanitize = {
      boundary_sanitize = true
 diff --git a/services/src/manager/core/app_domain_verify_mgr_service.cpp b/services/src/manager/core/app_domain_verify_mgr_service.cpp
-index de70b12..d399241 100644
+index 2b3bcb7..11ecc03 100644
 --- a/services/src/manager/core/app_domain_verify_mgr_service.cpp
 +++ b/services/src/manager/core/app_domain_verify_mgr_service.cpp
 @@ -29,7 +29,9 @@

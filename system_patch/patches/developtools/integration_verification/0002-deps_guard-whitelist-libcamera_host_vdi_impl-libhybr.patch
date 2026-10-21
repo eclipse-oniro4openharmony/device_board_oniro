@@ -1,4 +1,4 @@
-From 596f4a96b1be78fe08459758d6c5e63c7857023d Mon Sep 17 00:00:00 2001
+From 979f354dc351c43ef92ce4648eb837478c165798 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 21 May 2026 14:00:28 +0000
 Subject: [PATCH 2/5] =?UTF-8?q?deps=5Fguard:=20whitelist=20libcamera=5Fhos?=
@@ -23,10 +23,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 7 insertions(+)
 
 diff --git a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
-index 7939ca7..8b532e5 100644
+index 59385c4..e3ba6f2 100644
 --- a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
 +++ b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
-@@ -4808,6 +4808,13 @@
+@@ -4836,6 +4836,13 @@
          "dep_file_path": "system/lib64/chipset-sdk/libhilog.so",
          "description": "hybris_generic: libdisplay_composer_vdi_impl.z.so (passthrough) depends on libhilog (chipsetsdk)"
      },

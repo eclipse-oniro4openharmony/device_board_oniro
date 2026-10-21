@@ -1,4 +1,4 @@
-From e632eeca604c04b82ef4540a44652d75203467a8 Mon Sep 17 00:00:00 2001
+From 970a567768d0a85067c4768bfc28b7a5b611e8e4 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Fri, 5 Jun 2026 19:25:31 +0000
 Subject: [PATCH] memmgr: keep the SA published when HyperHold reclaim init
@@ -37,7 +37,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 12 insertions(+), 3 deletions(-)
 
 diff --git a/services/memmgrservice/src/mem_mgr_service.cpp b/services/memmgrservice/src/mem_mgr_service.cpp
-index 4e4e61d..987a56d 100644
+index a8f0ccf..f545721 100644
 --- a/services/memmgrservice/src/mem_mgr_service.cpp
 +++ b/services/memmgrservice/src/mem_mgr_service.cpp
 @@ -65,10 +65,19 @@ bool MemMgrService::Init()

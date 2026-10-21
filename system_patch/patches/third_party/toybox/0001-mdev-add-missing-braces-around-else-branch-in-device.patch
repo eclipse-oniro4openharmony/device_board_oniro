@@ -1,4 +1,4 @@
-From 8b70d9bbe9ceac63c1d7652c1950ecfe75b05773 Mon Sep 17 00:00:00 2001
+From f16092cac45866c075ffe0670d45321050460def Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:35:26 +0000
 Subject: [PATCH 1/2] mdev: add missing braces around else branch in device

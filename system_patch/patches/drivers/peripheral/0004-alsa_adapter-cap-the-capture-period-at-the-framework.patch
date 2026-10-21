@@ -1,7 +1,7 @@
-From b91813c960a6d0275cd35f64852bb8a1df49f333 Mon Sep 17 00:00:00 2001
+From c86bf3591ad8261a4ab3aba360887fd544df5de6 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Tue, 28 Jul 2026 22:10:50 +0000
-Subject: [PATCH 4/7] alsa_adapter: cap the capture period at the framework's
+Subject: [PATCH 4/8] alsa_adapter: cap the capture period at the framework's
  fragment size
 
 AudioCaptureCaptureFrame rejects a read whose caller buffer is smaller
@@ -23,7 +23,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c b/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
-index 82b046780..5ca98fb83 100755
+index 82b0467800..5ca98fb835 100755
 --- a/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
 +++ b/audio/supportlibs/alsa_adapter/src/alsa_snd_capture.c
 @@ -27,7 +27,13 @@

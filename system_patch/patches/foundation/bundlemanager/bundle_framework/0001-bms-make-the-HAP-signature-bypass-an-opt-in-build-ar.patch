@@ -1,7 +1,7 @@
-From dfb56905bc619930c5938b17c32844149b99a37a Mon Sep 17 00:00:00 2001
+From 964a41fbaea9445b7c5925084e0967df6d167025 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Fri, 7 Aug 2026 10:03:51 +0000
-Subject: [PATCH 1/2] bms: make the HAP signature bypass an opt-in build arg
+Subject: [PATCH] bms: make the HAP signature bypass an opt-in build arg
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -64,12 +64,12 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  5 files changed, 69 insertions(+), 3 deletions(-)
 
 diff --git a/appexecfwk.gni b/appexecfwk.gni
-index 7afc1f829..243194784 100644
+index ed4e25db2..a8f5e81bc 100644
 --- a/appexecfwk.gni
 +++ b/appexecfwk.gni
-@@ -40,6 +40,21 @@ declare_args() {
-   bundle_framework_form_dimension_2_3 = false
-   bundle_framework_form_dimension_3_3 = false
+@@ -42,6 +42,21 @@ declare_args() {
+   bundle_framework_bss_enable = false
+   bundle_framework_npapi_enable = false
  
 +  # Accept HAPs that fail signature and code-signature verification.
 +  #
@@ -90,10 +90,10 @@ index 7afc1f829..243194784 100644
    account_enable = true
    configpolicy_enable = true
 diff --git a/services/bundlemgr/BUILD.gn b/services/bundlemgr/BUILD.gn
-index 9d1a49ed0..e13a7c689 100644
+index d1c3d37e4..30bd6c71c 100644
 --- a/services/bundlemgr/BUILD.gn
 +++ b/services/bundlemgr/BUILD.gn
-@@ -217,7 +217,7 @@ ohos_source_set("bundle_parser") {
+@@ -222,7 +222,7 @@ ohos_source_set("bundle_parser") {
      defines += [ "BUNDLE_FRAMEWORK_OVERLAY_INSTALLATION" ]
    }
  
@@ -102,7 +102,7 @@ index 9d1a49ed0..e13a7c689 100644
      defines += [ "X86_EMULATOR_MODE" ]
    }
    part_name = "bundle_framework"
-@@ -311,8 +311,22 @@ ohos_shared_library("libbms") {
+@@ -317,8 +317,22 @@ ohos_shared_library("libbms") {
      "LOG_DOMAIN = 0xD001120",
    ]
  
@@ -128,10 +128,10 @@ index 9d1a49ed0..e13a7c689 100644
  
    if (build_variant == "user") {
 diff --git a/services/bundlemgr/src/base_bundle_installer.cpp b/services/bundlemgr/src/base_bundle_installer.cpp
-index d17c1f01c..e930023e0 100644
+index b2721933e..0255fc05a 100644
 --- a/services/bundlemgr/src/base_bundle_installer.cpp
 +++ b/services/bundlemgr/src/base_bundle_installer.cpp
-@@ -6346,7 +6346,15 @@ ErrCode BaseBundleInstaller::VerifyCodeSignatureForNativeFiles(InnerBundleInfo &
+@@ -7545,7 +7545,15 @@ ErrCode BaseBundleInstaller::VerifyCodeSignatureForNativeFiles(InnerBundleInfo &
      codeSignatureParam.isPreInstalledBundle = IsDataPreloadHap(modulePath_) ? false : info.IsPreInstallApp();
      codeSignatureParam.isCompileSdkOpenHarmony = (compileSdkType == COMPILE_SDK_TYPE_OPEN_HARMONY);
      bundleInstallChecker_->ProcessCodeSignatureParam(verifyRes_, codeSignatureParam);
@@ -147,7 +147,7 @@ index d17c1f01c..e930023e0 100644
  }
  
  ErrCode BaseBundleInstaller::VerifyCodeSignatureForHap(const std::unordered_map<std::string, InnerBundleInfo> &infos,
-@@ -6383,7 +6391,15 @@ ErrCode BaseBundleInstaller::VerifyCodeSignatureForHap(const std::unordered_map<
+@@ -7583,7 +7591,15 @@ ErrCode BaseBundleInstaller::VerifyCodeSignatureForHap(const std::unordered_map<
      codeSignatureParam.isPreInstalledBundle = IsDataPreloadHap(realHapPath) ? false : info.IsPreInstallApp();
      codeSignatureParam.isCompressNativeLibrary = info.IsCompressNativeLibs(info.GetCurModuleName());
      bundleInstallChecker_->ProcessCodeSignatureParam(verifyRes_, codeSignatureParam);
@@ -163,7 +163,7 @@ index d17c1f01c..e930023e0 100644
  }
  
  ErrCode BaseBundleInstaller::CheckSoEncryption(InnerBundleInfo &info, const std::string &cpuAbi,
-@@ -6593,8 +6609,15 @@ ErrCode BaseBundleInstaller::FindSignatureFileDir(const std::string &moduleName,
+@@ -7845,8 +7861,15 @@ ErrCode BaseBundleInstaller::FindSignatureFileDir(const std::string &moduleName,
      }
      auto iterator = verifyCodeParams_.find(moduleName);
      if (iterator == verifyCodeParams_.end()) {
@@ -180,10 +180,10 @@ index d17c1f01c..e930023e0 100644
      signatureFileDir = verifyCodeParams_.at(moduleName);
  
 diff --git a/services/bundlemgr/src/bundle_install_checker.cpp b/services/bundlemgr/src/bundle_install_checker.cpp
-index 1e0403289..e945827af 100644
+index f9ff7a92c..d08ebe41b 100644
 --- a/services/bundlemgr/src/bundle_install_checker.cpp
 +++ b/services/bundlemgr/src/bundle_install_checker.cpp
-@@ -1832,6 +1832,10 @@ ErrCode BundleInstallChecker::CheckIsolationMode(const std::unordered_map<std::s
+@@ -1955,6 +1955,10 @@ ErrCode BundleInstallChecker::CheckIsolationMode(const std::unordered_map<std::s
  
  ErrCode BundleInstallChecker::CheckSignatureFileDir(const std::string &signatureFileDir) const
  {
@@ -194,7 +194,7 @@ index 1e0403289..e945827af 100644
      ErrCode ret = BundleUtil::CheckFileName(signatureFileDir);
      if (ret != ERR_OK) {
          LOG_E(BMS_TAG_INSTALLER, "code signature file dir is invalid");
-@@ -1847,6 +1851,7 @@ ErrCode BundleInstallChecker::CheckSignatureFileDir(const std::string &signature
+@@ -1970,6 +1974,7 @@ ErrCode BundleInstallChecker::CheckSignatureFileDir(const std::string &signature
          return ERR_BUNDLEMANAGER_INSTALL_CODE_SIGNATURE_FILE_IS_INVALID;
      }
      return ERR_OK;
@@ -203,7 +203,7 @@ index 1e0403289..e945827af 100644
  
  ErrCode BundleInstallChecker::CheckDeveloperMode(
 diff --git a/services/bundlemgr/src/bundle_mgr_service.cpp b/services/bundlemgr/src/bundle_mgr_service.cpp
-index a225a8816..57e909232 100644
+index 2483e0a0c..65e48e44d 100644
 --- a/services/bundlemgr/src/bundle_mgr_service.cpp
 +++ b/services/bundlemgr/src/bundle_mgr_service.cpp
 @@ -35,6 +35,9 @@
@@ -216,7 +216,7 @@ index a225a8816..57e909232 100644
  #include "system_ability_definition.h"
  #include "system_ability_helper.h"
  #include "xcollie_helper.h"
-@@ -132,6 +135,12 @@ bool BundleMgrService::Init()
+@@ -133,6 +136,12 @@ bool BundleMgrService::Init()
      InitBmsParam();
      APP_LOGI_NOFUNC("BundleMgrService InitPreInstallExceptionMgr");
      InitPreInstallExceptionMgr();
@@ -228,7 +228,7 @@ index a225a8816..57e909232 100644
 +#endif
      CHECK_INIT_RESULT(InitBundleMgrHost(), "Init bundleMgr fail");
      CHECK_INIT_RESULT(InitBundleInstaller(), "Init bundleInstaller fail");
-     InitBundleDataMgr();
+     CHECK_INIT_RESULT(InitLocalPluginInstaller(), "Init local plugin installer fail");
 -- 
 2.50.1
 

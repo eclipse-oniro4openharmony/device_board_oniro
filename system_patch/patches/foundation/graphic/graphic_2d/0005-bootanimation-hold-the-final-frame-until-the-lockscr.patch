@@ -1,8 +1,8 @@
-From dff13b08d9c6a40d485fdad6c21cc8134c61df1b Mon Sep 17 00:00:00 2001
+From 79cfd3beddfb9b7fb0ae42631c4f5788a4beacec Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 27 Jul 2026 12:56:27 +0000
-Subject: [PATCH 07/10] bootanimation: hold the final frame until the
- lockscreen is ready
+Subject: [PATCH 5/9] bootanimation: hold the final frame until the lockscreen
+ is ready
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -31,7 +31,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  2 files changed, 57 insertions(+), 6 deletions(-)
 
 diff --git a/frameworks/bootanimation/include/boot_picture_player.h b/frameworks/bootanimation/include/boot_picture_player.h
-index da52e5407c..60a10efc5f 100644
+index da52e5407c4..60a10efc5fa 100644
 --- a/frameworks/bootanimation/include/boot_picture_player.h
 +++ b/frameworks/bootanimation/include/boot_picture_player.h
 @@ -51,6 +51,9 @@ private:
@@ -45,7 +45,7 @@ index da52e5407c..60a10efc5f 100644
  
      std::shared_ptr<OHOS::Rosen::RSSurface> rsSurface_;
 diff --git a/frameworks/bootanimation/src/boot_picture_player.cpp b/frameworks/bootanimation/src/boot_picture_player.cpp
-index e3c5550aaf..b987777084 100644
+index 216ee71698d..ebfdb87aebf 100644
 --- a/frameworks/bootanimation/src/boot_picture_player.cpp
 +++ b/frameworks/bootanimation/src/boot_picture_player.cpp
 @@ -22,6 +22,12 @@
@@ -61,7 +61,7 @@ index e3c5550aaf..b987777084 100644
  }
  
  BootPicturePlayer::BootPicturePlayer(const PlayerParams& params)
-@@ -142,11 +148,32 @@ void BootPicturePlayer::OnVsync()
+@@ -145,11 +151,32 @@ void BootPicturePlayer::OnVsync()
  bool BootPicturePlayer::Draw()
  {
      if (picCurNo_ >= (imgVecSize_ - 1)) {
@@ -98,7 +98,7 @@ index e3c5550aaf..b987777084 100644
      ROSEN_TRACE_BEGIN(HITRACE_TAG_GRAPHIC_AGP, "BootAnimation::Draw RequestFrame");
      auto frame = rsSurface_->RequestFrame(windowWidth_, windowHeight_);
      ROSEN_TRACE_END(HITRACE_TAG_GRAPHIC_AGP);
-@@ -176,11 +203,28 @@ bool BootPicturePlayer::OnDraw(Rosen::Drawing::CoreCanvas* canvas, int32_t curNo
+@@ -179,11 +206,28 @@ bool BootPicturePlayer::OnDraw(Rosen::Drawing::CoreCanvas* canvas, int32_t curNo
          return false;
      }
      std::shared_ptr<ImageStruct> imgstruct = imageVector_[curNo];
@@ -128,7 +128,7 @@ index e3c5550aaf..b987777084 100644
      Rosen::Drawing::Rect bgRect(0.0, 0.0, windowWidth_, windowHeight_);
      canvas->AttachBrush(brush);
      canvas->DrawRect(bgRect);
-@@ -190,7 +234,11 @@ bool BootPicturePlayer::OnDraw(Rosen::Drawing::CoreCanvas* canvas, int32_t curNo
+@@ -193,7 +237,11 @@ bool BootPicturePlayer::OnDraw(Rosen::Drawing::CoreCanvas* canvas, int32_t curNo
      Rosen::Drawing::Rect rect(pointX_, pointY_, pointX_ + realWidth_, pointY_ + realHeight_);
      Rosen::Drawing::SamplingOptions samplingOptions;
      canvas->DrawImageRect(*image, rect, samplingOptions);

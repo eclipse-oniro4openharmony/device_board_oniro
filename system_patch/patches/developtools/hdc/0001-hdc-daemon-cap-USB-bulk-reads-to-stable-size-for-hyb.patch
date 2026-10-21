@@ -1,4 +1,4 @@
-From f68712f9032c07f7f405419fd7ae036e8618f8d7 Mon Sep 17 00:00:00 2001
+From bc8ab23fc605ac1ed327b3841d013d3f473b3dcc Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 18 May 2026 13:03:04 +0000
 Subject: [PATCH 1/2] hdc daemon: cap USB bulk reads to stable size for hybris
@@ -27,10 +27,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  2 files changed, 21 insertions(+), 1 deletion(-)
 
 diff --git a/src/common/transfer.cpp b/src/common/transfer.cpp
-index bdd3e51a..7b21e397 100644
+index f1a3c92c..19d00750 100644
 --- a/src/common/transfer.cpp
 +++ b/src/common/transfer.cpp
-@@ -36,7 +36,20 @@ HdcTransferBase::HdcTransferBase(HTaskInfo hTaskInfo)
+@@ -38,7 +38,20 @@ HdcTransferBase::HdcTransferBase(HTaskInfo hTaskInfo)
      ResetCtx(&ctxNow, true);
      commandBegin = 0;
      commandData = 0;

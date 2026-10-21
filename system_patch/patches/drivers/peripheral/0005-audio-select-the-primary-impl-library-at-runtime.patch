@@ -1,7 +1,7 @@
-From dcde22b1ba98a7440305c75fffe2272aa25e0275 Mon Sep 17 00:00:00 2001
+From 63cdc581b4adec31631c4e8ab23647fc533654e8 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 29 Jul 2026 10:26:24 +0000
-Subject: [PATCH 5/7] audio: select the primary impl library at runtime
+Subject: [PATCH 5/8] audio: select the primary impl library at runtime
 
 The primary audio HDI service loads its entire implementation through one
 fixed dlopen of libaudio_primary_impl_vendor.z.so.  On products where a
@@ -23,7 +23,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  3 files changed, 44 insertions(+), 3 deletions(-)
 
 diff --git a/audio/bundle.json b/audio/bundle.json
-index 4645f244e..ed8b0f6b3 100755
+index 4645f244ed..ed8b0f6b3e 100755
 --- a/audio/bundle.json
 +++ b/audio/bundle.json
 @@ -48,6 +48,7 @@
@@ -35,10 +35,10 @@ index 4645f244e..ed8b0f6b3 100755
              ],
              "third_party": []
 diff --git a/audio/hdi_service/primary/BUILD.gn b/audio/hdi_service/primary/BUILD.gn
-index bf60660f7..95227e46d 100644
+index e21e205af0..c7800e61c3 100644
 --- a/audio/hdi_service/primary/BUILD.gn
 +++ b/audio/hdi_service/primary/BUILD.gn
-@@ -66,6 +66,7 @@ ohos_shared_library("audio_manager_service_6.0") {
+@@ -66,6 +66,7 @@ ohos_shared_library("audio_manager_service_6.1") {
        "hdf_core:libhdf_utils",
        "hdf_core:libhdi",
        "hilog:libhilog",
@@ -47,7 +47,7 @@ index bf60660f7..95227e46d 100644
    } else if (defined(ohos_lite)) {
      external_deps = [ "hilog_lite:hilog_shared" ]
 diff --git a/audio/hdi_service/primary/audio_manager_service.c b/audio/hdi_service/primary/audio_manager_service.c
-index 1f2586902..3240f1f9b 100644
+index 677fc55222..b8fcc86652 100644
 --- a/audio/hdi_service/primary/audio_manager_service.c
 +++ b/audio/hdi_service/primary/audio_manager_service.c
 @@ -14,15 +14,26 @@
@@ -60,7 +60,7 @@ index 1f2586902..3240f1f9b 100644
  #include <osal_mem.h>
  
 +#include "parameter.h"
- #include "v6_0/iaudio_manager.h"
+ #include "v6_1/iaudio_manager.h"
  #include "audio_uhdf_log.h"
  
  #define HDF_LOG_TAG    HDF_AUDIO_PRIMARY_SRV

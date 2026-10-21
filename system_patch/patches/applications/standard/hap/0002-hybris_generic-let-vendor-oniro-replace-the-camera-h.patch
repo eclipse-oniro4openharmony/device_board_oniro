@@ -1,7 +1,7 @@
-From 0f696939179b9a3a0d8b2a4b5ed4dbefde69cb23 Mon Sep 17 00:00:00 2001
+From 2a136ee13b7d1bb1e0380d9f78cf22a48dc214ee Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 26 Aug 2026 20:39:15 +0000
-Subject: [PATCH] hybris_generic: let vendor/oniro replace the camera hap
+Subject: [PATCH 2/3] hybris_generic: let vendor/oniro replace the camera hap
 
 With the Oniro HAP set opted in (oniro_install_custom_haps), com.ohos.camera
 ships from vendor/oniro instead of from here: a rebuild of
@@ -33,10 +33,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 17 insertions(+)
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 7f28bb2..991473b 100755
+index e62fa9f2..b884166a 100755
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -489,5 +489,22 @@ group("hap") {
+@@ -545,5 +545,22 @@ group("hap") {
    } else if (defined(product_name) && product_name == "ohos-arm64") {
      deps +=
          [ "//applications/standard/admin_provisioning:adminprovisioning_hap" ]

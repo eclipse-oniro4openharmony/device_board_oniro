@@ -1,4 +1,4 @@
-From 595d7a64c7586954fbadef3dab134bc90fe91086 Mon Sep 17 00:00:00 2001
+From 12e57016d63189b1399deea9adba72d8819ba0c4 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 11:59:06 +0200
 Subject: [PATCH 2/2] toybox: suppress -Wmisleading-indentation
@@ -12,10 +12,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 1 insertion(+)
 
 diff --git a/BUILD.gn b/BUILD.gn
-index ffa8c5d..ed98d99 100644
+index cc19b81..bb0e8b6 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -730,6 +730,7 @@ if (defined(ohos_lite)) {
+@@ -494,6 +494,7 @@ if (defined(ohos_lite)) {
        "-Wno-tautological-constant-compare",
        "-Wno-string-conversion",
        "-Wno-unused-but-set-variable",

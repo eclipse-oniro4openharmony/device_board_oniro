@@ -1,4 +1,4 @@
-From 2ce934c3107d7d0c2f87e1607d8045d879d392b8 Mon Sep 17 00:00:00 2001
+From 2612a379a732a2b41f697ec6adf4a087b745e346 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:53 +0200
 Subject: [PATCH] zydis: add OH GN BUILD, bundle.json, and

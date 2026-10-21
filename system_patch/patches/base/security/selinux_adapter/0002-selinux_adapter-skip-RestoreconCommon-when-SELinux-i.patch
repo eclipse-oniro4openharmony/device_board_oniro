@@ -1,4 +1,4 @@
-From 77fc443ed6cdfcafd501cefdff1d7d0e27c36c82 Mon Sep 17 00:00:00 2001
+From d4ed11285541dad5b78edf76a8a2ec941fa6d14c Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 11:59:12 +0200
 Subject: [PATCH 2/2] selinux_adapter: skip RestoreconCommon when SELinux is

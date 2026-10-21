@@ -1,4 +1,4 @@
-From 2caf0c3dd9d1b1df8eb0671095a3b1a644d6a7b3 Mon Sep 17 00:00:00 2001
+From 9479712b7c72941d91f959a05497e40eb7026977 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 11:59:08 +0200
 Subject: [PATCH] usb_manager: cast UTF-16 BOM bytes to unsigned char before
@@ -13,10 +13,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/services/native/src/usb_host_manager.cpp b/services/native/src/usb_host_manager.cpp
-index bd995fc9..08fceab0 100644
+index 2a018ceb..83c818eb 100644
 --- a/services/native/src/usb_host_manager.cpp
 +++ b/services/native/src/usb_host_manager.cpp
-@@ -1442,7 +1442,7 @@ static std::string Utf16leToUtf8(char *utf16leBytes, size_t length)
+@@ -1449,7 +1449,7 @@ static std::string Utf16leToUtf8(char *utf16leBytes, size_t length)
      }
      size_t charCount = length / HALF;
      // check and skip BOM

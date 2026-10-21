@@ -1,7 +1,7 @@
-From fb53aa14b517faed77c7bccffd279c75066726ae Mon Sep 17 00:00:00 2001
+From 9bdcf1d3d490ed2be36f9ea26c3bf52ee3769cab Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 27 Jul 2026 09:39:37 +0000
-Subject: [PATCH 3/7] alsa_adapter: don't let snd_mixer_load failure veto
+Subject: [PATCH 3/8] alsa_adapter: don't let snd_mixer_load failure veto
  stream open
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -26,7 +26,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 8 insertions(+), 2 deletions(-)
 
 diff --git a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
-index 093905613..304569d94 100644
+index 0939056138..304569d94c 100644
 --- a/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
 +++ b/audio/supportlibs/alsa_adapter/src/alsa_soundcard.c
 @@ -635,13 +635,19 @@ int32_t SndOpenMixer(struct AlsaSoundCard *cardIns)

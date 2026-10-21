@@ -1,4 +1,4 @@
-From f84e42ce5da00b63b67d903d5d2779465ff783f8 Mon Sep 17 00:00:00 2001
+From 5311ef3dcaca9f15568ac37b546405212e2f1d58 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:01:30 +0200
 Subject: [PATCH 5/5] build: whitelist asmjit libs for compile_standard
@@ -13,10 +13,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/compile_standard_whitelist.json b/compile_standard_whitelist.json
-index 008ad010..521d86ae 100644
+index 90651a201..d08ebf62c 100644
 --- a/compile_standard_whitelist.json
 +++ b/compile_standard_whitelist.json
-@@ -311,7 +311,9 @@
+@@ -315,7 +315,9 @@
          "//third_party/flutter/build/skia:skia_shared",
          "//third_party/vk-gl-cts/framework/platform/ohos/rosen_context:rosen_context",
          "//third_party/vk-gl-cts/framework/platform:libdeqp_ohos_platform",

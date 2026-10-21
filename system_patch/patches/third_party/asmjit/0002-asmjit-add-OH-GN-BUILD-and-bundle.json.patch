@@ -1,4 +1,4 @@
-From cb021ca8e2d6f4d457de5011ea9a939db84ab5a2 Mon Sep 17 00:00:00 2001
+From ec548a174a18aabc45bb77a812162f99c27fa18e Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:41 +0200
 Subject: [PATCH 2/2] asmjit: add OH GN BUILD and bundle.json

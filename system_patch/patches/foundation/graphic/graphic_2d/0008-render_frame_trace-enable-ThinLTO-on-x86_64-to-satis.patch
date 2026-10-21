@@ -1,7 +1,7 @@
-From d4c7724a22d197e5ec37bd389532f0cfc3956dee Mon Sep 17 00:00:00 2001
+From 6a84a8d4e380e3307c3cc6e646616925bafea4fa Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:13 +0200
-Subject: [PATCH 10/10] render_frame_trace: enable ThinLTO on x86_64 to satisfy
+Subject: [PATCH 8/9] render_frame_trace: enable ThinLTO on x86_64 to satisfy
  CFI
 
 render_frame_trace was compiled with -flto=thin only on arm/arm64. On x86_64 the FRAME_TRACE::RenderFrameTrace vtable failed cross-DSO CFI (render_service SIGABRTed at __cfi_check). Adding x86_64 to the gate so the vtable is LTO-visible to CFI.
@@ -13,7 +13,7 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/rosen/modules/render_frame_trace/BUILD.gn b/rosen/modules/render_frame_trace/BUILD.gn
-index 9d9206a249..3a896f9be1 100644
+index 12e03c8e44c..63a50c43e6a 100644
 --- a/rosen/modules/render_frame_trace/BUILD.gn
 +++ b/rosen/modules/render_frame_trace/BUILD.gn
 @@ -22,7 +22,8 @@ ohos_source_set("render_frame_trace") {

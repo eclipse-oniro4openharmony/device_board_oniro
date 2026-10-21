@@ -1,7 +1,7 @@
-From 948eaa871f8a657880118014d8898d1098704ad9 Mon Sep 17 00:00:00 2001
+From dc0119416ce7798044e101c3596bcfc2223355da Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 28 May 2026 12:00:10 +0200
-Subject: [PATCH 09/10] opengl_wrapper: open x86_64 libGLESv3 from platformsdk
+Subject: [PATCH 7/9] opengl_wrapper: open x86_64 libGLESv3 from platformsdk
  path
 
 libGLESv3.so installs under /system/lib64/platformsdk/, so the lib64
@@ -19,11 +19,11 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp b/frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp
-index b3446f1774..9b6f7e6d10 100644
+index 7cc31aadfd5..e99c74e9b02 100644
 --- a/frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp
 +++ b/frameworks/opengl_wrapper/src/EGL/egl_wrapper_entry.cpp
-@@ -300,7 +300,12 @@ EGLint EglGetErrorImpl(void)
- 
+@@ -305,7 +305,12 @@ EGLint EglGetErrorImpl(void)
+ // LCOV_EXCL_START
  static __eglMustCastToProperFunctionPointerType FindBuiltinWrapper(const char* procname)
  {
 -#if (defined(__aarch64__) || defined(__x86_64__))

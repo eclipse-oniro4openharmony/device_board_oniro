@@ -1,4 +1,4 @@
-From e8360968a0075a82714f7485bfacaf35b363fe1b Mon Sep 17 00:00:00 2001
+From 0a74eb1895102b8a08aa46424f2e74082f047f8c Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 13 Apr 2026 22:37:43 +0000
 Subject: [PATCH 1/5] integration_verification: register hybris_generic VDI
@@ -27,7 +27,7 @@ Change-Id: I85823334c979ac78360b0b8dc4621967fb1e08d9
  2 files changed, 47 insertions(+)
 
 diff --git a/tools/deps_guard/rules/Passthrough/passthrough_info.json b/tools/deps_guard/rules/Passthrough/passthrough_info.json
-index be6f7b5..6633297 100755
+index 174bf6c..7006126 100755
 --- a/tools/deps_guard/rules/Passthrough/passthrough_info.json
 +++ b/tools/deps_guard/rules/Passthrough/passthrough_info.json
 @@ -59,6 +59,18 @@
@@ -50,10 +50,10 @@ index be6f7b5..6633297 100755
          "name": "hdf:libusb_host_interface_service_2.0",
          "so_file_name": "libusb_host_interface_service_2.0.z.so",
 diff --git a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
-index 0860a2b..7939ca7 100644
+index 26959a2..59385c4 100644
 --- a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
 +++ b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
-@@ -4773,6 +4773,41 @@
+@@ -4801,6 +4801,41 @@
          "dep_file_path": "system/lib/chipset-sdk/libhilog.so",
          "description": "lib libdisplay_buffer_vdi_impl.z.so with innerapi_tags [passthrough] deps wrong lib libhilog.so contains innerapi_tags [chipsetsdk]"
      },

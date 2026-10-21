@@ -1,4 +1,4 @@
-From 52d89a3e30d89623c52183f08b3127ffdf91d87d Mon Sep 17 00:00:00 2001
+From be728ed39da99ac46e570f43441602612aa9c377 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 20 May 2026 20:50:36 +0000
 Subject: [PATCH 2/2] hdc daemon: cap USB bulk writes to stable size for hybris

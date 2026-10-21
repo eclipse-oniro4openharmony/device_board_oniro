@@ -1,4 +1,4 @@
-From c63afcbb121f784ad945fff0bbae03d80c837f4e Mon Sep 17 00:00:00 2001
+From 761d347dcd0adf40d3da1cce4ac83cf8c96fcec2 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Mon, 27 Jul 2026 15:54:21 +0000
 Subject: [PATCH] input: cache knuckle library load failure
@@ -21,10 +21,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  2 files changed, 24 insertions(+), 16 deletions(-)
 
 diff --git a/service/knuckle/include/knuckle_handler_component.h b/service/knuckle/include/knuckle_handler_component.h
-index 3687e2bc3..a7a9364a5 100644
+index 1c980aac0..04ded40a0 100644
 --- a/service/knuckle/include/knuckle_handler_component.h
 +++ b/service/knuckle/include/knuckle_handler_component.h
-@@ -54,6 +54,7 @@ private:
+@@ -58,6 +58,7 @@ private:
      using DestroyKnuckleHandlerFunc = void(*)(IKnuckleHandler*);
  
      void *handle_ { nullptr };
@@ -33,7 +33,7 @@ index 3687e2bc3..a7a9364a5 100644
      DestroyKnuckleHandlerFunc destroy_ { nullptr };
      IKnuckleHandler *impl_ { nullptr };
 diff --git a/service/knuckle/src/knuckle_handler_component.cpp b/service/knuckle/src/knuckle_handler_component.cpp
-index 1d471e264..21ee335bf 100644
+index 1f4a63afe..26a2fec93 100644
 --- a/service/knuckle/src/knuckle_handler_component.cpp
 +++ b/service/knuckle/src/knuckle_handler_component.cpp
 @@ -49,7 +49,7 @@ void KnuckleHandlerComponent::SetCurrentToolType(const struct TouchType &touchTy
@@ -153,7 +153,7 @@ index 1d471e264..21ee335bf 100644
          return RET_ERR;
      }
      return impl->SkipKnuckleDetect();
-@@ -179,7 +179,7 @@ int32_t KnuckleHandlerComponent::SetKnuckleSwitch(bool knuckleSwitch)
+@@ -179,7 +179,7 @@ int32_t KnuckleHandlerComponent::SetKnuckleSwitch(int32_t uid, bool knuckleSwitc
  {
      IKnuckleHandler *impl = Load();
      if (impl == nullptr) {
@@ -161,8 +161,8 @@ index 1d471e264..21ee335bf 100644
 +        MMI_HILOGD("impl is null");
          return RET_ERR;
      }
-     return impl->SetKnuckleSwitch(knuckleSwitch);
-@@ -189,7 +189,7 @@ void KnuckleHandlerComponent::Dump(int32_t fd)
+     return impl->SetKnuckleSwitch(uid, knuckleSwitch);
+@@ -199,7 +199,7 @@ void KnuckleHandlerComponent::Dump(int32_t fd)
  {
      IKnuckleHandler *impl = Load();
      if (impl == nullptr) {
@@ -171,7 +171,7 @@ index 1d471e264..21ee335bf 100644
          return;
      }
      impl->Dump(fd);
-@@ -200,9 +200,16 @@ IKnuckleHandler *KnuckleHandlerComponent::Load()
+@@ -222,9 +222,16 @@ IKnuckleHandler *KnuckleHandlerComponent::Load()
      if (impl_ != nullptr) {
          return impl_;
      }

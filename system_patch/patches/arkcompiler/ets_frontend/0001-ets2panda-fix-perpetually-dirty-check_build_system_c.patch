@@ -1,4 +1,4 @@
-From 097cd67e5fb9f60afc2e0e336ced956c65b65d18 Mon Sep 17 00:00:00 2001
+From d0eb85aadc4e5f4f0e7e1ee245ee56a0d9a5ed97 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Sun, 17 May 2026 09:18:27 +0000
 Subject: [PATCH] ets2panda: fix perpetually-dirty
@@ -19,10 +19,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  2 files changed, 20 insertions(+), 2 deletions(-)
 
 diff --git a/ets2panda/BUILD.gn b/ets2panda/BUILD.gn
-index 653d400cf..16671634e 100644
+index d1bccfef6..74307e388 100644
 --- a/ets2panda/BUILD.gn
 +++ b/ets2panda/BUILD.gn
-@@ -43,8 +43,20 @@ config("libes2panda_public_config") {
+@@ -48,8 +48,20 @@ config("libes2panda_public_config") {
  
  action("check_build_system_consistency") {
    script = "./scripts/check_build_system_consistency.py"

@@ -1,4 +1,4 @@
-From 94b589762bea23a0efc0ef99badfef16f8552edb Mon Sep 17 00:00:00 2001
+From a0ec8333e7d3b5668c12761baf36aae095394da8 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Thu, 30 Jul 2026 12:19:32 +0000
 Subject: [PATCH 1/2] storage_daemon: fall back to local mount when the kernel
@@ -30,14 +30,22 @@ unaffected -- they still take the real mount.
 Change-Id: Ib7fba3bfb5ec1f592bfc52613df18d6bfc7db505
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
 ---
- .../storage_daemon/user/src/mount_manager.cpp | 36 +++++++++++++++++--
- 1 file changed, 33 insertions(+), 3 deletions(-)
+ .../storage_daemon/user/src/mount_manager.cpp | 37 +++++++++++++++++--
+ 1 file changed, 34 insertions(+), 3 deletions(-)
 
 diff --git a/services/storage_daemon/user/src/mount_manager.cpp b/services/storage_daemon/user/src/mount_manager.cpp
-index 86c431026..ca1486558 100644
+index 793442667..4212bfaa2 100644
 --- a/services/storage_daemon/user/src/mount_manager.cpp
 +++ b/services/storage_daemon/user/src/mount_manager.cpp
-@@ -468,15 +468,45 @@ int32_t MountManager::UMountByListWithDetach(std::list<std::string> &list)
+@@ -16,6 +16,7 @@
+ #include "user/mount_manager.h"
+ #include <dirent.h>
+ #include <fcntl.h>
++#include <fstream>
+ #include <regex>
+ #include "crypto/key_manager.h"
+ #include "utils/disk_utils.h"
+@@ -463,16 +464,46 @@ int32_t MountManager::UMountByListWithDetach(std::list<std::string> &list)
      return result;
  }
  
@@ -61,9 +69,10 @@ index 86c431026..ca1486558 100644
 +
  bool MountManager::SupportHmdfs()
  {
+     LOGI("[L2:MountManager] SupportHmdfs: >>> ENTER <<<");
      char hmdfsEnable[HMDFS_VAL_LEN + 1] = {"false"};
      int ret = GetParameter(HMDFS_SYS_CAP, "", hmdfsEnable, HMDFS_VAL_LEN);
-     LOGI("GetParameter hmdfsEnable %{public}s, ret %{public}d", hmdfsEnable, ret);
+     LOGI("[L2:MountManager] SupportHmdfs: GetParameter hmdfsEnable %{public}s, ret %{public}d", hmdfsEnable, ret);
 -    if (strncmp(hmdfsEnable, "true", HMDFS_TRUE_LEN) == 0) {
 -        return true;
 +    if (strncmp(hmdfsEnable, "true", HMDFS_TRUE_LEN) != 0) {
