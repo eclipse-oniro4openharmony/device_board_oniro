@@ -15,7 +15,7 @@ These BSPs enable developers to build and deploy Oniro on supported hardware.
 ## Oniro Emulator (x86_general target)
 
 Step-by-step instructions to **build and run the Oniro Emulator** from the
-`OpenHarmony-6.1-LTS` source.
+`OpenHarmony-7.0-Release` source.
 
 ### 📦 Prerequisites
 
@@ -29,12 +29,12 @@ Step-by-step instructions to **build and run the Oniro Emulator** from the
 
 ### ⬇️ Download the source
 
-This document describes the `OpenHarmony-6.1-LTS` branch — sync the manifest
+This document describes the `OpenHarmony-7.0-Release` branch — sync the manifest
 branch that matches the branch of this repo you are reading.
 
 ```bash
 repo init -u https://github.com/eclipse-oniro4openharmony/manifest.git \
-     -b OpenHarmony-6.1-LTS -m oniro.xml --no-repo-verify
+     -b OpenHarmony-7.0-Release -m oniro.xml --no-repo-verify
 repo sync -c
 repo forall -c 'git lfs pull'
 ```

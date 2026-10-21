@@ -25,6 +25,6 @@ content authored by this project:
 
 ## Supported Versions
 
-Only the most recent release branch (`OpenHarmony-6.1-LTS`) is supported with
-security updates. Older release branches, including `OpenHarmony-6.1-Release`,
+Only the most recent release branch (`OpenHarmony-7.0-Release`) is supported with
+security updates. Older release branches, including `OpenHarmony-6.1-LTS`,
 are not maintained.
