@@ -1,7 +1,7 @@
 From fc7f2f9923a5711b19600ee674fc608402cf1c39 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 21 Oct 2026 16:29:43 +0000
-Subject: [PATCH 6/8] deps_guard: whitelist the codec manager's dlopen of
+Subject: [PATCH 6/9] deps_guard: whitelist the codec manager's dlopen of
  libOMX_Core
 
 deps_guard derives dependencies from strings(1), so the

@@ -1,7 +1,7 @@
 From d7bb7e512a5ea97dc14b674fe33f112ad50fbbe7 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 21 Oct 2026 17:06:44 +0000
-Subject: [PATCH 8/8] deps_guard: alias the musl loader names on the caller
+Subject: [PATCH 8/9] deps_guard: alias the musl loader names on the caller
  side too
 
 The whitelist aliasing only expanded dep_file_name, so entries whose

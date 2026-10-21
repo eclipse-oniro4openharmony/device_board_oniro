@@ -1,7 +1,7 @@
 From 0fc8ceb48cbc0b3729276fcca07755ffa5bd0e09 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 21 Oct 2026 16:47:06 +0000
-Subject: [PATCH 7/8] deps_guard: list the x86_64 musl loader as LLNDK
+Subject: [PATCH 7/9] deps_guard: list the x86_64 musl loader as LLNDK
 
 //build/common/musl:ld-musl-arm.so.1 produces ld-musl-x86_64.so.1 on
 x86_64, but llndk_info.json only names the arm and aarch64 files, so the

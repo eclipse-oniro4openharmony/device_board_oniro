@@ -1,0 +1,37 @@
+From bc92ad86dc20f1f1a0a4e059c90906671c133126 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 21 Oct 2026 22:27:40 +0000
+Subject: [PATCH 9/9] deps_guard: whitelist the hybris composer VDI's dlopen of
+ libhwc2_compat_layer
+
+7.0 deps_guard now also fails system/vendor-only modules whose dependency
+is not in the image. libdisplay_composer_vdi_impl.z.so android_dlopen()s
+the Halium-side libhwc2_compat_layer.so through libhybris; that library
+lives on the Android partitions, so it is never part of the OHOS image.
+
+Change-Id: I6c41533b4cfe0e52378304fb70ecc5ec32f65aad
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ tools/deps_guard/rules/chipsetsdk_dep_whitelist.json | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+index 04ad344..d393cb1 100644
+--- a/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
++++ b/tools/deps_guard/rules/chipsetsdk_dep_whitelist.json
+@@ -14291,5 +14291,12 @@
+         "dep_file_name": "libOMX_Core.z.so",
+         "dep_file_path": "",
+         "description": "Oniro x86: libcodec_component_manager_service_4.0.z.so dlopens the vendor libOMX_Core.z.so, which products without an OMX IL core do not ship"
++    },
++    {
++        "so_file_name": "libdisplay_composer_vdi_impl.z.so",
++        "so_file_path": "vendor/lib64/passthrough/libdisplay_composer_vdi_impl.z.so",
++        "dep_file_name": "libhwc2_compat_layer.so",
++        "dep_file_path": "",
++        "description": "hybris_generic: the composer VDI android_dlopen()s the Halium-side libhwc2_compat_layer.so through libhybris; it lives on the Android partitions, not in the OHOS image"
+     }
+ ]
+-- 
+2.50.1
+
