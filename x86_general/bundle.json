@@ -33,8 +33,7 @@
       },
       "build": {
         "sub_component": [
-          "//device/board/oniro/x86_general:x86_group",
-          "//third_party/alsa-utils:alsa-utils"
+          "//device/board/oniro/x86_general:x86_group"
         ],
         "test": []
       }
