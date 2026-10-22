@@ -61,7 +61,12 @@ it is 31k lines across 57 files, so instead of editing call sites it
 carries `fs/hmdfs/hmdfs_compat.h`, force-included by its Makefile
 (`ccflags-y += -include $(srctree)/$(src)/hmdfs_compat.h`). Every entry
 is a version-guarded token rename, which keeps the rest of `fs/hmdfs/`
-byte-identical to the OHOS tree — re-syncing is a plain re-copy:
+byte-identical to the OHOS tree — re-syncing is a plain re-copy.
+Re-sync whenever the OHOS release moves: storage_daemon passes hmdfs
+mount options from its own release, and an option the kernel does not
+know fails the mount with EINVAL, which leaves the account unverified
+(7.0 added `no_delete_name`; synced from the 7.0 `linux-6.6` tree on
+2026-10-22). The renames:
 
 | 6.6 spelling | 6.1 spelling | since |
 |---|---|---|

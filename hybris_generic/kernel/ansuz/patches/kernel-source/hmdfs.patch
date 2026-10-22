@@ -13342,10 +13342,10 @@ index 000000000..60d04f921
 +};
 diff --git a/fs/hmdfs/hmdfs.h b/fs/hmdfs/hmdfs.h
 new file mode 100644
-index 000000000..5d1eec787
+index 000000000..6876502b0
 --- /dev/null
 +++ b/fs/hmdfs/hmdfs.h
-@@ -0,0 +1,370 @@
+@@ -0,0 +1,371 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * fs/hmdfs/hmdfs.h
@@ -13480,6 +13480,7 @@ index 000000000..5d1eec787
 +	char *local_src;
 +	char *cache_dir;
 +	char *cloud_dir;
++	char *no_delete_name;
 +	/* seq number for hmdfs super block */
 +	unsigned int seq;
 +
@@ -14974,7 +14975,7 @@ index 000000000..ab2867dca
 +#endif
 diff --git a/fs/hmdfs/hmdfs_compat.h b/fs/hmdfs/hmdfs_compat.h
 new file mode 100644
-index 000000000..b7a679c8a
+index 000000000..8c8e3c09b
 --- /dev/null
 +++ b/fs/hmdfs/hmdfs_compat.h
 @@ -0,0 +1,80 @@
@@ -28378,10 +28379,10 @@ index 000000000..988178f74
 +}
 diff --git a/fs/hmdfs/main.c b/fs/hmdfs/main.c
 new file mode 100644
-index 000000000..7e0952990
+index 000000000..d682fe870
 --- /dev/null
 +++ b/fs/hmdfs/main.c
-@@ -0,0 +1,1134 @@
+@@ -0,0 +1,1135 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * fs/hmdfs/main.c
@@ -28680,6 +28681,7 @@ index 000000000..7e0952990
 +	kfree(sbi->real_dst);
 +	kfree(sbi->cache_dir);
 +	kfree(sbi->cloud_dir);
++	kfree(sbi->no_delete_name);
 +	kfifo_free(&sbi->notify_fifo);
 +	sb->s_fs_info = NULL;
 +	sbi->lower_sb = NULL;
@@ -31968,10 +31970,10 @@ index 000000000..f38e737f9
 +#endif
 diff --git a/fs/hmdfs/super.c b/fs/hmdfs/super.c
 new file mode 100644
-index 000000000..7de0971ed
+index 000000000..89338a052
 --- /dev/null
 +++ b/fs/hmdfs/super.c
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,194 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * fs/hmdfs/super.c
@@ -31997,6 +31999,7 @@ index 000000000..7de0971ed
 +	OPT_NO_OFFLINE_STASH,
 +	OPT_NO_DENTRY_CACHE,
 +	OPT_USER_ID,
++	OPT_NO_DELETE_NAME,
 +	OPT_ERR,
 +};
 +
@@ -32011,6 +32014,7 @@ index 000000000..7de0971ed
 +	{ OPT_NO_OFFLINE_STASH, "no_offline_stash" },
 +	{ OPT_NO_DENTRY_CACHE, "no_dentry_cache" },
 +	{ OPT_USER_ID, "user_id=%s"},
++	{ OPT_NO_DELETE_NAME, "no_delete_name=%s" },
 +	{ OPT_ERR, NULL },
 +};
 +
@@ -32107,6 +32111,11 @@ index 000000000..7de0971ed
 +			break;
 +		case OPT_CLOUD_DIR:
 +			err = hmdfs_match_strdup(&args[0], &sbi->cloud_dir);
++			if (err)
++				goto out;
++			break;
++		case OPT_NO_DELETE_NAME:
++			err = hmdfs_match_strdup(&args[0], &sbi->no_delete_name);
 +			if (err)
 +				goto out;
 +			break;
