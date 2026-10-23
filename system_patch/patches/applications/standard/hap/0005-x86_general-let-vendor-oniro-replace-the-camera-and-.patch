@@ -1,0 +1,38 @@
+From 61667fea5f0549eaf0eb27fda8bf4f9d676623bc Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 23 Oct 2026 11:49:49 +0000
+Subject: [PATCH] x86_general: let vendor/oniro replace the camera and
+ settingsdata haps
+
+The emulator now takes the Oniro HAP set too (oniro_install_custom_haps),
+so extend the hybris_generic branch to x86_general: with the arg on, the
+stock camera_hap, cameraPicker_hap and settingsData_hap make way for the
+vendor/oniro rebuilds that install to the same paths.  With the arg off
+nothing changes.
+
+Change-Id: I9c144e0e12e1c4aa517494dc428ffe7e194fbf71
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index dc71add2..3e04c2a6 100755
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -545,7 +545,11 @@ group("hap") {
+   } else if (defined(product_name) && product_name == "ohos-arm64") {
+     deps +=
+         [ "//applications/standard/admin_provisioning:adminprovisioning_hap" ]
+-  } else if (defined(product_name) && product_name == "hybris_generic") {
++  } else if (defined(product_name) &&
++             (product_name == "hybris_generic" || product_name == "x86_general")) {
++    # The two Oniro products (the phones and the emulator) share vendor/oniro's
++    # HAP set.
++    #
+     # With the Oniro HAP set opted in, com.ohos.camera ships from vendor/oniro
+     # instead: a rebuild of //applications/standard/camera that fixes the
+     # viewfinder and the saved JPEG being 90/180 degrees out. Both install
+-- 
+2.50.1
+
