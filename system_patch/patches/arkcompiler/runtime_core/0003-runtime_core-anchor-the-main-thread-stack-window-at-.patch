@@ -1,0 +1,94 @@
+From 8d2e825d6531bcdb5c78f3e687117f5403883a2e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 23 Oct 2026 16:38:46 +0000
+Subject: [PATCH] runtime_core: anchor the main-thread stack window at the
+ [stack] mapping
+
+ThreadGetStackInfo() recomputes the main thread's stack from RLIMIT_STACK,
+anchored at the top address musl reports. That address is the auxv; the
+argv/env strings and a random offset sit above it, while the kernel counts
+RLIMIT_STACK from the end of the [stack] mapping. So the computed low end
+lies past what the stack can grow to, by an amount that varies with the
+stack randomisation. ProtectNativeStack() then writes to that page to grow
+the stack and faults with SEGV_MAPERR.
+
+On the x86_64 emulator this crashed appspawn intermittently while it
+preloaded the ArkTS (static) VM (ANI_CreateVM). appspawn is a critical
+service, so after four crashes init rebooted the system.
+
+Read the end of the [stack] mapping from /proc/self/maps and anchor the
+window there, falling back to the old computation if it is not found.
+
+Change-Id: I4ef6569fa6d3565d6d1ba22edc2992c5b29ed62c
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../platforms/unix/libarkbase/thread.cpp      | 39 +++++++++++++++++--
+ 1 file changed, 36 insertions(+), 3 deletions(-)
+
+diff --git a/static_core/platforms/unix/libarkbase/thread.cpp b/static_core/platforms/unix/libarkbase/thread.cpp
+index 37b0cf2534..9fc080d71c 100644
+--- a/static_core/platforms/unix/libarkbase/thread.cpp
++++ b/static_core/platforms/unix/libarkbase/thread.cpp
+@@ -17,6 +17,7 @@
+ #include <chrono>
+ #include <cstdint>
+ #include <cstdio>
++#include <cstring>
+ #ifdef PANDA_USE_FFRT
+ #include "c/executor_task.h"
+ #include "ffrt.h"
+@@ -184,6 +185,30 @@ void ThreadSendSignal(NativeHandleType pthreadHandle, int sig)
+     LOG_IF(pthread_kill(pthreadHandle, sig) != 0, FATAL, COMMON) << "pthread_kill failed";
+ }
+ 
++#if defined(PANDA_TARGET_OHOS)
++// End (highest address) of the main thread's [stack] mapping, from /proc/self/maps.
++static bool GetMainStackVmaEnd(uintptr_t &end)
++{
++    FILE *maps = fopen("/proc/self/maps", "re");
++    if (maps == nullptr) {
++        return false;
++    }
++    static constexpr size_t LINE_SIZE = 512;
++    char line[LINE_SIZE];
++    bool found = false;
++    while (!found && fgets(line, sizeof(line), maps) != nullptr) {
++        unsigned long lo = 0;  // NOLINT(google-runtime-int)
++        unsigned long hi = 0;  // NOLINT(google-runtime-int)
++        if (strstr(line, "[stack]") != nullptr && sscanf_s(line, "%lx-%lx", &lo, &hi) == 2) {
++            end = static_cast<uintptr_t>(hi);
++            found = true;
++        }
++    }
++    fclose(maps);
++    return found;
++}
++#endif /* defined(PANDA_TARGET_OHOS) */
++
+ int ThreadGetStackInfo(NativeHandleType thread, void **stackAddr, size_t *stackSize, size_t *guardSize)
+ {
+ #ifdef PANDA_USE_FFRT
+@@ -225,9 +250,17 @@ int ThreadGetStackInfo(NativeHandleType thread, void **stackAddr, size_t *stackS
+                                                                                       : stackSizeLimit;
+ 
+                 // MUSL returns the currently-mmap'd size for the main thread; recompute the
+-                // full stack window from RLIMIT_STACK, anchored at the high address pthread reported.
+-                uintptr_t stackLoAddr = stackHiAddr - stackSizeLimit;
+-                *stackSize = stackSizeLimit;
++                // full stack window from RLIMIT_STACK. The kernel counts RLIMIT_STACK from the
++                // end of the [stack] mapping, which lies above the address pthread reports (the
++                // auxv; argv/env strings and a random offset sit above it), so anchor the low
++                // end there. Anchoring at the pthread address puts it past what the stack can
++                // grow to, and touching it there (ProtectNativeStack) faults with SEGV_MAPERR.
++                uintptr_t stackVmaEnd = 0;
++                uintptr_t stackLoAddr = GetMainStackVmaEnd(stackVmaEnd) && stackVmaEnd > stackSizeLimit &&
++                                                stackVmaEnd - stackSizeLimit < stackHiAddr
++                                            ? stackVmaEnd - stackSizeLimit
++                                            : stackHiAddr - stackSizeLimit;
++                *stackSize = stackHiAddr - stackLoAddr;
+                 *stackAddr = ToVoidPtr(stackLoAddr);
+             }
+         }
+-- 
+2.50.1
+
