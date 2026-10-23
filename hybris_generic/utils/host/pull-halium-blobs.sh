@@ -219,17 +219,21 @@ pull_ansuz() {
     local DL="$BLOBS/downloads"
     mkdir -p "$BLOBS" "$DL"
 
-    # Source 1 — bootstrap zip (VollaOS 14 stock firmware set).  Pin follows
-    # ubports-installer-configs v2 devices/ansuz.json.
-    local BOOTSTRAP_URL="https://volla.tech/filedump/volla-ansuz-14.0-ubports-installer-bootstrap-v2.zip"
-    local BOOTSTRAP_SHA256="0b6af6ce3fe535c73f95d6a52a548ed3cbe057fa3b68d0969167723be5fed1af"
+    # Source 1 — bootstrap zip (VollaOS 14 stock firmware set; newest images
+    # dated 2026-08-31).  Pin follows ubports installer-configs v2
+    # devices/ansuz.yml.
+    local BOOTSTRAP_URL="https://volla.tech/filedump/volla-ansuz-14.0-ubports-installer-bootstrap-v3.zip"
+    local BOOTSTRAP_SHA256="b0f05235ea8e73cda5809f68f739ec59696e13c702298b2db1f1e2c795d7cdf2"
     local BOOTSTRAP_ZIP="$DL/bootstrap.zip"
 
     # Source 2 — system-image 24.04-1.x/arm64/android9plus/stable/ansuz,
-    # pinned to version 3 (tag 24.04-1.4, latest as of 2026-08-23).
-    local DEVICE_TAR_URL="https://system-image.ubports.com/pool/device-1fd22a63f9390b084a9b4212cdb0bb345fff9b1dd249fea74afc8ff0c477adf6.tar.xz"
-    local DEVICE_TAR_SHA256="0f5b370303770494cdec43b74651ec7f72020e2828601250423451ada43e90b5"
+    # pinned to version 4 (tag 24.04-1.5, latest as of 2026-10-22).
+    local DEVICE_TAR_URL="https://system-image.ubports.com/pool/device-457cb574165c2dcd9f39b2e2cd1c9856adcda3e4b8f85c6789396ada8afb31e3.tar.xz"
+    local DEVICE_TAR_SHA256="faf45a65822b5ff4926b9791d60e8ee390fcd007d47ecfae696ad64a7935c065"
     local DEVICE_TAR="$DL/device.tar.xz"
+    # The boot tarball stays at version 3: version 4's vendor_boot carries the
+    # port repo's 29554f8 DTB, which the bootstrap v3 dtbo cannot be applied to
+    # (see build_kernel.sh ANSUZ_REPO_SHA).
     local BOOT_TAR_URL="https://system-image.ubports.com/pool/boot-aa9bc6bf7ed80df227324b7b6fef076ca26d9d01e83a4efd0098c7c87e11215c.tar.xz"
     local BOOT_TAR_SHA256="836c9ed146cbb795f085ac20675ab7fcfa091993901e5e5a4b7ac60d73c521c5"
     local BOOT_TAR="$DL/boot.tar.xz"

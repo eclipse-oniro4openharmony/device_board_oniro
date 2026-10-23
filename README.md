@@ -264,14 +264,29 @@ with it, or the vendor modules fail to load with a vermagic mismatch. On the
 Plinius, `vendor_boot-ohos.img` carries `ohos.boot.hardware=ansuz lsm=selinux` —
 never flash it under Ubuntu Touch.
 
-On the Plinius the kernel source is cloned by the Halium build tools as a
-`--depth 1` checkout of the moving `android14-6.1-halium` branch, so a fresh
-tree gets the branch *tip*, not `build_kernel.sh`'s `KERNEL_SHA` pin — the
-script prints `WARN: … at <tip>, pinned <sha>` and carries on. Two trees synced
-weeks apart therefore build different kernels. What actually gates the build is
-the KMI guard that follows it: it diffs the new `Module.symvers` against
+On the Plinius the Halium build tools clone the kernel source as a `--depth 1`
+checkout of the `android14-6.1-halium` branch, which gets rebased and
+force-pushed. `build_kernel.sh` therefore checks out its `KERNEL_SHA` (and the
+port repo and build tools pins) by hash after cloning, so trees synced weeks
+apart build the same kernel. The kernel, the port repo's `vendor_boot` module
+overlay and the bootstrap pin in `pull-halium-blobs.sh` move together: the KMI
+guard after the build diffs the new `Module.symvers` against
 `kernel/ansuz/kmi/stock-module-versions.txt` and fails if any symbol the stock
-MTK modules expect changed CRC.
+MTK modules expect changed CRC. Regenerate that list with
+`kernel/ansuz/kmi/gen-stock-module-versions.sh` whenever the blob or port repo
+pins change.
+
+The co-processor firmware partitions (`modem`, `connsys_*`, `scp`, `sspm`,
+`tee`, ...) come from the same bootstrap zip, but `flash-native.sh` never writes
+them; they are whatever the phone was last bootstrapped with. After a
+bootstrap pin change, flash them from the zip once (`fastboot flash <part>_a
+<part>.img` for the zip's co-processor images; the preloader and `lk` are not
+needed unless they changed). The `dtbo` partition has to match the base DTB in
+the port repo's `vendor_boot`: LK applies the overlay at boot, and if one of its
+`__fixups__` labels is missing from the DTB the phone resets before the kernel
+starts. The port repo is pinned to f8c7581 for that reason — 29554f8 dropped the
+`flashlights_ocp81378` label that the bootstrap v3 dtbo still references. Check
+a new pin offline with `fdtoverlay -i <vendor_boot dtb> -o /dev/null <dtbo entry>`.
 
 ### ⚡ Flash
 

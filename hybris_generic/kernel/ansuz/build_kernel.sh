@@ -40,29 +40,51 @@ KERNEL_OBJ="$KERNEL_TREE/workdir/downloads/KERNEL_OBJ"
 OUT_DIR="$KERNEL_TREE/out"
 BASELINE_SYMVERS="$KERNEL_TREE/workdir/baseline-Module.symvers"
 
-# Pinned refs (recorded 2026-07-23; update consciously)
+# Pinned refs (recorded 2026-10-22; update consciously, together with the
+# blob pins in utils/host/pull-halium-blobs.sh and kmi/stock-module-versions.txt:
+# the port repo's vendor_boot module overlay, the bootstrap's vendor_dlkm and
+# this kernel's KMI have to match).
+# The port repo stays at f8c7581, the parent of 29554f8: that commit's DTB drops
+# the flashlights_ocp81378 label, which the bootstrap v3 dtbo still fixes up
+# against, so LK fails the overlay apply and the phone resets before the kernel.
 ANSUZ_REPO_URL="https://gitlab.com/ubports/porting/reference-device-ports/halium-14/volla-phone-plinius/volla-ansuz.git"
 ANSUZ_REPO_SHA="f8c758198ed3b2735b9d5945a19b642f4dbbd6a3"
-BUILDTOOLS_SHA="d5838d5c4cf90c7dbece749a451fb14271847dc9"
-KERNEL_SHA="2d5a7bc8a21fc06e5ab80a149a8b01e958e1cb12"   # android14-6.1-halium tip (6.1.129 era)
+BUILDTOOLS_URL="https://gitlab.com/ubports/community-ports/halium-generic-adaptation-build-tools.git"
+BUILDTOOLS_SHA="dd1afd8efc5bb895efc313b61960bd6537dee24a"
+KERNEL_SHA="994f2f422ca12fa39806bd0c405860117cce3252"   # android14-6.1-halium, 6.1.145
 
 MODE="${1:-patched}"
+
+# pin_checkout DIR SHA: put the clone in DIR at SHA.  The Halium tools clone
+# the kernel at --depth 1 of the branch tip, and that branch gets rebased and
+# force-pushed, so a fresh clone lands on whatever the tip is today.  GitLab
+# still serves a commit that left the branch when it is asked for by hash.
+pin_checkout() {
+    local repo="$1" want="$2"
+    [ "$(git -C "$repo" rev-parse HEAD)" = "$want" ] && return 0
+    echo "Pinning $repo to $want..."
+    git -C "$repo" cat-file -e "$want^{commit}" 2>/dev/null || \
+        git -C "$repo" fetch --depth 1 origin "$want" || {
+            echo "ERROR: pinned $want not fetchable for $repo" >&2; exit 1; }
+    git -C "$repo" checkout -q -f --detach "$want"
+}
 
 # ---------------------------------------------------------------------------
 # 1. Port repo + sources (idempotent; heavy clone happens once)
 # ---------------------------------------------------------------------------
-if [ ! -d "$KERNEL_TREE" ]; then
-    git clone "$ANSUZ_REPO_URL" "$KERNEL_TREE"
-    git -C "$KERNEL_TREE" checkout "$ANSUZ_REPO_SHA"
-fi
+[ -d "$KERNEL_TREE" ] || git clone "$ANSUZ_REPO_URL" "$KERNEL_TREE"
+pin_checkout "$KERNEL_TREE" "$ANSUZ_REPO_SHA"
+# Clone the build tools here rather than letting the port's build.sh do it,
+# so the clone step below already runs the pinned tools.
+[ -d "$KERNEL_TREE/build" ] || git clone "$BUILDTOOLS_URL" "$KERNEL_TREE/build"
+pin_checkout "$KERNEL_TREE/build" "$BUILDTOOLS_SHA"
 if [ ! -d "$KERNEL_SRC" ]; then
     ( cd "$KERNEL_TREE" && ./build.sh -b workdir -c )
 fi
-for repo_sha in "$KERNEL_TREE:$ANSUZ_REPO_SHA" "$KERNEL_TREE/build:$BUILDTOOLS_SHA" "$KERNEL_SRC:$KERNEL_SHA"; do
-    repo="${repo_sha%%:*}"; want="${repo_sha##*:}"
-    have="$(git -C "$repo" rev-parse HEAD)"
-    [ "$have" = "$want" ] || echo "WARN: $repo at $have, pinned $want" >&2
-done
+# A patched build leaves the OHOS files (fs/hmdfs, ...) untracked in the
+# kernel tree; drop them first so a checkout to a new pin cannot trip over them.
+git -C "$KERNEL_SRC" clean -fdq
+pin_checkout "$KERNEL_SRC" "$KERNEL_SHA"
 
 # ---------------------------------------------------------------------------
 # 2. Reset kernel tree to pristine, then (for patched builds) apply OHOS bits
