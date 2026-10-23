@@ -1,0 +1,55 @@
+From c143f0e76fa17c04c6e6598cfd49d494c520b93c Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 23 Oct 2026 09:36:38 +0000
+Subject: [PATCH 4/4] hybris_generic: let vendor/oniro replace the camera
+ picker hap too
+
+With the Oniro HAP set opted in, com.ohos.camera's Camera.hap comes from
+vendor/oniro, but the stock cameraPicker.hap kept shipping into the same
+bundle directory.  bms installs that directory as one unit and rejects
+modules whose apiReleaseType differs.  The stock sceneboard prebuilts are
+'Beta' (SDK 26.0.0.37), while a rebuild against the in-tree SDK is
+'Release'.  So preinstall failed with 9568258 "releaseType not same" and
+the camera never installed on a fresh /data.  Updating an existing install
+with only Camera.hap hid this.
+
+Drop cameraPicker_hap under the same gn arg; vendor/oniro now builds the
+picker module from the same camera source.
+
+Change-Id: I1686855008f24db4119b1b3e9319280f899e048a
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 73d57532..dc71add2 100755
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -550,7 +550,10 @@ group("hap") {
+     # instead: a rebuild of //applications/standard/camera that fixes the
+     # viewfinder and the saved JPEG being 90/180 degrees out. Both install
+     # app/com.ohos.camera/Camera.hap, so exactly one must be active or ninja
+-    # sees two rules writing the same file.
++    # sees two rules writing the same file. The picker goes with it: bms
++    # installs the bundle dir as one unit and rejects modules whose
++    # apiReleaseType differs, so vendor/oniro builds cameraPicker.hap from the
++    # same source.
+     #
+     # The arg is false by default, so out of the box nothing changes here and
+     # the stock hap still ships. The import sits inside the branch so products
+@@ -560,7 +563,10 @@ group("hap") {
+     # prebuilt is refreshed. See vendor/oniro/oniro-haps/.
+     import("//vendor/oniro/oniro-haps/oniro_haps.gni")
+     if (oniro_install_custom_haps) {
+-      deps -= [ "//applications/standard/hap:camera_hap" ]
++      deps -= [
++        "//applications/standard/hap:cameraPicker_hap",
++        "//applications/standard/hap:camera_hap",
++      ]
+     }
+ 
+     # Likewise com.ohos.settingsdata: vendor/oniro builds it from
+-- 
+2.50.1
+
