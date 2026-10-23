@@ -1,0 +1,16 @@
+diff --git a/drivers/accesstokenid/access_tokenid.c b/drivers/accesstokenid/access_tokenid.c
+--- a/drivers/accesstokenid/access_tokenid.c
++++ b/drivers/accesstokenid/access_tokenid.c
+@@ -317,6 +317,12 @@
+ {
+ 	void __user *uarg = (void __user *)arg;
+ 
++	/* Not ours, e.g. TIOCGWINSZ from isatty() on a descriptor that happens
++	 * to be this device: report "not a tty" quietly instead of logging an
++	 * error for every call. */
++	if (_IOC_TYPE(cmd) != ACCESS_TOKEN_ID_IOCTL_BASE)
++		return -ENOTTY;
++
+ 	if (uarg == NULL) {
+ 		pr_err("%s: invalid user uarg\n", __func__);
+ 		return -EINVAL;

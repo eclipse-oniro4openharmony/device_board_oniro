@@ -21,6 +21,21 @@ if (target_cpu == "arm") {
 action("kernel") {
   script = "build_kernel.sh"
   sources = [ kernel_source_dir ]
+
+  # Everything else build_kernel.sh consumes, so that changing the config, a
+  # patch or the launcher rebuilds the kernel and re-copies the launcher.
+  inputs = [
+    "x86_general_linux_defconfig",
+    "run.sh",
+    "run.bat",
+    "patch/linux-6.6/common_patch/hdf.patch",
+    "patch/linux-6.6/common_patch/hdf_patch.sh",
+    "patch/linux-6.6/kernel_patch/0001-virt.patch",
+    "patch/linux-6.6/kernel_patch/0002-drivers_staging_android.patch",
+    "patch/linux-6.6/kernel_patch/0004-es1370.patch",
+    "patch/linux-6.6/kernel_patch/0005-power.patch",
+    "patch/linux-6.6/kernel_patch/0006-access_tokenid-quiet-foreign-ioctls.patch",
+  ]
   outputs = [ "$root_build_dir/packages/phone/images/$kernel_image" ]
   args = [
       rebase_path(kernel_build_script_dir,root_build_dir),

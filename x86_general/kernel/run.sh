@@ -307,7 +307,7 @@ exec "$qemu_bin" \
   -drive if=none,file=userdata.img,format=raw,id=userdata,index=3 \
   -device virtio-blk-pci,drive=userdata \
   "${serial_args[@]}" \
-  -append "ip=dhcp loglevel=4 console=ttyS0,115200 init=init root=/dev/ram0 rw ohos.boot.hardware=x86_general ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required ohos.required_mount.misc=/dev/block/vda@/misc@none@none=@wait,required" \
+  -append "ip=dhcp loglevel=4 console=ttyS0,115200 panic=5 init=init root=/dev/ram0 rw ohos.boot.hardware=x86_general ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required ohos.required_mount.misc=/dev/block/vda@/misc@none@none=@wait,required" \
   "${accel_args[@]}" \
   "${cpu_args[@]}" \
   -netdev "user,id=net0,hostfwd=tcp:${forward_host}:${forward_port}-:55555" \
