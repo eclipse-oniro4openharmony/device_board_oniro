@@ -286,6 +286,9 @@ fi
 info "Starting QEMU..."
 
 # ---- Launch QEMU -----------------------------------------------
+# virtio-tablet-pci is an absolute pointer: QEMU does not grab the host mouse,
+# and the guest's emulator_touch daemon turns clicks and drags in the window
+# into touches (left button = finger, right button = Back).
 cd "$image_dir"
 
 exec "$qemu_bin" \
@@ -311,4 +314,5 @@ exec "$qemu_bin" \
   "${accel_args[@]}" \
   "${cpu_args[@]}" \
   -netdev "user,id=net0,hostfwd=tcp:${forward_host}:${forward_port}-:55555" \
-  -device virtio-net-pci,netdev=net0
+  -device virtio-net-pci,netdev=net0 \
+  -device virtio-tablet-pci
