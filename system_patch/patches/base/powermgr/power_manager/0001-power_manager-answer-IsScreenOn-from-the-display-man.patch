@@ -1,0 +1,77 @@
+From af518cd3485aff0be389edf52b0791d0522e9288 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 26 Oct 2026 14:35:26 +0000
+Subject: [PATCH] power_manager: answer IsScreenOn from the display manager
+ before init
+
+PowerStateMachine::IsScreenOn() reads the display state from the display
+power service (DPMS). Until DPMS is published that reads DISPLAY_UNKNOWN,
+which IsScreenOn() reports as "off". DPMS shares the powermgr process with
+the power service and publishes later: both block their startup on the
+sensor service, and on a device without a sensor HDI the sensor service
+only comes up after 25 x 200 ms of retries. So for about a second the
+power service is published but answers "screen off" for a lit screen.
+
+SceneBoard's lock screen calls power.isActive() once at startup and from
+then on only follows display power events. On a fast emulator host it
+asks inside that window, starts in AOD/screen-off mode (no clock, taps
+ignored), and nothing corrects it: when the state machine initialises
+after boot with the screen already on, SetDisplayState(DISPLAY_ON) is a
+no-op and no WAKE_UP/DISPLAY_ON event is sent.
+
+While the state machine has not been initialised and the display state is
+unknown, ask the display manager for the default screen's power instead.
+Once InitState has run, or whenever DPMS answers, nothing changes (DPMS's
+DISPLAY_DELAY_OFF also maps to DISPLAY_UNKNOWN, but only after init).
+
+Change-Id: I04e27b4ab718fc73f0d011c831bf59a83a4b94c4
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/native/src/power_state_machine.cpp | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/services/native/src/power_state_machine.cpp b/services/native/src/power_state_machine.cpp
+index 48b33446..0728e36b 100644
+--- a/services/native/src/power_state_machine.cpp
++++ b/services/native/src/power_state_machine.cpp
+@@ -1075,6 +1075,20 @@ bool PowerStateMachine::HibernateInner(bool clearMemory, const std::string& reas
+ }
+ #endif
+ 
++namespace {
++// Before InitState the display power service may not be published yet (its startup waits for the
++// sensor service), so the display state reads unknown. Ask the display manager then instead of
++// answering "off": the lock screen samples this once at startup and then only follows events.
++bool IsDefaultScreenPoweredOn()
++{
++    std::string identity = IPCSkeleton::ResetCallingIdentity();
++    bool isScreenOn = Rosen::ScreenManagerLite::GetInstance().GetScreenPower() == Rosen::ScreenPowerState::POWER_ON;
++    IPCSkeleton::SetCallingIdentity(identity);
++    POWER_HILOGI(FEATURE_POWER_STATE, "Display state unknown before init, screen power on: %{public}d", isScreenOn);
++    return isScreenOn;
++}
++}
++
+ bool PowerStateMachine::IsScreenOn(bool needPrintLog)
+ {
+ #ifdef POWER_MANAGER_ENABLE_EXTERNAL_SCREEN_MANAGEMENT
+@@ -1087,10 +1101,16 @@ bool PowerStateMachine::IsScreenOn(bool needPrintLog)
+     } else {
+         DisplayState displayState = stateAction_->GetDisplayState();
+         isScreenOn = (displayState == DisplayState::DISPLAY_ON) || (displayState == DisplayState::DISPLAY_DIM);
++        if (displayState == DisplayState::DISPLAY_UNKNOWN && GetState() == PowerState::UNKNOWN) {
++            isScreenOn = IsDefaultScreenPoweredOn();
++        }
+     }
+ #else
+     DisplayState state = stateAction_->GetDisplayState();
+     bool isScreenOn = (state == DisplayState::DISPLAY_ON) || (state == DisplayState::DISPLAY_DIM);
++    if (state == DisplayState::DISPLAY_UNKNOWN && GetState() == PowerState::UNKNOWN) {
++        isScreenOn = IsDefaultScreenPoweredOn();
++    }
+ #endif
+ 
+     if (needPrintLog) {
+-- 
+2.50.1
+
