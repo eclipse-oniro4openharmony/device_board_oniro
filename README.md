@@ -146,6 +146,23 @@ hdc shell "ps -A | wc -l"        # system processes up
 Give it a minute to boot; the OHOS lockscreen then renders (SDL window, or over
 VNC in headless mode).
 
+### 🧭 Simulate sensors
+
+The emulator has virtual sensors (accelerometer, gyroscope, magnetic field,
+ambient light, barometer, proximity, humidity, ambient temperature). Each one
+reads its value from a system parameter, so you can change it at any time:
+
+```bash
+hdc shell param get | grep emulator.sensor           # current values
+hdc shell param set emulator.sensor.accelerometer "0 9.81 0"   # held upright
+hdc shell param set emulator.sensor.proximity 0      # something near the screen
+hdc shell param set emulator.sensor.ambient_light "20 0 0"     # dim room, lux
+```
+
+Values are floats in the order and units of the `@ohos.sensor` API. They reset
+to the defaults in `device/soc/oniro/x86_general/hardware/sensor/emulator_sensor.para`
+(device lying flat, 300 lux, nothing near) at every boot.
+
 ---
 
 ## Oniro on Volla phones (hybris_generic target)
