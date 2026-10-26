@@ -258,11 +258,21 @@ if [[ "$headless" == true ]]; then
   )
   serial_args=(-serial "telnet:0.0.0.0:${serial_port},server,nowait")
 else
+  # With an absolute pointer (virtio-tablet) SDL hides the host pointer and
+  # expects the guest to draw one, but the guest turns clicks into touches and
+  # draws none: ask SDL to keep showing it. The display suboption exists since
+  # QEMU 5.0; older versions take -show-cursor.
+  qemu_major=$(sed -n 's/^QEMU emulator version \([0-9][0-9]*\)\..*/\1/p' <<<"$qemu_version")
+  if [[ "${qemu_major:-0}" -ge 5 ]]; then
+    sdl_args=(-display sdl,gl=off,show-cursor=on)
+  else
+    sdl_args=(-display sdl,gl=off -show-cursor)
+  fi
   display_args=(
     -nographic
     -vga none
     -device "virtio-gpu-pci,xres=${res_w},yres=${res_h},max_outputs=1,addr=08.0"
-    -display sdl,gl=off
+    "${sdl_args[@]}"
   )
 fi
 
