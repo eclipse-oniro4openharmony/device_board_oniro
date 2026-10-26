@@ -39,6 +39,10 @@ Options:
       --vnc-display N    VNC display number (default: $DEFAULT_VNC_DISPLAY,
                          i.e. TCP port $((5900 + DEFAULT_VNC_DISPLAY)))
       --serial-port PORT Telnet serial console port (default: $DEFAULT_SERIAL_PORT)
+      --display UI       Window backend: gtk, cocoa or sdl (default: cocoa on
+                         macOS, else gtk if QEMU has it, else sdl). The gtk and
+                         cocoa windows have Machine > Power Down, which is the
+                         phone's power button.
   -q, --qemu PATH        Path to qemu-system-x86_64 binary
   -h, --help             Show this help message
 EOF
@@ -59,6 +63,7 @@ resolution="$DEFAULT_RES"
 headless=false
 vnc_display="$DEFAULT_VNC_DISPLAY"
 serial_port="$DEFAULT_SERIAL_PORT"
+ui=""
 qemu_bin="${QEMU_BIN:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -70,6 +75,7 @@ while [[ $# -gt 0 ]]; do
     --headless)       headless=true; shift ;;
     --vnc-display)    vnc_display="${2:?missing VNC display number}"; shift 2 ;;
     --serial-port)    serial_port="${2:?missing serial port}"; shift 2 ;;
+    --display)        ui="${2:?missing display backend}"; shift 2 ;;
     -q|--qemu)        qemu_bin="${2:?missing qemu path}"; shift 2 ;;
     -h|--help)        usage ;;
     -*)               error "Unknown option: $1" ;;
@@ -258,21 +264,47 @@ if [[ "$headless" == true ]]; then
   )
   serial_args=(-serial "telnet:0.0.0.0:${serial_port},server,nowait")
 else
-  # With an absolute pointer (virtio-tablet) SDL hides the host pointer and
-  # expects the guest to draw one, but the guest turns clicks into touches and
-  # draws none: ask SDL to keep showing it. The display suboption exists since
-  # QEMU 5.0; older versions take -show-cursor.
+  # Prefer a window with a menu: Machine > Power Down sends an ACPI power button
+  # press, which the guest takes as the phone's power key. QEMU 6 and later list
+  # their backends with "-display help"; older ones only in -help.
+  if [[ -z "$ui" ]]; then
+    backends=$("$qemu_bin" -display help 2>/dev/null | sed -n '2,$p' || true)
+    if [[ -z "$backends" ]]; then
+      backends=$("$qemu_bin" -help 2>/dev/null | sed -n 's/^-display \([a-z-]*\).*/\1/p' || true)
+    fi
+    if [[ "$host_os" == Darwin ]]; then
+      ui=cocoa
+    elif grep -qx gtk <<<"$backends" || ! grep -qx sdl <<<"$backends"; then
+      ui=gtk
+    else
+      ui=sdl
+    fi
+  fi
+  # GTK zooms to fit by default with virtio-gpu and then sends the window size
+  # to the guest as its display mode, replacing xres/yres: the window opens at
+  # 640x480 and the guest never gets a picture on screen. Size the window to
+  # the guest instead.
+  case "$ui" in
+    gtk)       ui_opts="$ui,gl=off,zoom-to-fit=off" ;;
+    sdl)       ui_opts="$ui,gl=off" ;;
+    cocoa)     ui_opts="$ui" ;;
+    *)         error "Unknown display backend: $ui (use gtk, cocoa or sdl)" ;;
+  esac
+  # With an absolute pointer (virtio-tablet) the window hides the host pointer
+  # and expects the guest to draw one, but the guest turns clicks into touches
+  # and draws none: keep showing it. The display suboption exists since QEMU
+  # 5.0; older versions take -show-cursor.
   qemu_major=$(sed -n 's/^QEMU emulator version \([0-9][0-9]*\)\..*/\1/p' <<<"$qemu_version")
   if [[ "${qemu_major:-0}" -ge 5 ]]; then
-    sdl_args=(-display sdl,gl=off,show-cursor=on)
+    ui_args=(-display "$ui_opts,show-cursor=on")
   else
-    sdl_args=(-display sdl,gl=off -show-cursor)
+    ui_args=(-display "$ui_opts" -show-cursor)
   fi
   display_args=(
     -nographic
     -vga none
     -device "virtio-gpu-pci,xres=${res_w},yres=${res_h},max_outputs=1,addr=08.0"
-    "${sdl_args[@]}"
+    "${ui_args[@]}"
   )
 fi
 
@@ -291,7 +323,12 @@ if [[ "$headless" == true ]]; then
   info "  Serial     -> nc localhost $serial_port"
   info "  HDC        -> hdc tconn $connect_key"
 else
-  info "Mode            : graphical (SDL)"
+  info "Mode            : graphical ($ui)"
+  if [[ "$ui" == sdl ]]; then
+    info "Power button    : type Ctrl-A c here, then system_powerdown"
+  else
+    info "Power button    : Machine > Power Down in the window menu"
+  fi
 fi
 info "Starting QEMU..."
 
