@@ -234,7 +234,11 @@ EOF
     info "Using WHPX acceleration. If QEMU fails, enable Windows Hypervisor Platform:"
     info "  Settings > Apps > Optional Features > More Windows Features > Windows Hypervisor Platform"
     accel_args=(-accel whpx)
-    cpu_args=()
+    # Without -cpu QEMU exposes the baseline qemu64 model, which lacks AVX2 and
+    # BMI. The guest's openHiTLS crypto assembly uses them with no fallback:
+    # foundation dies with SIGILL and init reboots the guest. WHPX rejects
+    # -cpu host, so ask for the x86-64-v3 feature set instead.
+    cpu_args=(-cpu qemu64,+ssse3,+sse4.1,+sse4.2,+popcnt,+cx16,+xsave,+avx,+avx2,+fma,+f16c,+bmi1,+bmi2,+movbe,+abm)
     ;;
 
   *)
@@ -357,6 +361,11 @@ else
   )
 fi
 
+# The window UIs report their initial 640x480 placeholder size to virtio-gpu
+# before the guest starts, so its preferred mode becomes 640x480 and xres/yres
+# are ignored. A video= mode on the kernel command line takes precedence.
+video_mode="video=Virtual-1:${res_w}x${res_h}"
+
 # ---- Summary ---------------------------------------------------
 info "Image directory : $image_dir"
 info "Connect key     : $connect_key"
@@ -407,7 +416,7 @@ exec "$qemu_bin" \
   -drive if=none,file=userdata.img,format=raw,id=userdata,index=3 \
   -device virtio-blk-pci,drive=userdata \
   "${serial_args[@]}" \
-  -append "ip=dhcp loglevel=4 console=ttyS0,115200 panic=5 init=init root=/dev/ram0 rw ohos.boot.hardware=x86_general ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required ohos.required_mount.misc=/dev/block/vda@/misc@none@none=@wait,required" \
+  -append "ip=dhcp loglevel=4 ${video_mode} console=ttyS0,115200 panic=5 init=init root=/dev/ram0 rw ohos.boot.hardware=x86_general ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required ohos.required_mount.misc=/dev/block/vda@/misc@none@none=@wait,required" \
   "${accel_args[@]}" \
   "${cpu_args[@]}" \
   -netdev "user,id=net0,hostfwd=tcp:${forward_host}:${forward_port}-:55555" \
