@@ -1,0 +1,32 @@
+From 153272b0d1aa248d008a2e3364dd7a2677ba48bc Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 27 Oct 2026 08:33:36 +0000
+Subject: [PATCH] build: use the lib64 dragging-player path on x86_64
+
+DRAGGING_PLAYER_PATH is /system/lib unless target_cpu is arm64 or the
+build is the SDK emulator, but a 64-bit x86 device installs its
+libraries under /system/lib64. Use lib64 for x86_64 too, as the media
+plugin paths now do.
+
+Change-Id: I2e639ee12e143ba9b44320ac3703aa8f13899d13
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/engine/histreamer/player/BUILD.gn | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/engine/histreamer/player/BUILD.gn b/services/engine/histreamer/player/BUILD.gn
+index 620320f5a8..6c88cea1f0 100644
+--- a/services/engine/histreamer/player/BUILD.gn
++++ b/services/engine/histreamer/player/BUILD.gn
+@@ -39,7 +39,7 @@ config("media_engine_histreamer_player_config") {
+   ]
+   defines = [ "MEDIA_OHOS" ]
+ 
+-  if (target_cpu == "arm64" || is_emulator) {
++  if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+     dragging_player_path = "\"/system/lib64\""
+   } else {
+     dragging_player_path = "\"/system/lib\""
+-- 
+2.50.1
+

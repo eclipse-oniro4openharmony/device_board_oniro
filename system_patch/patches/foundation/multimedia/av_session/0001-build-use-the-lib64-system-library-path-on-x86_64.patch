@@ -1,0 +1,60 @@
+From 648c09427350bad24b86eda2d0a0e63d025d470d Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 27 Oct 2026 08:33:39 +0000
+Subject: [PATCH] build: use the lib64 system library path on x86_64
+
+SYSTEM_LIB_PATH, where the session service loads its extension
+libraries from, is /system/lib unless target_cpu is arm64 or the build
+is the SDK emulator, but a 64-bit x86 device installs them under
+/system/lib64. Use lib64 for x86_64 too, as the media plugin paths now
+do.
+
+Change-Id: I22430bc6ac4d00f90146e087ea095e4c8448417e
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/session/BUILD.gn | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/services/session/BUILD.gn b/services/session/BUILD.gn
+index 711b1a90..6deaacf6 100644
+--- a/services/session/BUILD.gn
++++ b/services/session/BUILD.gn
+@@ -206,7 +206,7 @@ av_session_ohos_library("avsession_service") {
+   cflags_cc += [ "-fvisibility-inlines-hidden" ]
+ 
+   defines = []
+-  if (target_cpu == "arm64" || is_emulator) {
++  if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+     system_lib_path = "\"/system/lib64/\""
+   } else {
+     system_lib_path = "\"/system/lib/\""
+@@ -380,7 +380,7 @@ if (castplus_cast_engine_enable) {
+     cflags_cc += [ "-fvisibility-inlines-hidden" ]
+ 
+     defines = []
+-    if (target_cpu == "arm64" || is_emulator) {
++    if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+       system_lib_path = "\"/system/lib64/\""
+     } else {
+       system_lib_path = "\"/system/lib/\""
+@@ -647,7 +647,7 @@ av_session_ohos_library("avsession_item") {
+   cflags_cc += [ "-fvisibility-inlines-hidden" ]
+ 
+   defines = []
+-  if (target_cpu == "arm64" || is_emulator) {
++  if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+     system_lib_path = "\"/system/lib64/\""
+   } else {
+     system_lib_path = "\"/system/lib/\""
+@@ -811,7 +811,7 @@ av_session_ohos_library("avsession_cast_item") {
+   cflags_cc += [ "-fvisibility-inlines-hidden" ]
+ 
+   defines = []
+-  if (target_cpu == "arm64" || is_emulator) {
++  if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+     system_lib_path = "\"/system/lib64/\""
+   } else {
+     system_lib_path = "\"/system/lib/\""
+-- 
+2.50.1
+

@@ -1,0 +1,107 @@
+From fad44ca491f649174fdcc5e1b7aeb7c9c44a4564 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 27 Oct 2026 08:33:39 +0000
+Subject: [PATCH] build: use the lib64 codec and plugin paths on x86_64
+
+AV_CODEC_PATH, AV_CODEC_PLUGIN_PATH and the camera post-processor path
+are /system/lib unless target_cpu is arm64 (or, for most of them, the
+build is the SDK emulator), but a 64-bit x86 device installs these
+libraries under /system/lib64. Use lib64 for x86_64 too, as the media
+plugin paths now do.
+
+Change-Id: I02fae45dd254d77d39b56e623a4a1ee6844763aa
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ interfaces/inner_api/native/BUILD.gn   | 8 ++++----
+ services/engine/codeclist/BUILD.gn     | 2 +-
+ services/media_engine/filters/BUILD.gn | 2 +-
+ services/services/BUILD.gn             | 4 ++--
+ 4 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/interfaces/inner_api/native/BUILD.gn b/interfaces/inner_api/native/BUILD.gn
+index 780dfa6673..422ac2318f 100644
+--- a/interfaces/inner_api/native/BUILD.gn
++++ b/interfaces/inner_api/native/BUILD.gn
+@@ -102,7 +102,7 @@ config("av_codec_client_public_config") {
+   defines = []
+   defines += av_codec_defines
+ 
+-  if (target_cpu == "arm64" || is_emulator) {
++  if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+     av_codec_plugin_path = "\"/system/lib64/media/av_codec_plugins\""
+     av_codec_path = "\"/system/lib64\""
+   } else {
+@@ -141,7 +141,7 @@ config("av_codec_suspend_client_public_config") {
+ 
+   defines = []
+ 
+-  if (target_cpu == "arm64" || is_emulator) {
++  if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+     av_codec_plugin_path = "\"/system/lib64/media/av_codec_plugins\""
+     av_codec_path = "\"/system/lib64\""
+   } else {
+@@ -267,13 +267,13 @@ ohos_shared_library("av_codec_client") {
+       "$av_codec_root_dir/services/media_engine/plugins",
+     ]
+ 
+-    if (target_cpu == "arm64" || is_emulator) {
++    if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+       av_codec_plugin_path = "\"/system/lib64/media/av_codec_plugins\""
+     } else {
+       av_codec_plugin_path = "\"/system/lib/media/av_codec_plugins\""
+     }
+ 
+-    if (target_cpu == "arm64" || is_emulator) {
++    if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+       oh_file_plugin_path = "\"/system/lib64/media/histreamer_plugins\""
+     } else {
+       oh_file_plugin_path = "\"/system/lib/media/histreamer_plugins\""
+diff --git a/services/engine/codeclist/BUILD.gn b/services/engine/codeclist/BUILD.gn
+index 065c04aef4..1eef4aec33 100644
+--- a/services/engine/codeclist/BUILD.gn
++++ b/services/engine/codeclist/BUILD.gn
+@@ -43,7 +43,7 @@ ohos_static_library("av_codec_engine_codeclist") {
+   if (av_codec_enable_codec_vivid) {
+     defines += [ "SUPPORT_CODEC_AUDIO_VIVID" ]
+   }
+-  if (target_cpu == "arm64") {
++  if (target_cpu == "arm64" || target_cpu == "x86_64") {
+     av_codec_path = "\"/system/lib64\""
+   } else {
+     av_codec_path = "\"/system/lib\""
+diff --git a/services/media_engine/filters/BUILD.gn b/services/media_engine/filters/BUILD.gn
+index 9d1d907725..ec67ffd8b5 100644
+--- a/services/media_engine/filters/BUILD.gn
++++ b/services/media_engine/filters/BUILD.gn
+@@ -141,7 +141,7 @@ ohos_shared_library("av_codec_media_engine_filters") {
+ 
+   if (defined(av_codec_support_camera_post_processor) &&
+       av_codec_support_camera_post_processor) {
+-    if (target_cpu == "arm64" || is_emulator) {
++    if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+       camera_post_processor_path = "\"/system/lib64\""
+     } else {
+       camera_post_processor_path = "\"/system/lib\""
+diff --git a/services/services/BUILD.gn b/services/services/BUILD.gn
+index 563f45f40c..633197487b 100644
+--- a/services/services/BUILD.gn
++++ b/services/services/BUILD.gn
+@@ -79,13 +79,13 @@ config("av_codec_service_config") {
+     "$av_codec_root_dir/interfaces",
+   ]
+ 
+-  if (target_cpu == "arm64" || is_emulator) {
++  if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+     av_codec_plugin_path = "\"/system/lib64/media/av_codec_plugins\""
+   } else {
+     av_codec_plugin_path = "\"/system/lib/media/av_codec_plugins\""
+   }
+ 
+-  if (target_cpu == "arm64" || is_emulator) {
++  if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+     oh_file_plugin_path = "\"/system/lib64/media/histreamer_plugins\""
+   } else {
+     oh_file_plugin_path = "\"/system/lib/media/histreamer_plugins\""
+-- 
+2.50.1
+

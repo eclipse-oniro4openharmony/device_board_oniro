@@ -1,0 +1,51 @@
+From 622af07a766a5968f10f1543c41bc4c8078a2d99 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 27 Oct 2026 08:33:36 +0000
+Subject: [PATCH] build: load media plugins from lib64 on x86_64
+
+HST_PLUGIN_PATH, the directory the plugin manager loads every media
+plugin from (sources, demuxers, decoders, sinks), is /system/lib unless
+target_cpu is arm64 or the build is the SDK emulator. A 64-bit x86
+device installs the plugins under /system/lib64/media, so media_service
+finds no source plugin there and every player fails with
+"CONTAINER_ERR unsupport container format". The histreamer plugin path
+has the same condition.
+
+Use the lib64 paths for x86_64 too.
+
+Change-Id: I4b39a011ae109693b730c8b721416acf5214c580
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ engine/plugin/BUILD.gn | 2 +-
+ src/BUILD.gn           | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/engine/plugin/BUILD.gn b/engine/plugin/BUILD.gn
+index 5e09f1e6..9a8f0042 100644
+--- a/engine/plugin/BUILD.gn
++++ b/engine/plugin/BUILD.gn
+@@ -249,7 +249,7 @@ ohos_source_set("histreamer_plugin_core") {
+       public_external_deps = [ "bounds_checking_function:libsec_shared" ]
+     }
+   } else {
+-    if (target_cpu == "arm64" || is_emulator) {
++    if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+       hst_plugin_path = "\"/system/lib64/media/histreamer_plugins\""
+     } else {
+       hst_plugin_path = "\"/system/lib/media/histreamer_plugins\""
+diff --git a/src/BUILD.gn b/src/BUILD.gn
+index 9ee958aa..3abf7fac 100644
+--- a/src/BUILD.gn
++++ b/src/BUILD.gn
+@@ -226,7 +226,7 @@ if (hst_is_standard_sys) {
+ 
+     if (is_asan) {
+       hst_plugin_path = "\"/system/asan/lib64/media/media_plugins\""
+-    } else if (target_cpu == "arm64" || is_emulator) {
++    } else if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+       hst_plugin_path = "\"/system/lib64/media/media_plugins\""
+     } else {
+       hst_plugin_path = "\"/system/lib/media/media_plugins\""
+-- 
+2.50.1
+

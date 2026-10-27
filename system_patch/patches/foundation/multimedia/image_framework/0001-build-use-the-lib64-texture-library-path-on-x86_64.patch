@@ -1,0 +1,46 @@
+From b79db3739c64ad1f993c0cddfa6f557568863ed5 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 27 Oct 2026 08:33:40 +0000
+Subject: [PATCH] build: use the lib64 texture library path on x86_64
+
+SUT_PATH_X64 selects /system/lib64 for the texture super-compression
+library. Like the other multimedia library paths it is only set for
+arm64 and the SDK emulator, but a 64-bit x86 device installs its
+libraries under /system/lib64 too. Set it for x86_64 device builds.
+
+Change-Id: I93e384f3a0c1a91635ee54a5c2737d09da60bb5d
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ interfaces/innerkits/BUILD.gn                   | 2 +-
+ plugins/common/libs/image/libextplugin/BUILD.gn | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/interfaces/innerkits/BUILD.gn b/interfaces/innerkits/BUILD.gn
+index 605575d0b..e49a9c34d 100644
+--- a/interfaces/innerkits/BUILD.gn
++++ b/interfaces/innerkits/BUILD.gn
+@@ -308,7 +308,7 @@ if (use_clang_android) {
+         ]
+       }
+     }
+-    if (target_cpu == "arm64" || is_emulator) {
++    if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+       defines += [ "SUT_PATH_X64" ]
+     }
+     if (memory_utils_purgeable_ashmem_enable && defined(global_parts_info) &&
+diff --git a/plugins/common/libs/image/libextplugin/BUILD.gn b/plugins/common/libs/image/libextplugin/BUILD.gn
+index 835472ccd..076f9e9fc 100644
+--- a/plugins/common/libs/image/libextplugin/BUILD.gn
++++ b/plugins/common/libs/image/libextplugin/BUILD.gn
+@@ -219,7 +219,7 @@ ohos_shared_library("extplugin") {
+     if (defined(global_parts_info) &&
+         defined(global_parts_info.graphic_graphic_2d_ext)) {
+       defines += [ "SUT_ENCODE_ENABLE" ]
+-      if (target_cpu == "arm64" || is_emulator) {
++      if (target_cpu == "arm64" || target_cpu == "x86_64" || is_emulator) {
+         defines += [ "SUT_PATH_X64" ]
+       }
+     }
+-- 
+2.50.1
+
