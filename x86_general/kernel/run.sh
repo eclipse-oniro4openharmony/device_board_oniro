@@ -43,6 +43,12 @@ Options:
                          macOS, else gtk if QEMU has it, else sdl). The gtk and
                          cocoa windows have Machine > Power Down, which is the
                          phone's power button.
+      --audio DRIVER     Host audio backend for the guest's sound card, as a
+                         QEMU -audiodev driver with optional suboptions, e.g.
+                         pa, pipewire, alsa, coreaudio, dsound, sdl,
+                         wav,path=out.wav or none (default: auto, i.e.
+                         coreaudio on macOS, dsound on Windows, and on Linux
+                         the PulseAudio/PipeWire server or ALSA if found)
   -q, --qemu PATH        Path to qemu-system-x86_64 binary
   -h, --help             Show this help message
 EOF
@@ -64,6 +70,7 @@ headless=false
 vnc_display="$DEFAULT_VNC_DISPLAY"
 serial_port="$DEFAULT_SERIAL_PORT"
 ui=""
+audio="auto"
 qemu_bin="${QEMU_BIN:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -76,6 +83,7 @@ while [[ $# -gt 0 ]]; do
     --vnc-display)    vnc_display="${2:?missing VNC display number}"; shift 2 ;;
     --serial-port)    serial_port="${2:?missing serial port}"; shift 2 ;;
     --display)        ui="${2:?missing display backend}"; shift 2 ;;
+    --audio)          audio="${2:?missing audio driver}"; shift 2 ;;
     -q|--qemu)        qemu_bin="${2:?missing qemu path}"; shift 2 ;;
     -h|--help)        usage ;;
     -*)               error "Unknown option: $1" ;;
@@ -135,6 +143,8 @@ fi
 
 qemu_version=$("$qemu_bin" --version | head -1)
 info "Using $qemu_version"
+qemu_major=$(sed -n 's/^QEMU emulator version \([0-9][0-9]*\)\..*/\1/p' <<<"$qemu_version")
+qemu_minor=$(sed -n 's/^QEMU emulator version [0-9][0-9]*\.\([0-9][0-9]*\).*/\1/p' <<<"$qemu_version")
 
 # Detect the correct ES1370 audio device name (case varies by QEMU version)
 if "$qemu_bin" -device help 2>&1 | grep -q '"es1370"'; then
@@ -251,6 +261,46 @@ if [[ "$headless" == false ]]; then
   esac
 fi
 
+# ---- Host audio ------------------------------------------------
+# The guest plays to and records from the ES1370 card, and -audiodev connects
+# it to the host. QEMU 8 and later exit when a requested backend cannot start,
+# so "auto" only picks a sound server that is actually there. With "none" the
+# card still works but its output is dropped.
+if [[ "$audio" == auto ]]; then
+  # QEMU 7 and later list their drivers with "-audiodev help"; older ones fail.
+  audio_drivers=$("$qemu_bin" -audiodev help 2>/dev/null | sed -n '2,$p' || true)
+  has_audio_driver() { grep -qx "$1" <<<"$audio_drivers"; }
+  runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  case "$host_os" in
+    Darwin)                audio=coreaudio ;;
+    MINGW*|MSYS*|CYGWIN*)  audio=dsound ;;
+    *)
+      # PipeWire desktops run pipewire-pulse too, so pa covers both servers.
+      if [[ -n "${PULSE_SERVER:-}" || -S "$runtime_dir/pulse/native" ]] &&
+         { [[ -z "$audio_drivers" ]] || has_audio_driver pa; }; then
+        audio=pa
+      elif [[ -S "$runtime_dir/pipewire-0" ]] && has_audio_driver pipewire; then
+        audio=pipewire
+      elif [[ -e /dev/snd/controlC0 ]] &&
+           { [[ -z "$audio_drivers" ]] || has_audio_driver alsa; }; then
+        audio=alsa
+      else
+        audio=none
+      fi
+      ;;
+  esac
+fi
+
+if [[ "${qemu_major:-0}" -gt 4 ]] ||
+   [[ "${qemu_major:-0}" -eq 4 && "${qemu_minor:-0}" -ge 2 ]]; then
+  audio_args=(-audiodev "${audio},id=snd0" -device "$audio_device,audiodev=snd0")
+else
+  # Sound cards take an audiodev property since QEMU 4.2; before that the
+  # backend comes from the environment.
+  export QEMU_AUDIO_DRV="${audio%%,*}"
+  audio_args=(-device "$audio_device")
+fi
+
 # ---- Build display and serial arguments -------------------------
 display_args=()
 serial_args=()
@@ -294,7 +344,6 @@ else
   # and expects the guest to draw one, but the guest turns clicks into touches
   # and draws none: keep showing it. The display suboption exists since QEMU
   # 5.0; older versions take -show-cursor.
-  qemu_major=$(sed -n 's/^QEMU emulator version \([0-9][0-9]*\)\..*/\1/p' <<<"$qemu_version")
   if [[ "${qemu_major:-0}" -ge 5 ]]; then
     ui_args=(-display "$ui_opts,show-cursor=on")
   else
@@ -313,6 +362,7 @@ info "Image directory : $image_dir"
 info "Connect key     : $connect_key"
 info "CPUs: $smp | RAM: $mem | Resolution: ${res_w}x${res_h}"
 info "Acceleration    : ${accel_args[*]:-none} ${cpu_args[*]:-}"
+info "Audio           : ${audio}"
 if [[ "$headless" == true ]]; then
   info "Mode            : headless"
   info "  VNC display   : localhost:$vnc_tcp_port (VNC :$vnc_display)"
@@ -345,7 +395,7 @@ exec "$qemu_bin" \
   -boot c \
   "${display_args[@]}" \
   -rtc base=utc,clock=host \
-  -device "$audio_device" \
+  "${audio_args[@]}" \
   -initrd ramdisk.img \
   -kernel bzImage \
   -drive if=none,file=updater.img,format=raw,id=updater,index=0 \

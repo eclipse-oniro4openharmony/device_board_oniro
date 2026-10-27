@@ -146,6 +146,20 @@ hdc shell "ps -A | wc -l"        # system processes up
 Give it a minute to boot; the OHOS lockscreen then renders (SDL window, or over
 VNC in headless mode).
 
+### 🔊 Audio
+
+The emulator's sound card plays through the host's speakers and records from
+its default input. `run.sh` picks the host backend: CoreAudio on macOS,
+DirectSound on Windows, and on Linux the desktop's PulseAudio or PipeWire
+server (ALSA if neither is running). To choose one yourself, pass a QEMU
+`-audiodev` driver:
+
+```bash
+./run.sh --audio pipewire               # or pa, alsa, sdl, coreaudio, dsound
+./run.sh --audio wav,path=guest.wav     # record what the guest plays to a file
+./run.sh --audio none                   # no host audio
+```
+
 ### 🧭 Simulate sensors
 
 The emulator has virtual sensors (accelerometer, gyroscope, magnetic field,
