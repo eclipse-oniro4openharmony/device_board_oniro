@@ -41,13 +41,13 @@ static int32_t CaptureInitImpl(struct AlsaCapture* captureIns)
     }
 
     SndElementItemInit(&priData->ctrlVolume);
-    priData->ctrlVolume.numid = SND_NUMID_CAPTURE_VOL;
+    priData->ctrlVolume.numid = SND_NUMID_BY_NAME;
     priData->ctrlVolume.name = SND_ELEM_CAPTURE_VOL;
 
     CaptureSetPriData(captureIns, (CapturePriData)priData);
 
     SndElementItemInit(&elem);
-    elem.numid = SND_NUMID_CAPTURE_VOL;
+    elem.numid = SND_NUMID_BY_NAME;
     elem.name = SND_ELEM_CAPTURE_VOL;
     elem.value = SND_IN_CAPTURE_DEFAULT_VOLUME;
 
@@ -56,6 +56,13 @@ static int32_t CaptureInitImpl(struct AlsaCapture* captureIns)
         AUDIO_FUNC_LOGE("write capture volume fail!");
         return HDF_FAILURE;
     }
+
+    /* Route the mic into the ADC; the AK4531 resets with no capture source. */
+    SndElementItemInit(&elem);
+    elem.numid = SND_NUMID_BY_NAME;
+    elem.name = SND_ELEM_CAPTURE_ROUTE;
+    elem.value = SND_IN_CARD_ON;
+    (void)SndElementWrite(cardIns, &elem);
 
     return HDF_SUCCESS;
 }
@@ -154,7 +161,7 @@ static int32_t CaptureStartImpl(struct AlsaCapture *captureIns, const struct Aud
     CHECK_NULL_PTR_RETURN_DEFAULT(captureIns);
 
     SndElementItemInit(&mixerItem);
-    mixerItem.numid = SND_NUMID_CAPTURE_SWITCH;
+    mixerItem.numid = SND_NUMID_BY_NAME;
     mixerItem.name = SND_ELEM_CAPTURE_SWITCH;
     mixerItem.value = SND_IN_CARD_ON;
     SndElementWrite(&captureIns->soundCard, &mixerItem);
@@ -169,7 +176,7 @@ static int32_t CaptureStopImpl(struct AlsaCapture *captureIns)
     CHECK_NULL_PTR_RETURN_DEFAULT(&captureIns->soundCard);
 
     SndElementItemInit(&mixerItem);
-    mixerItem.numid = SND_NUMID_CAPTURE_SWITCH;
+    mixerItem.numid = SND_NUMID_BY_NAME;
     mixerItem.name = SND_ELEM_CAPTURE_SWITCH;
     mixerItem.value = SND_IN_CARD_OFF;
     SndElementWrite(&captureIns->soundCard, &mixerItem);

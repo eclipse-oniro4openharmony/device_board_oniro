@@ -41,24 +41,31 @@ static int32_t RenderInitImpl(struct AlsaRender *renderIns)
     }
 
     SndElementItemInit(&priData->ctrlVolume);
-    priData->ctrlVolume.numid = SND_NUMID_MASTER_PLAYBACK_VOL;
+    priData->ctrlVolume.numid = SND_NUMID_BY_NAME;
     priData->ctrlVolume.name = SND_ELEM_MASTER_PLAYBACK_VOL;
     RenderSetPriData(renderIns, (RenderPriData)priData);
 
-    
+    /* Route DAC2 into the output mixer at 0 dB; the AK4531 resets muted. */
     SndElementItemInit(&elem);
-    elem.numid = SND_NUMID_AUTO_MUTE_MODE;
-    elem.name = SND_ELEM_AUTO_MUTE_MODE;
-    elem.value = 0;
-
-    ret = SndElementWrite(cardIns, &elem);
-    if (ret != HDF_SUCCESS) {
-        AUDIO_FUNC_LOGE("write Auto-Mute Mode fail!");
-        return HDF_FAILURE;
-    }
+    elem.numid = SND_NUMID_BY_NAME;
+    elem.name = SND_ELEM_PCM_PLAYBACK_SWITCH;
+    elem.value = SND_OUT_CARD_ON;
+    (void)SndElementWrite(cardIns, &elem);
 
     SndElementItemInit(&elem);
-    elem.numid = SND_NUMID_MASTER_PLAYBACK_VOL;
+    elem.numid = SND_NUMID_BY_NAME;
+    elem.name = SND_ELEM_PCM_SWITCH;
+    elem.value = SND_OUT_CARD_ON;
+    (void)SndElementWrite(cardIns, &elem);
+
+    SndElementItemInit(&elem);
+    elem.numid = SND_NUMID_BY_NAME;
+    elem.name = SND_ELEM_PCM_VOL;
+    elem.value = SND_PCM_DEFAULT_VOLUME;
+    (void)SndElementWrite(cardIns, &elem);
+
+    SndElementItemInit(&elem);
+    elem.numid = SND_NUMID_BY_NAME;
     elem.name = SND_ELEM_MASTER_PLAYBACK_VOL;
     elem.value = SND_OUT_PLAYBACK_DEFAULT_VOLUME;
 
@@ -175,7 +182,7 @@ static int32_t RenderStartImpl(struct AlsaRender *renderIns, const struct AudioH
     struct AlsaSoundCard *cardIns = (struct AlsaSoundCard *)renderIns;
 
     SndElementItemInit(&elem);
-    elem.numid = SND_NUMID_MASTER_PLAYBACK_SWITCH;
+    elem.numid = SND_NUMID_BY_NAME;
     elem.name = SND_ELEM_MASTER_PLAYBACK_SWITCH;
     elem.value = SND_OUT_CARD_ON;
     // switch (renderIns->descPins) {
@@ -208,7 +215,7 @@ static int32_t RenderStopImpl(struct AlsaRender *renderIns)
     CHECK_NULL_PTR_RETURN_DEFAULT(&renderIns->soundCard);
 
     SndElementItemInit(&elem);
-    elem.numid = SND_NUMID_MASTER_PLAYBACK_SWITCH;
+    elem.numid = SND_NUMID_BY_NAME;
     elem.name = SND_ELEM_MASTER_PLAYBACK_SWITCH;
     elem.value = SND_OUT_CARD_OFF;
     ret = SndElementWrite(cardIns, &elem);
