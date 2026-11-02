@@ -370,10 +370,19 @@ loads the Android EGL/HWC2/gralloc `.so`s with an embedded bionic linker and rem
 
 ### 📈 Status
 
-Native boot, USB hdc, display, touch, WiFi and audio work on both phones. The
-Plinius is the actively developed device and additionally has hardware keys,
-sensors, vibrator, camera and cellular (mobile data, SMS, voice) up; Bluetooth,
-NFC and fingerprint are not enabled yet on either.
+On both phones the following work:
+
+* Native boot, USB hdc, display and touch.
+* WiFi.
+* Audio, through the vendor's Android audio HAL.
+* Sensors and the vibrator.
+* Camera preview and stills.
+* GNSS on the Plinius. On the X23 the engine runs and streams NMEA, but a fix
+  has not been confirmed under open sky yet.
+
+The Plinius also has its hardware keys and cellular (mobile data, SMS, voice)
+up. The X23's Halium 12 modem stack is not bridged yet. Bluetooth, NFC and
+fingerprint are not enabled on either phone.
 
 ---
 
