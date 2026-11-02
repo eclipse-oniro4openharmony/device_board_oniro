@@ -29,7 +29,10 @@ OUT_DIR="$KERNEL_TREE/out"
 
 # Temporary workspace for clean builds
 KERNEL_SRC_TMP_PATH="$ROOT_DIR/out/kernel/src_tmp/volla-x23"
-mkdir -p "$ROOT_DIR/out/kernel/src_tmp/"
+# After the first build $KERNEL_SRC is a symlink to this directory; create
+# it up front so a cleaned out/ doesn't leave the link dangling (which makes
+# the -d test below fail and build.sh try to re-clone over the link).
+mkdir -p "$KERNEL_SRC_TMP_PATH"
 
 # 1. Ensure kernel tree is initialized
 if [ ! -d "$KERNEL_TREE" ]; then

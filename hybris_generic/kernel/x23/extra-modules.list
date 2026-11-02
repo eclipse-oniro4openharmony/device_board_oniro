@@ -100,3 +100,112 @@ wmt_drv.ko
 mddp.ko
 wmt_chrdev_wifi.ko
 wlan_drv_gen4m_6789.ko
+
+# Sensor hub: hf_manager provides /dev/hf_manager (the MTK sensor-2.0 ABI the
+# hybris sensor VDI reads); sensorhub registers the SCP-hosted sensors on it
+# and needs scp.ko, so init.x23.cfg loads both right after the SCP modules.
+hf_manager.ko
+sensorhub.ko
+
+# GNSS: gps_drv_stp (/dev/stpgps, on the WMT connsys) and gps_pwr — mnld's
+# devices.  Loaded after wmt_drv; see the GNSS notes in init.x23.cfg.
+gps_drv_stp.ko
+gps_pwr.ko
+
+# The rest of what Ubuntu Touch's vidofnir port loads at boot
+# (overlay/system/usr/lib/modules-load.d/vidofnir.conf in the port repo),
+# in dependency order, minus what OHOS cannot use or what could disturb it:
+# USB network/gadget functions (c2k_usb*, asix, ax88179, mtk_u_ether,
+# rndis), fingerprint, Bluetooth, voice wake-up, Widevine, the unused tfa98xx
+# amp, and the extra ccci modem modules (ccci_dpmaif crashes the kernel when
+# loaded this late).  This brings up the camera stack (imgsensor_isp6s, ISP,
+# DIP, CCU, lens, flash, MDP), the JPEG/video codecs, thermal and power
+# throttling, and the CPU/GPU performance helpers.  Order matters:
+# camera_dip_isp6s probed out of this order resets the SoC.
+mtk-swpm.ko
+mtk-swpm-dbg-common-v1.ko
+thermal_interface.ko
+mtk-swpm-dbg-v6789.ko
+gz_trusty_mod.ko
+gz_ipc_mod.ko
+gz_tz_system.ko
+cmdq-sec-drv.ko
+iommu_gz.ko
+trusted_mem.ko
+mtk_sec_heap.ko
+mdp_drv_mt6789.ko
+clk-dbg-mt6789.ko
+mtk-ssc-dbg-v2.ko
+mtk_battery_oc_throttling.ko
+mtk_bp_thl.ko
+mtk_md_power_throttling.ko
+mtk_cpu_power_throttling.ko
+soc_temp_lvts.ko
+pmic_temp.ko
+thermal-generic-adc.ko
+thermal_trace.ko
+board_temp.ko
+md_cooling_all.ko
+charger_cooling.ko
+backlight_cooling.ko
+richtek_spm_cls.ko
+atf_logger.ko
+vcp.ko
+mtk_jpeg.ko
+mtk-vcodec-common.ko
+mtk-vcu.ko
+mtk-vcodec-dec-v1.ko
+mtk-vcodec-enc-v1.ko
+gz_log_mod.ko
+gz_main_mod.ko
+gz_irq_mod.ko
+gz_virtio_mod.ko
+mtk_heap_debug.ko
+mtk-cqdma.ko
+devmpu.ko
+mtk-dvfsrc-start.ko
+cpudvfs.ko
+mtk_cm_ipi.ko
+mtk_cm_mgr.ko
+cpufreq_sugov_ext.ko
+scheduler.ko
+mtk_core_ctl.ko
+cpuqos_v3.ko
+mtk_perf_ioctl.ko
+mtk_fpsgo.ko
+mainaf.ko
+main2af.ko
+main3af.ko
+subaf.ko
+sub2af.ko
+mtk-composite.ko
+flashlight.ko
+lm3643.ko
+trace_mmstat.ko
+mtk-pwm.ko
+mtk_irtx_pwm.ko
+camera_rsc_isp60.ko
+camera_fdvt_isp51.ko
+mtk-lpm.ko
+mtk-lpm-dbg-common-v1.ko
+mtk-lpm-plat-v1.ko
+mtk-lpm-dbg-mt6789.ko
+clk-disable-unused.ko
+mtk-pm-domain-disable-unused.ko
+imgsensor_isp6s.ko
+camera_eeprom.ko
+camera_dip_isp6s.ko
+archcounter_timesync.ko
+camera_mem.ko
+cam_qos.ko
+camera_isp.ko
+mtk_cm_mgr_mt6789.ko
+sec.ko
+load_track.ko
+uload_ind.ko
+vdec-fmt.ko
+mtk_perf_common.ko
+task_turbo.ko
+pmsr.ko
+spmtwam.ko
+mtk_disp_sec.ko
