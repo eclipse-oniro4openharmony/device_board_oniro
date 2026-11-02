@@ -18180,7 +18180,7 @@ diff -ruN a/fs/hmdfs/hmdfs_device_view.h b/fs/hmdfs/hmdfs_device_view.h
 diff -ruN a/fs/hmdfs/hmdfs.h b/fs/hmdfs/hmdfs.h
 --- a/fs/hmdfs/hmdfs.h	1970-01-01 00:00:00.000000000 +0000
 +++ b/fs/hmdfs/hmdfs.h	2026-05-19 11:53:46.762865211 +0000
-@@ -0,0 +1,370 @@
+@@ -0,0 +1,371 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * fs/hmdfs/hmdfs.h
@@ -18315,6 +18315,7 @@ diff -ruN a/fs/hmdfs/hmdfs.h b/fs/hmdfs/hmdfs.h
 +	char *local_src;
 +	char *cache_dir;
 +	char *cloud_dir;
++	char *no_delete_name;
 +	/* seq number for hmdfs super block */
 +	unsigned int seq;
 +
@@ -28117,7 +28118,7 @@ diff -ruN a/fs/hmdfs/Kconfig b/fs/hmdfs/Kconfig
 diff -ruN a/fs/hmdfs/main.c b/fs/hmdfs/main.c
 --- a/fs/hmdfs/main.c	1970-01-01 00:00:00.000000000 +0000
 +++ b/fs/hmdfs/main.c	2026-05-19 12:00:15.471511210 +0000
-@@ -0,0 +1,1134 @@
+@@ -0,0 +1,1135 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * fs/hmdfs/main.c
@@ -28417,6 +28418,7 @@ diff -ruN a/fs/hmdfs/main.c b/fs/hmdfs/main.c
 +	kfree(sbi->real_dst);
 +	kfree(sbi->cache_dir);
 +	kfree(sbi->cloud_dir);
++	kfree(sbi->no_delete_name);
 +	kfifo_free(&sbi->notify_fifo);
 +	sb->s_fs_info = NULL;
 +	sbi->lower_sb = NULL;
@@ -31733,7 +31735,7 @@ diff -ruN a/fs/hmdfs/stash.h b/fs/hmdfs/stash.h
 diff -ruN a/fs/hmdfs/super.c b/fs/hmdfs/super.c
 --- a/fs/hmdfs/super.c	1970-01-01 00:00:00.000000000 +0000
 +++ b/fs/hmdfs/super.c	2026-05-19 11:53:46.778865522 +0000
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,198 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * fs/hmdfs/super.c
@@ -31760,6 +31762,7 @@ diff -ruN a/fs/hmdfs/super.c b/fs/hmdfs/super.c
 +	OPT_NO_DENTRY_CACHE,
 +	OPT_USER_ID,
 +	OPT_DEVELOPER,
++	OPT_NO_DELETE_NAME,
 +	OPT_ERR,
 +};
 +
@@ -31775,6 +31778,7 @@ diff -ruN a/fs/hmdfs/super.c b/fs/hmdfs/super.c
 +	{ OPT_NO_DENTRY_CACHE, "no_dentry_cache" },
 +	{ OPT_USER_ID, "user_id=%s"},
 +	{ OPT_DEVELOPER, "developer"},
++	{ OPT_NO_DELETE_NAME, "no_delete_name=%s" },
 +	{ OPT_ERR, NULL },
 +};
 +
@@ -31871,6 +31875,11 @@ diff -ruN a/fs/hmdfs/super.c b/fs/hmdfs/super.c
 +			break;
 +		case OPT_CLOUD_DIR:
 +			err = hmdfs_match_strdup(&args[0], &sbi->cloud_dir);
++			if (err)
++				goto out;
++			break;
++		case OPT_NO_DELETE_NAME:
++			err = hmdfs_match_strdup(&args[0], &sbi->no_delete_name);
 +			if (err)
 +				goto out;
 +			break;

@@ -1885,7 +1885,7 @@ diff -ruN a/fs/sharefs/Makefile b/fs/sharefs/Makefile
 diff -ruN a/fs/sharefs/sharefs.h b/fs/sharefs/sharefs.h
 --- a/fs/sharefs/sharefs.h	1970-01-01 00:00:00.000000000 +0000
 +++ b/fs/sharefs/sharefs.h	2026-05-19 09:51:34.051718180 +0000
-@@ -0,0 +1,244 @@
+@@ -0,0 +1,245 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Copyright (c) 1998-2022 Erez Zadok
@@ -1953,6 +1953,7 @@ diff -ruN a/fs/sharefs/sharefs.h b/fs/sharefs/sharefs.h
 +	unsigned int user_id;
 +	bool override;
 +	bool override_support_delete;
++	bool sniffer;
 +};
 +
 +/* operations vectors defined in specific files */
@@ -2133,7 +2134,7 @@ diff -ruN a/fs/sharefs/sharefs.h b/fs/sharefs/sharefs.h
 diff -ruN a/fs/sharefs/super.c b/fs/sharefs/super.c
 --- a/fs/sharefs/super.c	1970-01-01 00:00:00.000000000 +0000
 +++ b/fs/sharefs/super.c	2026-05-19 09:51:34.051718180 +0000
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,219 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Copyright (c) 1998-2022 Erez Zadok
@@ -2151,6 +2152,7 @@ diff -ruN a/fs/sharefs/super.c b/fs/sharefs/super.c
 +	OPT_USER_ID,
 +	OPT_OVERRIDE,
 +	OPT_OVERRIDE_SUPPORT_DELETE,
++	OPT_SNIFFER,
 +    	OPT_ERR,
 +};
 +
@@ -2158,6 +2160,7 @@ diff -ruN a/fs/sharefs/super.c b/fs/sharefs/super.c
 +	{ OPT_USER_ID, "user_id=%s" },
 +	{ OPT_OVERRIDE, "override" },
 +	{ OPT_OVERRIDE_SUPPORT_DELETE, "override_support_delete" },
++	{ OPT_SNIFFER, "sniffer" },
 +    	{ OPT_ERR, NULL }
 +};
 +
@@ -2203,6 +2206,9 @@ diff -ruN a/fs/sharefs/super.c b/fs/sharefs/super.c
 +			break;
 +		case OPT_OVERRIDE_SUPPORT_DELETE:
 +			sbi->override_support_delete = true;
++			break;
++		case OPT_SNIFFER:
++			sbi->sniffer = true;
 +			break;
 +		default:
 +			err = -EINVAL;
