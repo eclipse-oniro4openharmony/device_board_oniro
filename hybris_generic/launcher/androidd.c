@@ -38,12 +38,14 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <netdb.h>
+#include <pwd.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/mount.h>
@@ -481,6 +483,116 @@ static int nv_loop_attach(const char *img, dev_t *devno)
     return rc == 0 ? index : -1;
 }
 
+/* -------------------------------------------------------------------------
+ * Bluetooth device address
+ * -------------------------------------------------------------------------
+ * The connsys BT controller comes up with MediaTek's placeholder address;
+ * the handset's real one is the first six bytes of the NVRAM record
+ * nvdata:/APCFG/APRDEB/BT_Addr, in display order (the WIFI record next to it
+ * holds the same OUI, one lower).  On Android libbluetooth_mtk reads it via
+ * nvram_daemon.  Here the OHOS HCI HDI reads /data/vendor/bluetooth/btmac.txt
+ * ("AA:BB:CC:DD:EE:FF") and hands it to libbt_vendor, which programs it.
+ *
+ * blue_host cannot see the Halium mount namespace, so the parent reads the
+ * record off the loop device with a short read-only mount before the child
+ * mounts it read-write (never both at once).  `noload` keeps the read-only
+ * mount from replaying the journal.  Without a usable record btmac.txt is
+ * left alone and the HDI falls back to a random address it persists itself.
+ * ---------------------------------------------------------------------- */
+
+#define BT_ADDR_DIR   "/data/vendor/bluetooth"
+#define BT_ADDR_FILE  BT_ADDR_DIR "/btmac.txt"
+#define BT_ADDR_PEEK  "/dev/.androidd-nvdata"
+#define BT_ADDR_REC   BT_ADDR_PEEK "/APCFG/APRDEB/BT_Addr"
+
+static int bt_addr_usable(const unsigned char *a)
+{
+    int zero = 1, ones = 1;
+    for (int i = 0; i < 6; i++) {
+        if (a[i] != 0x00) zero = 0;
+        if (a[i] != 0xff) ones = 0;
+    }
+    /* bit 0 of the first byte set = group address, never a device's */
+    return !zero && !ones && !(a[0] & 0x01);
+}
+
+static void nv_export_bt_addr(dev_t devno, int loop_index)
+{
+    char devp[64];
+    snprintf(devp, sizeof devp, "/dev/loop%d", loop_index);
+    if (mknod_min(devp, S_IFBLK | 0600, devno) < 0) {
+        logmsg("bt: mknod %s: %s", devp, strerror(errno));
+        return;
+    }
+    if (mkdir(BT_ADDR_PEEK, 0700) < 0 && errno != EEXIST) {
+        logmsg("bt: mkdir %s: %s", BT_ADDR_PEEK, strerror(errno));
+        return;
+    }
+    if (mount(devp, BT_ADDR_PEEK, "ext4",
+              MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC, "noload") < 0) {
+        logmsg("bt: mount %s ro: %s", devp, strerror(errno));
+        rmdir(BT_ADDR_PEEK);
+        return;
+    }
+    unsigned char a[6];
+    int fd = open(BT_ADDR_REC, O_RDONLY | O_CLOEXEC);
+    ssize_t r = fd >= 0 ? read(fd, a, sizeof a) : -1;
+    if (fd < 0)
+        logmsg("bt: open %s: %s", BT_ADDR_REC, strerror(errno));
+    if (fd >= 0) close(fd);
+    if (umount2(BT_ADDR_PEEK, 0) < 0)
+        logmsg("bt: umount %s: %s", BT_ADDR_PEEK, strerror(errno));
+    rmdir(BT_ADDR_PEEK);
+
+    if (r != (ssize_t)sizeof a || !bt_addr_usable(a)) {
+        logmsg("bt: no usable address in NVRAM BT_Addr — HDI will pick one");
+        return;
+    }
+
+    char text[18];
+    snprintf(text, sizeof text, "%02X:%02X:%02X:%02X:%02X:%02X",
+             a[0], a[1], a[2], a[3], a[4], a[5]);
+
+    char cur[18] = "";
+    fd = open(BT_ADDR_FILE, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        if (read(fd, cur, 17) != 17) cur[0] = '\0';
+        cur[17] = '\0';
+        close(fd);
+    }
+    if (strcasecmp(cur, text) == 0) {
+        logmsg("bt: %s already holds the NVRAM address", BT_ADDR_FILE);
+        return;
+    }
+
+    /* init's post-fs-data creates the dir too; whichever runs first wins,
+     * and both give it to blue_host. */
+    struct passwd *pw = getpwnam("blue_host");
+    if (mkdir(BT_ADDR_DIR, 0770) < 0 && errno != EEXIST) {
+        logmsg("bt: mkdir %s: %s", BT_ADDR_DIR, strerror(errno));
+        return;
+    }
+    if (pw && chown(BT_ADDR_DIR, pw->pw_uid, pw->pw_gid) < 0)
+        logmsg("bt: chown %s: %s", BT_ADDR_DIR, strerror(errno));
+
+    const char *tmp = BT_ADDR_FILE ".tmp";
+    fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
+        logmsg("bt: create %s: %s", tmp, strerror(errno));
+        return;
+    }
+    int ok = write(fd, text, 17) == 17 && fsync(fd) == 0;
+    if (pw && fchown(fd, pw->pw_uid, pw->pw_gid) < 0) ok = 0;
+    close(fd);
+    if (!ok || rename(tmp, BT_ADDR_FILE) < 0) {
+        logmsg("bt: write %s: %s", BT_ADDR_FILE, strerror(errno));
+        unlink(tmp);
+        return;
+    }
+    logmsg("bt: device address %.8s:**:**:%s from NVRAM -> %s",
+           text, text + 15, BT_ADDR_FILE);
+}
+
 /* Parent side, before clone(2): seed the images if needed and bind them to
  * loop devices.  Everything here needs the OHOS namespace (/data,
  * /dev/loop-control, /system/bin/mke2fs), which the child loses at the
@@ -545,6 +657,9 @@ static void nv_prepare(void)
         g_nv_dev[i] = devno;
         logmsg("nv: %s -> loop%d (%u:%u) -> %s", np->img, index,
                major(devno), minor(devno), np->mnt);
+
+        if (strcmp(np->part, "nvdata") == 0)
+            nv_export_bt_addr(devno, index);
     }
 
     g_nv_ready = 1;

@@ -1,0 +1,84 @@
+From 9d92c683c67283c8c7a9c9f7f7913673e9455f1b Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 3 Nov 2026 12:42:08 +0000
+Subject: [PATCH] bluetooth: resync the A2DP play state from the stack
+
+The passthrough A2DP HDI (a2dp_host) gates WriteFrame, StopPlaying and
+SuspendPlaying on g_playState, which only follows OnPlayingStatusChanged.
+The A2DP source server sends that on transitions only: an observer that
+registers late gets the connection state replayed but not the playing
+state. a2dp_host registers when audio_server loads the adapter, which can
+be after the sink has already started the stream (some headsets start it
+themselves). Then StartPlaying is a no-op on the streaming stream, no
+transition is ever reported, every frame is dropped with "playState is
+not Streaming", StopPlaying is never sent either, and the headset stays
+silent until it reconnects.
+
+Ask the stack for its own playing state (IBluetoothA2dpSrc::GetPlayingState)
+whenever the render path reads the state, which it does only on
+start/stop/suspend, and adopt it if the two disagree.
+
+Seen on the Volla Phone Plinius (hybris_generic) with a pair of FreeBuds
+SE 3: connected, routed, and silent.
+
+Change-Id: Ic6f46f4d9728ad4a96bff7aff22feda9d67b764e
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../src/audio_bluetooth_manager.cpp           | 39 +++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/bluetooth/audio/hal/hdi_passthrough/src/audio_bluetooth_manager.cpp b/bluetooth/audio/hal/hdi_passthrough/src/audio_bluetooth_manager.cpp
+index a1f8ff374..1682cbfe9 100644
+--- a/bluetooth/audio/hal/hdi_passthrough/src/audio_bluetooth_manager.cpp
++++ b/bluetooth/audio/hal/hdi_passthrough/src/audio_bluetooth_manager.cpp
+@@ -142,8 +142,47 @@ static BtA2dpAudioCallback g_hdiCallbacks = {
+     .OnMediaStackChanged = AudioOnMediaStackChanged,
+ };
+ 
++/*
++ * g_playState only follows OnPlayingStatusChanged, which the A2DP source
++ * server sends on transitions only: a newly registered observer gets the
++ * connection state replayed but not the playing state.  If this host binds
++ * while the stream is already up (it is loaded after the sink connects, and
++ * the sink may start the stream itself), it never sees the transition; the
++ * render then skips StartPlaying (a no-op on a streaming stream anyway),
++ * every WriteFrame is dropped, and StopPlaying is never sent either, so the
++ * two sides stay out of step until the sink reconnects.  The render path
++ * asks for the state only on start/stop/suspend, so take the stack's own
++ * view there whenever it can be had.
++ */
++static void SyncPlayingStateFromStack()
++{
++    if (!g_proxy_) {
++        return;
++    }
++    RawAddress device = g_proxy_->GetActiveSinkDevice();
++    int state = A2DP_NOT_PLAYING;
++    if (g_proxy_->GetPlayingState(device, state) != 0) {
++        return;
++    }
++    std::lock_guard<std::mutex> lock(g_playStateMutex);
++    if ((state != A2DP_NOT_PLAYING) == (g_playState != A2DP_NOT_PLAYING)) {
++        return;
++    }
++    HDF_LOGI("%{public}s: play state %{public}d -> %{public}d (from stack)", __func__, g_playState, state);
++    for (auto it = g_playdevices.begin(); it != g_playdevices.end();) {
++        it = (it->second == device.GetAddress()) ? g_playdevices.erase(it) : std::next(it);
++    }
++    if (state != A2DP_NOT_PLAYING) {
++        g_playdevices.insert(std::make_pair(state, device.GetAddress()));
++        g_playState = state;
++    } else if (g_playdevices.empty()) {
++        g_playState = state;
++    }
++}
++
+ int GetPlayingState()
+ {
++    SyncPlayingStateFromStack();
+     HDF_LOGI("%{public}s: state:%{public}d", __func__, g_playState);
+     return g_playState;
+ }
+-- 
+2.50.1
+

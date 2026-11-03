@@ -380,9 +380,10 @@ On both phones the following work:
 * GNSS on the Plinius. On the X23 the engine runs and streams NMEA, but a fix
   has not been confirmed under open sky yet.
 
-The Plinius also has its hardware keys and cellular (mobile data, SMS, voice)
-up. The X23's Halium 12 modem stack is not bridged yet. Bluetooth, NFC and
-fingerprint are not enabled on either phone.
+The Plinius also has its hardware keys, cellular (mobile data, SMS, voice) and
+Bluetooth (scanning, pairing, A2DP audio to a headset) up. The X23's Halium 12
+modem stack is not bridged yet, and neither is its Bluetooth (no BT kernel
+driver is loaded). NFC and fingerprint are not enabled on either phone.
 
 ---
 
