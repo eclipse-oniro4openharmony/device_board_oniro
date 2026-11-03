@@ -25,6 +25,12 @@
 #     init_boot_a    <- out/hybris_generic/init_boot-chainload.img (kernel/ansuz/build_init_boot_chainload.sh)
 #     vendor_boot_a  <- out/hybris_generic/vendor_boot-ohos.img    (same script; carries
 #                       "ohos.boot.hardware=ansuz lsm=selinux" — NEVER flash this under UT)
+#     --firmware adds, flashed first: halium-blobs/ansuz/firmware/<part>.img
+#                       -> <part>_a (pull-halium-blobs.sh -d ansuz: the UT
+#                       channel's firmware set — dtbo, lk, preloader, modem,
+#                       scp, ...).  Needed once per phone after a firmware pin
+#                       bump: vendor_dlkm in super and the dtbo must be the
+#                       same generation as the kernel modules.
 #
 # `super` carries the OHOS partitions *and* the Halium ones, and its LP
 # geometry is per-device: flash only a super.img produced by the matching
@@ -77,6 +83,7 @@ WIPE=0
 WIPE_PARTS="userdata"
 REBOOT=1
 DRY_RUN=0
+FIRMWARE=0
 declare -a IMAGE_OVERRIDES=()
 
 usage() {
@@ -103,6 +110,9 @@ Options:
                            --only boot_a,init_boot_a  (skips the 3 GB super);
                            --only none flashes nothing — pair it with --wipe
       --image PART=PATH    override the image flashed to PART (repeatable)
+      --firmware           ansuz: also flash the firmware set from
+                           halium-blobs/ansuz/firmware/ (dtbo, lk, preloader,
+                           co-processors) to slot a, before the OS images
   -w, --wipe               wipe /data: erase the `userdata` partition before
                            flashing (OHOS reformats it on the next boot).
                            A factory reset — ALL user data is lost.
@@ -127,6 +137,9 @@ Examples:
 
   # factory reset only: wipe /data, flash nothing
   ./flash-native.sh -d ansuz --only none --wipe
+
+  # after a firmware pin bump: firmware set + OS images, clean /data
+  ./flash-native.sh -d ansuz --firmware --wipe
 EOF
 }
 
@@ -151,6 +164,7 @@ while [[ $# -gt 0 ]]; do
         -w|--wipe)       WIPE=1; shift ;;
         --wipe=*)        WIPE=1; WIPE_PARTS="${1#*=}"; shift ;;
         --no-reboot)     REBOOT=0; shift ;;
+        --firmware)      FIRMWARE=1; shift ;;
         -n|--dry-run)    DRY_RUN=1; shift ;;
         -h|--help)       usage; exit 0 ;;
         *)               echo "Unknown argument: $1" >&2; echo >&2; usage >&2; exit 2 ;;
@@ -175,6 +189,14 @@ case "$DEVICE" in
     ansuz|plinius)
         DEVICE="ansuz"
         DEVICE_LABEL="Volla Phone Plinius (ansuz)"
+        if (( FIRMWARE )); then
+            FW_DIR="$HERE/../../halium-blobs/ansuz/firmware"
+            [[ -d "$FW_DIR" ]] || die "--firmware: $FW_DIR missing — run pull-halium-blobs.sh -d ansuz"
+            for fw in "$FW_DIR"/*.img; do
+                fw_part="$(basename "$fw" .img)"
+                add_artifact "${fw_part}_a" "$(cd "$(dirname "$fw")" && pwd)/$(basename "$fw")" required
+            done
+        fi
         add_artifact super         "$OUT/super.img"                          required
         add_artifact boot_a        "$OHOS_ROOT/kernel/linux/volla-ansuz/out/boot.img" required
         add_artifact init_boot_a   "$OUT/init_boot-chainload.img"            required
@@ -187,6 +209,8 @@ case "$DEVICE" in
         die "unknown device '$DEVICE' — known: x23 (vidofnir), ansuz (plinius)"
         ;;
 esac
+
+(( ! FIRMWARE )) || [[ "$DEVICE" == "ansuz" ]] || die "--firmware is ansuz-only"
 
 # --image PART=PATH overrides
 for ov in ${IMAGE_OVERRIDES[@]+"${IMAGE_OVERRIDES[@]}"}; do

@@ -32,7 +32,6 @@
 0x017de3d5	nr_cpu_ids
 0x01968f79	devm_rtc_allocate_device
 0x01a718fc	kicker_pbm_by_flash
-0x01cf4af5	charger_dev_reset_eoc_state
 0x01d6838d	mml_drm_put_context
 0x01e7ead9	dev_pm_clear_wake_irq
 0x01e9e124	v4l2_device_register
@@ -61,11 +60,12 @@
 0x03019bb0	frs_data
 0x032acd76	serial8250_rpm_get
 0x0337a746	cfg80211_control_port_tx_status
-0x0347ba5b	tcpm_dpm_pd_get_pps_status
+0x034bef14	tcpci_unlock_typec
 0x03522510	fpsgo_get_lr_pair_fp
 0x0360a9c1	mml_log_rec
 0x0366307a	console_suspend_enabled
 0x037a0cba	kfree
+0x03907a8e	charger_dev_is_enabled
 0x03a20a41	topology_clear_scale_freq_source
 0x03b21b81	__tracepoint_android_vh_binder_set_priority
 0x03c6adfb	get_adsp_type
@@ -111,9 +111,9 @@
 0x05a88eb7	slbc_gid_request
 0x05b4a6e2	reset_controller_register
 0x05b941b3	tty_port_install
+0x05cfe393	tcpm_inquire_pd_pe_ready
 0x05e59274	__pm_runtime_disable
 0x05f5fa5d	unregister_3way_semaphore_notifier
-0x05f9f6b1	charger_dev_is_charging_done
 0x06055a23	__tracepoint_pelt_se_tp
 0x060ba97c	gen_pool_free_owner
 0x061de863	icc_put
@@ -140,11 +140,11 @@
 0x07215730	fput
 0x073314cd	xgf_event_buffer
 0x073f3d9b	usb_autopm_put_interface
+0x074f29c3	charger_dev_set_property
 0x077ea4aa	mtk_get_gpu_memory_usage_fp
 0x07813c35	device_create_managed_software_node
 0x0784f05c	dev_set_name
 0x0793a2a4	dev_set_mtu
-0x079a1237	charger_dev_set_constant_voltage
 0x079ff9a0	snd_pcm_set_ops
 0x07a33d72	mddp_drv_attach
 0x07b52e38	rtnl_unregister
@@ -200,7 +200,6 @@
 0x0ab955ce	cfg80211_assoc_failure
 0x0ab9fd3b	vb2_ops_wait_prepare
 0x0ad41394	is_support_secure_handle
-0x0afe925f	charger_dev_set_ibusocp
 0x0b251408	unregister_virtio_driver
 0x0b28e75b	sk_error_report
 0x0b36a876	tty_encode_baud_rate
@@ -215,7 +214,6 @@
 0x0b98ac20	v4l2_m2m_ioctl_querybuf
 0x0bb113b6	adsp_send_message
 0x0bc477a2	irq_set_irq_type
-0x0bd20eb7	charger_dev_is_vbuslowerr
 0x0bd394d8	tty_termios_baud_rate
 0x0bd72419	__tracepoint_android_rvh_tick_entry
 0x0bdd7131	__video_register_device
@@ -242,18 +240,23 @@
 0x0cdad411	usb_serial_register_drivers
 0x0cdce87c	rfkill_set_hw_state_reason
 0x0cfcffa4	vb2_request_object_is_buffer
+0x0d0719a9	charger_dev_dump_registers
 0x0d1360a0	get_dsu_ceiling_freq
 0x0d1898d6	mtk_dma_buf_set_name
 0x0d53cde9	ffa_driver_register
 0x0d542439	__ipv6_addr_type
+0x0d57056a	charger_dev_set_input_current
 0x0d5cb810	pd_get_opp_leakage
 0x0d604f97	mtk_map_util_freq
 0x0d78f33b	eth_header_cache
 0x0d91978b	trusty_enqueue_nop
+0x0d92be52	tcpm_resume
 0x0d98be8b	dev_set_mac_address
 0x0d9b4753	drm_mode_equal
+0x0d9e277d	oled_esd_recovery
 0x0da10ec3	security_sock_graft
 0x0dafa66a	of_property_read_variable_u16_array
+0x0db09a9f	charger_dev_enable_hz
 0x0db2b181	usb_root_hub_lost_power
 0x0dd32e2c	cmdq_dump_usage
 0x0dd3afa3	open_candev
@@ -265,6 +268,7 @@
 0x0e2bd50d	rpmsg_sendto
 0x0e30e59e	regulator_list_voltage_table
 0x0e412be4	mbox_free_channel
+0x0e4183b6	tcpm_inquire_pd_vconn_role
 0x0e501568	swpm_arm_dsu_pmu_set_type
 0x0e6501dd	dma_pool_create
 0x0e742a21	l2tp_tunnel_delete
@@ -273,7 +277,9 @@
 0x0ea3c74e	tasklet_kill
 0x0ebc9f21	media_pad_remote_pad_unique
 0x0ec43f6f	gpio_to_desc
+0x0ecd0464	tcpm_get_remote_power_cap
 0x0ecd991f	hrtimer_active
+0x0edf379b	tcpci_notify_vbus_short_cc_status
 0x0eec7cfb	wakeup_sources_walk_start
 0x0efbce6b	usb_hcd_giveback_urb
 0x0f15b38a	kmalloc_caches
@@ -309,6 +315,7 @@
 0x10839f69	DAL_SetColor
 0x1085e486	mtk_spk_send_ipi_buf_to_dsp
 0x1092d9de	clockevents_config_and_register
+0x10a0404e	current_barosensor_info
 0x10a73976	wakeup_source_remove
 0x10c6040e	qos_rec_get_hist_bw
 0x10ea702c	netdev_info
@@ -317,7 +324,6 @@
 0x110098f6	UARTHUB_open
 0x11089ac7	_ctype
 0x111d2777	alarm_start
-0x112cb4e4	charger_dev_get_zcv
 0x113858c3	simple_write_to_buffer
 0x1148c0ea	flush_delayed_work
 0x116424dd	unregister_lpm_logger_mbrain_dbg_ops
@@ -331,6 +337,7 @@
 0x11b138a7	cmdq_pkt_clear_event
 0x11bc8fea	spi_controller_resume
 0x11bfb9a4	__tracepoint_android_rvh_get_nohz_timer_target
+0x11c1a144	charger_dev_notify
 0x11c68c40	get_dsu_temp
 0x11d6a547	bpf_trace_run11
 0x11e90cd4	kobject_put
@@ -349,10 +356,10 @@
 0x124493ab	mtk_smem_init
 0x124bad4d	kstrtobool
 0x124e8423	trusty_nop_set_switch_pri
-0x12641095	tcpm_dpm_pd_vconn_swap
 0x1264cbde	call_netdevice_notifiers
 0x126805b7	serdev_device_set_tiocm
 0x1271fac9	scmi_tinysys_register_event_notifier
+0x12901163	current_gyroscope_info
 0x12988d83	snd_soc_new_compress
 0x12c27859	mtk_lpm_sysfs_sub_entry_add
 0x12c79179	mtk_vdec_lpw_limit
@@ -401,11 +408,11 @@
 0x14de1090	mt_irq_dump_status
 0x14f5d679	drm_atomic_helper_check
 0x150684d1	cfg80211_remain_on_channel_expired
-0x15175df0	tcpm_inquire_pd_pe_ready
 0x151f4898	schedule_timeout_uninterruptible
 0x1526a3b5	mtk_mmqos_get_avail_hrt_bw
 0x1549e8e2	cfg80211_pmksa_candidate_notify
 0x15528baa	rpmsg_send
+0x155f7b2d	charger_dev_init_chip
 0x1578c6f0	wakeup_source_create
 0x1580647f	mtk_drm_gateic_select
 0x159083e3	devm_nvmem_device_get
@@ -440,7 +447,6 @@
 0x170611ee	gpufreq_get_power_by_idx
 0x170ed47b	dsu_get_opp_ps
 0x171224e9	gpiochip_generic_free
-0x1715f95c	charger_dev_enable_otg
 0x171dda3d	drm_kms_helper_poll_fini
 0x17336304	device_link_add
 0x1733e179	serial8250_get_port
@@ -452,9 +458,7 @@
 0x17bebe24	tty_ldisc_deref
 0x17cb0a23	notify_fpsgo_touch_latency_ko_ready
 0x17d6bd85	component_match_add_typed
-0x17dc8543	charger_dev_do_event
 0x17e5d102	remap_vmalloc_range
-0x17e9bcae	tcpm_typec_change_role
 0x17fa4179	aee_sram_fiq_log
 0x17ff0acb	rtnl_link_register
 0x180d8e06	snd_soc_component_write
@@ -472,7 +476,6 @@
 0x18a8aa95	cmdq_pkt_write_reg_addr
 0x18b48e28	__memset_io
 0x18b91b5a	connsys_coredump_deinit
-0x18bd215e	tcpm_shutdown
 0x18c331d7	get_md_smem_cachable_offset
 0x18c96487	usb_add_gadget_udc
 0x18d2d657	seq_puts
@@ -504,7 +507,6 @@
 0x19d42229	mt_leds_classdev_register
 0x19dd35ba	__alloc_skb
 0x19ea9b52	percpu_down_write
-0x19f6967c	tcpm_suspend
 0x1a04087a	eara2fstb_tfps_mdiff
 0x1a09a655	mtk_vcodec_get_enc_reg_addr
 0x1a11b568	met_ondiemet_attr_init_mcupm
@@ -527,12 +529,10 @@
 0x1b700d37	put_vaddr_frames
 0x1b7d2a94	l2tp_session_inc_refcount
 0x1b8822d8	pinctrl_gpio_direction_output
-0x1b92cb08	charger_dev_get_constant_voltage
 0x1b998c98	genl_register_family
 0x1ba22d8b	__netdev_alloc_skb
 0x1ba59527	__kmalloc_node
 0x1bab1211	__devm_regmap_init_i2c
-0x1bc36986	current_sarsensor_info
 0x1bc5eebe	pinctrl_gpio_direction_input
 0x1bd55625	mtk_btag_ufs_send_command
 0x1be461e1	driver_unregister
@@ -552,6 +552,7 @@
 0x1ca87cdd	__devm_regmap_init_spmi_ext
 0x1ca92b6c	mtk_spk_set_reduceDb
 0x1cab394e	simple_attr_write
+0x1cb6eb3c	charger_dev_get_min_input_current
 0x1cbf5582	qca_uart_setup
 0x1cc49782	mt_spi_enable_master_clk
 0x1cc7f053	scmi_tinysys_common_set
@@ -560,6 +561,7 @@
 0x1ce70c88	__blk_alloc_disk
 0x1cf259a2	cmdq_util_error_enable
 0x1cf2dc32	ged_get_last_commit_idx_fp
+0x1d18e205	charger_dev_enable_cable_drop_comp
 0x1d222ced	irq_get_irqchip_state
 0x1d22bd73	ufshcd_mcq_make_queues_operational
 0x1d24c881	___ratelimit
@@ -573,14 +575,12 @@
 0x1d6766db	usb_ep_free_request
 0x1d836063	param_set_charp
 0x1da1aeb9	addrconf_prefix_rcv_add_addr
-0x1dbd5f15	charger_dev_enable_cable_drop_comp
 0x1dd8d6f5	drm_bridge_attach
 0x1ddd1883	__skb_get_hash
 0x1df13bbf	rhashtable_free_and_destroy
 0x1dfaa4dd	efi
 0x1e17a753	video_ioctl2
 0x1e19eb6c	_printk_deferred
-0x1e1d5451	charger_dev_set_property
 0x1e249bc3	cfg80211_rx_mlme_mgmt
 0x1e3487b9	platform_device_alloc
 0x1e39ba1c	proc_mkdir
@@ -605,12 +605,12 @@
 0x1f1f4d4f	get_adsp_core_total
 0x1f2f9e6c	phy_print_status
 0x1f4a18aa	tty_mode_ioctl
+0x1f4e8db2	rt_pd_manager_update_usb_state
 0x1f557414	gen_pool_has_addr
 0x1f6dcb06	gpufreq_dual_commit
 0x1f7600cb	bpf_trace_run3
 0x1f8d81e4	get_scmi_tinysys_info_symbol
 0x1f929ea3	usb_autopm_get_interface_no_resume
-0x1f97f585	hf_device_register_manager_create
 0x1f99bde1	__tracepoint_md_mutt_limit
 0x1f9c8229	devm_extcon_register_notifier
 0x1fb5fc3d	cmdq_pkt_create
@@ -643,6 +643,7 @@
 0x208cad27	pwclkcnt
 0x2092986b	conninfra_adie_top_ck_en_off
 0x20978fb9	idr_find
+0x209cc831	current_tp_info
 0x20a789ac	irq_set_chip_data
 0x20ab4b65	mtk_uart_get_apdma_rx_state
 0x20ba2e0b	fpsgo_notify_fbt_is_boost_fp
@@ -677,7 +678,9 @@
 0x22808c6a	__pm_runtime_set_status
 0x228f026d	arp_tbl
 0x22984856	__register_rpmsg_driver
+0x22a60e0a	tcpci_alert_wakeup
 0x22a98e56	mtk_dvfsrc_send_request
+0x22f1dd79	current_battery_info
 0x233a5250	rpmsg_unregister_device
 0x233f2200	rproc_add_subdev
 0x23412816	rtc_tm_to_ktime
@@ -718,7 +721,6 @@
 0x24f39c39	reset_control_reset
 0x25097918	drm_gem_prime_import_dev
 0x250f2b76	ccd_master_destroy
-0x2513dd12	charger_dev_is_safety_timer_enabled
 0x251738bc	serdev_device_wait_until_sent
 0x2527a7d9	mmc_cmdq_disable
 0x2532dd75	vlan_ioctl_set
@@ -728,7 +730,6 @@
 0x25491db2	get_user_pages_unlocked
 0x2549f63f	snd_soc_get_volsw
 0x255df1ca	cfg80211_tdls_oper_request
-0x2567d136	charger_device_register
 0x256c3603	before_md_sleep_status
 0x256df0b4	notify_ultra_afe_hw_free
 0x2574d8a8	ip6_dst_hoplimit
@@ -741,7 +742,6 @@
 0x25c780fa	bt_sock_stream_recvmsg
 0x25f85cbd	mtk_get_dvfs_loading_mode
 0x2604b7c2	down_read_killable
-0x26067e04	tcpm_dpm_pd_data_swap
 0x260c14c0	mmup_enable_count
 0x26130015	get_hac_status
 0x26188cfb	get_clkg_sram_base_addr
@@ -769,7 +769,6 @@
 0x27189346	drm_atomic_helper_swap_state
 0x27391bc0	adapter_dev_send_hardreset
 0x273e101f	typec_partner_set_identity
-0x27492326	register_charger_device_notifier
 0x275269b3	ieee80211_ie_split_ric
 0x275789bb	scp_ipidev
 0x2765f55c	mt63xx_hw_set_value
@@ -786,7 +785,6 @@
 0x280f9f14	__per_cpu_offset
 0x28179e84	devfreq_monitor_start
 0x2823696b	mcupm_reserve_mem_get_phys
-0x282b3b44	charger_dev_reset_vbusovp_alarm
 0x282ef6fb	seq_open
 0x284009bc	register_get_fpsgo_is_boosting_fp
 0x28779e52	drm_printf
@@ -819,7 +817,6 @@
 0x29bfce6d	vm_map_ram
 0x29c0975f	mtk_smi_dbg_dump_for_mminfra
 0x29c37d82	aee_is_printk_too_much
-0x29cacbf8	pri_common_node_register
 0x29e29275	snd_soc_component_exit_regmap
 0x29f6604d	snd_soc_dapm_sync
 0x29f93135	__alloc_percpu
@@ -845,14 +842,13 @@
 0x2afdabe8	mtk_hcp_get_dip_mem_tdr_fd
 0x2b039b28	mtk_vcodec_config_group_list
 0x2b11f66f	dma_async_tx_descriptor_init
-0x2b23c01d	charger_dev_get_adc
 0x2b3e59fd	mmdvfs_force_step_by_vcp
-0x2b426854	charger_dev_set_vbatovp
 0x2b593aa8	gen_pool_alloc_algo_owner
 0x2b6945b5	udp6_set_csum
 0x2b7417b7	ccd_ipi_register
 0x2b8dcd34	fpsgo_notify_vsync_period_fp
 0x2b9997fb	atomic_notifier_chain_register
+0x2b9cfce8	tcpc_typec_handle_otp
 0x2b9e28ac	cmdq_pkt_reuse_poll
 0x2bb32ad1	arc4_setkey
 0x2bda2355	__tracepoint_android_vh_binder_trans
@@ -888,7 +884,6 @@
 0x2cdf87a1	proc_dointvec_minmax
 0x2ceb5865	typec_set_pwr_role
 0x2cebdc18	mtk_pctrl_show_one_pin
-0x2d12671b	charger_dev_get_adc_accuracy
 0x2d17e429	get_sbb_active_ratio_gear
 0x2d181b92	word_size_align
 0x2d2c902f	perf_trace_buf_alloc
@@ -918,7 +913,6 @@
 0x2e03c4c3	vcodec_trace
 0x2e09263f	usb_copy_descriptors
 0x2e0b1deb	dma_fence_get_status
-0x2e1c1e23	current_tp_info
 0x2e1ca751	clk_put
 0x2e22ca9b	of_property_read_u64_index
 0x2e2b40d2	strncat
@@ -938,6 +932,7 @@
 0x2f0004dc	hci_recv_frame
 0x2f0213b6	trusted_mem_ffa_query_pa
 0x2f0640d2	can_proto_unregister
+0x2f17906d	charger_dev_reset_eoc_state
 0x2f220db3	devm_clk_put
 0x2f350e2e	connsys_log_read_to_user
 0x2f4880df	static_key_slow_dec
@@ -952,7 +947,6 @@
 0x2fae0e87	gpueb_get_send_PIN_ID_by_name
 0x2fbf103d	ipv6_skip_exthdr
 0x2fc505ec	vm_node_stat
-0x2fcbf3a6	charger_dev_is_enabled
 0x2fe050cb	mml_drm_ctx_idle
 0x2fe2045b	mmc_get_card
 0x2fe252cc	unregister_inet6addr_notifier
@@ -960,7 +954,6 @@
 0x30088187	imgsys_cmdq_clearevent
 0x30219add	eara2fbt_set_2nd_t2wnt
 0x3026e722	thread_group_cputime_adjusted
-0x305e284d	charger_dev_get_charging_current
 0x30a3c21b	dev_close
 0x30b703f5	component_bind_all
 0x30b80c16	rtnl_link_unregister
@@ -974,6 +967,7 @@
 0x3133d901	sysfs_create_bin_file
 0x313401e5	mtk_v4l2_dbg_level
 0x3147ea9b	mtk_ipi_recv_reply_symbol
+0x31496f22	battery_info_set_property
 0x314a6896	fget
 0x31575e51	mtk_afe_debugfs_write
 0x315c0d4b	mtk_memif_set_pbuf_size
@@ -1010,6 +1004,7 @@
 0x328b60c8	drm_property_lookup_blob
 0x3292651b	dev_pm_domain_attach_by_id
 0x329487cb	l2tp_session_delete
+0x32a8989a	charger_dev_set_charging_current
 0x32c08f70	met_mcupm_log_uninit
 0x32c39494	get_smem_phy_start_addr
 0x32c5a9bf	n_tty_ioctl_helper
@@ -1077,7 +1072,6 @@
 0x3620741f	of_address_to_resource
 0x36318027	mt6878_set_adda_predistortion
 0x3638f99c	get_gpueb_ipidev_symbol
-0x363e2bff	tcpc_device_irq_enable
 0x3643b80f	ieee80211_chandef_to_operating_class
 0x365495cb	perf_event_enable
 0x3659f14d	pdchk_hwv_irq_init
@@ -1141,7 +1135,6 @@
 0x38d911ed	cmdq_pkt_alloc_buf
 0x38dd7eaa	devfreq_cooling_unregister
 0x38e6f699	mml_cmdq_err
-0x39318546	current_camera_info
 0x393623b2	of_phy_simple_xlate
 0x3937cd70	mtk_vcodec_alloc_mem
 0x395d33f4	get_dspdaiid_by_dspscene
@@ -1176,6 +1169,7 @@
 0x3a908023	skb_dequeue
 0x3a9229cf	imgsys_cmdq_streamoff
 0x3aaa15b2	cpu_latency_qos_remove_request
+0x3aef9eaa	charger_dev_set_vbatovp
 0x3af92941	log_md_sleep_info
 0x3b0da3a7	mtk_set_gpu_idle_fp
 0x3b20fb95	dma_fence_remove_callback
@@ -1214,8 +1208,6 @@
 0x3cfd9348	usb_gadget_giveback_request
 0x3cfedf08	pd_get_util_ps
 0x3d02cd70	dma_fence_signal_locked
-0x3d1365c5	charger_dev_get_input_current
-0x3d1cccb5	charger_dev_is_powerpath_enabled
 0x3d210724	gen_pool_dma_zalloc_align
 0x3d44e855	pwr_hw_is_on
 0x3d4ba090	typec_partner_set_pd_revision
@@ -1255,9 +1247,11 @@
 0x3eb09d10	vb2_fop_poll
 0x3ebd5214	hrtimer_init
 0x3ecca617	drm_atomic_private_obj_fini
+0x3ed2d1e7	tcpci_notify_wd0_state
 0x3ee6671b	usb_serial_generic_open
 0x3f19d564	mdiobus_free
 0x3f26cfd6	mtk_venc_slb_cb
+0x3f2c4bbc	tcpc_device_irq_enable
 0x3f3039c2	__tracepoint_android_rvh_cpu_cgroup_online
 0x3f322a95	sbb
 0x3f4547a7	put_unused_fd
@@ -1276,7 +1270,6 @@
 0x3fe9f497	usb_remove_function
 0x401544bf	connectivity_export_conap_scp_clr_dfd_buffer
 0x40235c98	_raw_write_unlock
-0x40271fef	charger_dev_send_ta20_current_pattern
 0x40283b29	ufshcd_uic_change_pwr_mode
 0x403f9529	gpio_request_one
 0x4056037d	scmi_tinysys_event_notify
@@ -1327,7 +1320,6 @@
 0x4302d0eb	free_pages
 0x433d2315	drm_atomic_helper_commit_modeset_disables
 0x43406bdf	vcp_cmd_ex
-0x435584cf	tcpci_alert_wakeup
 0x4357bccf	devm_regulator_unregister_notifier
 0x4361c86a	noop_llseek
 0x4368f1ab	cfg80211_get_iftype_ext_capa
@@ -1343,7 +1335,6 @@
 0x43fc37b1	fpsgo_notify_vsync_fp
 0x4401dc99	cfg80211_rx_assoc_resp
 0x4406c079	dma_buf_begin_cpu_access
-0x440b6131	tcpm_typec_role_swap
 0x441d50a3	kfree_skb_list_reason
 0x4425402e	dma_buf_detach
 0x44480f47	mmprofile_log_meta
@@ -1372,11 +1363,9 @@
 0x45315ff3	vlan_vid_del
 0x4531ab62	copy_from_kernel_nofault
 0x4565a0fa	mtk_iova_unmap
-0x4567190f	tcpci_lock_typec
 0x4575a0ca	drm_mode_set_crtcinfo
 0x45856120	vb2_ops_wait_finish
 0x45897285	sched_feat_keys
-0x458996fa	tcpm_inquire_typec_attach_state
 0x458ec8f9	mtk_dramc_get_steps_freq
 0x45985a50	cmdq_mbox_buf_alloc
 0x459e133f	v4l2_m2m_get_curr_priv
@@ -1419,14 +1408,12 @@
 0x479f7d4b	clk_bulk_disable
 0x47a8d9c2	mtk_smpu_md_handling_register
 0x47aad3b9	have_governor_per_policy
-0x47adeade	current_barosensor_info
 0x47ae886e	UARTHUB_config_internal_baud_rate
 0x47de384c	mtk_smi_status_check
 0x47df155f	kstrtobool_from_user
 0x47ea7f83	snd_soc_poweroff
 0x47ee41ec	generic_mii_ioctl
 0x47fc61bb	aee_rr_rec_wdk_ktime
-0x47fe3c3f	charger_dev_set_boot_volt_times
 0x4804dc0b	iio_trigger_notify_done
 0x48080238	pci_free_irq_vectors
 0x4817ee32	drm_panel_prepare
@@ -1477,7 +1464,6 @@
 0x4a3c8e94	pdchk_debug_dump
 0x4a46772b	snd_soc_unregister_component
 0x4a5f012e	device_remove_bin_file
-0x4a70e013	hf_device_unregister_manager_destroy
 0x4a8dd239	hid_parse_report
 0x4aa4c9ea	v4l2_ctrl_subdev_subscribe_event
 0x4aa4e33a	swpm_arm_ai_pmu_get
@@ -1512,8 +1498,8 @@
 0x4c353ac0	mtk_disp_notifier_register
 0x4c3a48f4	param_get_charp
 0x4c576a3b	mtk_drm_get_target_fps_fp
+0x4c5c0424	charger_dev_enable_chip
 0x4c71307f	debounce_times_perf_down_local_get
-0x4c72b8f9	current_lcm_info
 0x4c740777	dma_mmap_attrs
 0x4c83cd6a	security_sk_classify_flow
 0x4c8831c4	page_pool_create
@@ -1532,8 +1518,8 @@
 0x4d1c2f85	snd_soc_resume
 0x4d27d89b	clk_hw_is_prepared
 0x4d296494	__arch_clear_user
+0x4d49fa01	charger_dev_set_vbusovp_alarm
 0x4d4e1a44	param_get_ulong
-0x4d4f7480	tcpc_typec_is_act_as_sink_role
 0x4d65cbd5	csum_ipv6_magic
 0x4d6d0bbc	iommu_group_ref_get
 0x4d768812	ccmni_set_init_rps
@@ -1565,7 +1551,6 @@
 0x4e6eb722	gce_mminfra
 0x4e71abaf	video_device_release_empty
 0x4e79f242	register_file_buf_handler
-0x4e93014a	charger_dev_set_input_current
 0x4eae3dec	of_graph_get_next_endpoint
 0x4eb76570	v4l2_m2m_ioctl_expbuf
 0x4ec40cd3	mtk_get_gpu_pmu_deinit_symbol
@@ -1573,7 +1558,7 @@
 0x4ecd66ce	dev_set_allmulti
 0x4ecfcf3d	skb_pull_rcsum
 0x4ed6a2f5	ns_capable
-0x4f06fc7f	flashlight_dev_register
+0x4ef55cc6	charger_dev_enable_6pin_battery_charging
 0x4f2250ba	rtc_tm_to_time64
 0x4f31871b	mtk_vcodec_check_alive
 0x4f4564b1	ftrace_user_opp_v3
@@ -1638,6 +1623,7 @@
 0x525d0aa3	trace_seq_printf
 0x52637a4b	netdev_upper_dev_unlink
 0x52647db1	ct_idle_exit
+0x527c0e41	tcpm_dpm_pd_vconn_swap
 0x5284d1b3	qca_set_bdaddr_rome
 0x5287884f	of_find_i2c_device_by_node
 0x528c44b7	cmdq_pkt_read_addr
@@ -1663,6 +1649,7 @@
 0x53d475f7	tty_insert_flip_string_fixed_flag
 0x53d5fe78	mtk_iommu_set_ops
 0x53d7f503	__netlink_dump_start
+0x53e327e8	charger_dev_get_constant_voltage
 0x53fce8fe	ufs_mtk_dbg_tp_unregister
 0x54156b4a	drm_writeback_signal_completion
 0x541a80cc	pm_runtime_irq_safe
@@ -1685,9 +1672,9 @@
 0x54f15b49	scmi_tinysys_event_notify_symbol
 0x54f954ba	dma_heap_add
 0x55067d21	mtk_lp_sysfs_entry_func_create
+0x551269b3	tcpci_alert
 0x551bd071	__rb_erase_color
 0x5528f6cb	crypto_skcipher_decrypt
-0x552c89a2	tcpm_dpm_pd_power_swap
 0x552d4efc	KREE_CreateSession
 0x55308b41	get_cpu_ceiling_freq
 0x554138e8	mtk_vcodec_set_log
@@ -1721,7 +1708,6 @@
 0x5641485b	tty_termios_encode_baud_rate
 0x56470118	__warn_printk
 0x564aa2e8	kernel_listen
-0x564dae73	charger_dev_is_chip_enabled
 0x564f2dac	pid_task
 0x56525008	drm_atomic_state_clear
 0x56591d01	sysfs_create_link
@@ -1731,7 +1717,7 @@
 0x56c1736a	spi_setup
 0x56ce2f81	get_user_pages_fast
 0x56d4f794	typec_mux_unregister
-0x56e1678c	charger_dev_run_aicl
+0x56e2f003	current_cp_info
 0x57132996	mtk_swpm_sysfs_entry_func_node_add
 0x5718e0ba	ppp_input
 0x57360baf	ufshcd_system_suspend
@@ -1765,7 +1751,6 @@
 0x5855fc1d	rndis_test_last_msg_id
 0x585c1f37	dev_change_flags
 0x585eaed3	__clk_mux_determine_rate_closest
-0x58622611	current_cp_info
 0x5875d7da	mtk_get_leakage
 0x5878b0aa	devm_clk_register
 0x5878d629	KREE_CloseSession
@@ -1784,6 +1769,7 @@
 0x5964a2a8	ppp_unregister_channel
 0x596a05ff	mtk_mmdvfs_fmeter_register_notifier
 0x596bea40	nvmem_cell_get
+0x598dbd16	charger_dev_plug_out
 0x5998b6c8	regulator_is_enabled_regmap
 0x599eadd5	met_gpueb_log_uninit
 0x599fb41c	kvmalloc_node
@@ -1806,6 +1792,7 @@
 0x5aa683b8	freq_qos_update_request
 0x5aac7c29	kobject_uevent
 0x5aacc70c	folio_wait_bit
+0x5ac41e1b	tcpci_notify_cc_hi
 0x5ad089c6	sugov_grp_awr_update_cpu_tar_util_hook
 0x5adffa30	mtk_panel_tch_handle_reg
 0x5af2a617	mtk_dmabuf_page_pool_size
@@ -1864,6 +1851,7 @@
 0x5dc263fd	memdup_user
 0x5dcb3db3	drm_encoder_cleanup
 0x5dd4ac73	crypto_shash_digest
+0x5de5f597	charger_dev_do_event
 0x5de839de	crypto_aead_setauthsize
 0x5deca51a	set_task_vvip
 0x5df7236c	KREE_ION_ReferenceChunkmem
@@ -1877,6 +1865,7 @@
 0x5e35749a	connectivity_unregister_dfd_handler
 0x5e4aaffb	lpm_dbg_plat_ops_register
 0x5e515be6	ktime_get_ts64
+0x5e6b1286	charger_dev_set_ibusocp
 0x5e9ec63c	mtk_vcodec_is_vcp
 0x5ec6dfcd	usb_get_from_anchor
 0x5eda4e76	vb2_plane_cookie
@@ -1905,6 +1894,7 @@
 0x60225859	sock_init_data
 0x602ab713	mtk_drm_set_conn_backlight_level
 0x60352082	register_inet6addr_notifier
+0x60433396	charger_dev_reset_vbatovp_alarm
 0x6048e9c0	__sk_receive_skb
 0x604f3a64	connectivity_export_show_stack
 0x605d5bfa	cache_line_size
@@ -1952,7 +1942,6 @@
 0x6237e7ff	dev_pm_qos_add_notifier
 0x625001a0	drm_plane_cleanup
 0x6262c539	swpm_arm_pmu_get_idx
-0x6262fe97	tcpc_typec_handle_otp
 0x6272e817	regmap_bulk_write
 0x62737e1d	sock_unregister
 0x628882fb	dev_pm_opp_put
@@ -1963,6 +1952,7 @@
 0x62be7bae	drm_gem_mmap_obj
 0x62d42e01	set_target_margin
 0x62d513cd	mtk_loading_base_dvfs_step_fp
+0x62eb7d68	tcpm_dpm_pd_request
 0x62f5cccf	regulator_get_voltage_sel_regmap
 0x6305d23f	cfg80211_iftype_allowed
 0x63150e06	clk_get_parent
@@ -1971,7 +1961,6 @@
 0x632ffc4f	cpufreq_generic_attr
 0x633308af	dst_cache_set_ip4
 0x6334feef	mtk_custom_boost_gpu_freq_fp
-0x634d468b	tcpc_typec_handle_fod
 0x634eb2cc	cm_mgr_update_dram_by_cpu_opp
 0x6369852b	sock_release
 0x6381dcda	ccci_port_recv_skb
@@ -1986,7 +1975,6 @@
 0x63cc6a77	rhashtable_walk_stop
 0x63d17c67	ip_route_output_flow
 0x63e16604	register_low_battery_notify
-0x63ea5e02	tcpm_inquire_pd_data_role
 0x63eb7924	ccd_master_listen
 0x63fdd47f	snd_soc_add_component_controls
 0x6401ce4f	debugfs_create_dir
@@ -2015,11 +2003,11 @@
 0x64effeaf	drm_connector_register
 0x65005562	drm_framebuffer_lookup
 0x6508739f	netif_carrier_off
+0x651baadb	charger_dev_plug_in
 0x651e1d7a	debugfs_create_bool
 0x6523dc45	mtk_hcp_get_dip_mem_virt
 0x6524732a	mtk_hcp_get_dip_mem_cq_fd
 0x65278a71	rtnl_register_module
-0x652d025b	charger_dev_set_pe20_efficiency_table
 0x653b329e	mtk_spm_sysfs_root_entry_create
 0x653ec2e0	ufshcd_remove
 0x6554264c	hci_unregister_dev
@@ -2030,7 +2018,6 @@
 0x65ac6d56	drm_connector_attach_encoder
 0x65b8210a	regulator_enable_regmap
 0x65ceed0f	netlink_broadcast
-0x65db925b	tcpm_reset_pd_charging_policy
 0x65e0d6d7	memory_read_from_buffer
 0x65e5c101	trusted_mem_api_alloc
 0x65f4e8c4	fpsgo_get_pid_fp
@@ -2040,7 +2027,6 @@
 0x661e7e24	gpufreq_register_gpufreq_fp
 0x6626afca	down
 0x66286463	bt_sock_ioctl
-0x664aae8a	tcpc_typec_handle_wd
 0x665829f8	gpufreq_dump_infra_status
 0x668402aa	crypto_put_default_rng
 0x66922fa6	lpm_dbg_plat_info_set
@@ -2048,7 +2034,6 @@
 0x669e62ec	mtk_sync_timeline_inc
 0x669f34e6	kthread_flush_worker
 0x66b4cc41	kmemdup
-0x66bcc725	tcpm_dpm_pd_request
 0x66cfd2b2	param_set_uint
 0x66e8950d	dma_sync_single_for_cpu
 0x66e8ab95	devm_gpiod_get
@@ -2066,8 +2051,8 @@
 0x678b96ec	dma_pool_alloc
 0x679cf96b	mtk_icc_node_create
 0x67a94ad7	scp_get_semaphore_3way
-0x67ae68fb	charger_dev_get_vbus
 0x67b27ec1	tty_std_termios
+0x67bc1a30	flashlight_kicker_pbm_by_device_id
 0x67c99abe	vcorefs_get_src_req_num
 0x67cb9dc6	param_get_uint
 0x67cfcf54	serdev_device_write_flush
@@ -2076,7 +2061,6 @@
 0x67e404ca	register_dlpt_notify
 0x67e9e82a	netif_rx
 0x68071e79	cpufreq_update_util_data
-0x681ab926	tcpci_alert
 0x6820f16e	__devm_regmap_init_mmio_clk
 0x6823520a	support_wfd_region
 0x68238341	media_devnode_remove
@@ -2084,10 +2068,12 @@
 0x68465f38	cpufreq_set_cci_mode
 0x686d006d	gpufreq_get_freq_by_idx
 0x687dddfd	cqhci_deactivate
+0x6887bb20	tcpc_get_dev_data
 0x689f7bde	mtk_smi_dbg_hang_detect
 0x68a24153	snd_pcm_format_physical_width
 0x68b6ad64	met_sspm_emi
 0x68c9a56f	boost_get_cmd_fp
+0x68ce327f	charger_dev_get_ibat
 0x68dc2b2e	mtk_hcp_get_pqdip_mem_virt
 0x68f31cbd	__list_add_valid
 0x68fc7e58	kernfs_put
@@ -2110,7 +2096,6 @@
 0x698f3950	mtk_uart_apdma_polling_tx_finish
 0x69986964	devfreq_register_opp_notifier
 0x699e1454	v4l2_ctrl_handler_init_class
-0x69af4ddb	charger_dev_enable_termination
 0x69b18f43	rfc1042_header
 0x69bef55d	class_unregister
 0x69ca6e1b	virtqueue_kick_prepare
@@ -2126,6 +2111,7 @@
 0x6a5cb5ee	__get_free_pages
 0x6a5ecb18	unregister_module_notifier
 0x6a6e05bf	kstrtou8
+0x6a768354	charger_dev_set_pe20_efficiency_table
 0x6a7b383b	get_xpu_ip_num
 0x6a902ced	pm_runtime_enable
 0x6aa05c15	cmdq_mbox_chan_id
@@ -2150,6 +2136,7 @@
 0x6b6e2d02	alloc_can_err_skb
 0x6b722180	log_read_mmio
 0x6b79f44e	netif_device_detach
+0x6b81c38b	power_supply_unreg_notifier
 0x6b853d06	ns_to_kernel_old_timeval
 0x6b8bf149	netif_receive_skb_list
 0x6b9fe557	__tracepoint_android_vh_set_wake_flags
@@ -2206,13 +2193,13 @@
 0x6dea6a3b	sock_alloc_send_pskb
 0x6df6ef79	em_dev_register_perf_domain
 0x6e008147	vcorefs_get_num_opp
+0x6e021815	tcpc_dev_get_by_name
 0x6e05674b	blk_queue_physical_block_size
 0x6e1f98d7	swpm_set_only_cmd
 0x6e34ead3	devm_of_phy_get_by_index
 0x6e3c218b	usbnet_defer_kevent
 0x6e4e69eb	platform_get_irq
 0x6e5208e9	get_net_ns_by_fd
-0x6e572d94	charger_dev_get_mivr
 0x6e591d3f	get_user_pages
 0x6e5d94cd	ssc_kobj
 0x6e720ff2	rtnl_unlock
@@ -2249,7 +2236,6 @@
 0x705502d8	snd_pcm_lib_preallocate_pages_for_all
 0x706dcc43	mtk_hcp_release_gce_working_buffer
 0x708a8a04	ufshcd_dme_set_attr
-0x708e1425	hf_device_register
 0x709558be	mmc_free_host
 0x7096c85f	__napi_schedule_irqoff
 0x70a454d5	mtk_smi_larb_ultra_dis
@@ -2323,8 +2309,6 @@
 0x73ae1a0c	tty_wakeup
 0x73af7820	mtk_vcodec_set_curr_ctx
 0x73b6e47f	cfg80211_scan_done
-0x73b8557a	register_tcp_dev_notifier
-0x73cb19d1	hf_manager_create
 0x73e08ef8	get_mcupm_ipidev
 0x73e2bcf1	wake_up_process
 0x73f4f415	clk_hw_get_rate
@@ -2334,7 +2318,6 @@
 0x7426549d	cfg80211_chandef_dfs_required
 0x7436d39e	_dev_notice
 0x744a4b34	page_pool_alloc_pages
-0x744a8956	tcpc_typec_handle_ctd
 0x744d5694	mtk_hcp_get_gce_token_mem_virt
 0x747527f1	get_wifi_process_status
 0x7475be8e	crypto_ecdh_key_len
@@ -2346,6 +2329,7 @@
 0x74b8e674	slhc_toss
 0x74bf31f1	sock_no_connect
 0x74c134b9	__sw_hweight32
+0x74c2943a	charger_dev_get_property
 0x74c765e6	conninfra_spi_clock_switch
 0x74d1d966	usb_serial_generic_get_icount
 0x74d40f4e	iov_iter_revert
@@ -2354,7 +2338,6 @@
 0x74fc6fbd	drm_format_info_block_width
 0x750b140e	set_wl_type_manual
 0x750e084e	unregister_ultra_afe_hw_free_notifier
-0x75111f08	charger_dev_get_property
 0x7522f3ba	irq_modify_status
 0x752e64c4	device_property_read_u32_array
 0x7537226a	cpu_latency_qos_request_active
@@ -2362,6 +2345,7 @@
 0x75570b17	snd_ctl_boolean_mono_info
 0x756ff09a	trusty_adjust_task_attr
 0x75865a3c	watchdog_init_timeout
+0x758948f6	tcpm_inquire_pd_source_apdo
 0x75aecb8b	__irq_domain_add
 0x75b20ea5	close_candev
 0x75bda77a	seq_hlist_next
@@ -2401,7 +2385,6 @@
 0x776d3a82	v4l2_event_queue
 0x777cb86f	vb2_queue_init
 0x7789af3e	icc_link_create
-0x778fa417	current_gyroscope_info
 0x77909e8e	trace_event_buffer_reserve
 0x7795233a	crypto_alloc_kpp
 0x7797518d	pinctrl_dev_get_drvdata
@@ -2465,6 +2448,7 @@
 0x79cf5987	init_timer_key
 0x79d1ae52	lbat_user_set_debounce
 0x79e4c52b	cpu_hwcaps
+0x79f1f693	charger_dev_enable_powerpath
 0x79fa057d	devm_devfreq_remove_device
 0x7a0460ff	ufshcd_get_pwr_dev_param
 0x7a08ba5b	devm_kstrdup
@@ -2476,10 +2460,10 @@
 0x7a43f1a4	mtk_ipi_send_compl_symbol
 0x7a479b0a	reg_loading_tracking_sp
 0x7a555f61	flt_ctrl_force_get
-0x7a5be546	current_nfc_info
 0x7a6b169c	free_percpu_irq
 0x7aa1756e	kvfree
 0x7aa2a539	proc_set_user
+0x7aaef4b7	battery_info_get_property
 0x7ac81130	setMaxBrightness
 0x7ac98637	mtk_gpueb_power_modle_cmd
 0x7acb86ed	ieee80211_radiotap_iterator_next
@@ -2521,6 +2505,7 @@
 0x7ceaf0d5	generic_handle_irq
 0x7cf81440	ged_dvfs_update_step_size
 0x7d0ba682	gen_pool_virt_to_phys
+0x7d1f326d	tcpci_lock_typec
 0x7d3657fd	cdev_init
 0x7d3eca64	drm_writeback_connector_init
 0x7d4d96b8	_dev_printk
@@ -2532,6 +2517,7 @@
 0x7d817ffb	mtk_vcodec_vcp
 0x7dbac15c	drm_dp_aux_register
 0x7dd8e502	ufshcd_system_resume
+0x7dde228a	current_fingerprint_info
 0x7de0ce62	get_ddr_sr_pd_times
 0x7e03de69	of_drm_find_panel
 0x7e1ebe2a	cfg80211_new_sta
@@ -2542,15 +2528,18 @@
 0x7e34ad6c	__tracepoint_android_rvh_check_preempt_wakeup
 0x7e34c48d	bpf_trace_run12
 0x7e704a24	kstrtoint_from_user
+0x7e7312a7	current_camera_info
 0x7e851706	mtk_imgsys_cmdq_get_plat_dev
 0x7e9ccb11	eara2fstb_get_tfps
 0x7ea982d2	devfreq_add_device
 0x7eb4d0e0	mtk_mmdvfs_enable_vcp
 0x7eb4f7d7	mtk_smi_dbg_register_notifier
+0x7eb74d1a	charger_dev_set_constant_voltage
 0x7ebf2090	ieee80211_data_to_8023_exthdr
 0x7ec58d17	gpio_dump_regs
 0x7ec8fead	mtk_get_gpu_idle_fp
 0x7ed8583b	__tracepoint_md_scg_off
+0x7edcdcf2	current_sarsensor_info
 0x7edf470b	drm_edid_duplicate
 0x7ef39823	ieee80211_hdrlen
 0x7ef67a65	drm_dev_register
@@ -2577,6 +2566,7 @@
 0x801f7a52	get_ipi_recv_private
 0x80335c11	usb_get_urb
 0x8034c53b	dmabuf_page_pool_create
+0x80353afe	current_msensor_info
 0x80432a75	__dev_change_net_namespace
 0x8043ee81	clk_dbg_driver_register
 0x8047453c	ccci_skb_dequeue
@@ -2618,6 +2608,7 @@
 0x81bac377	cfg80211_ch_switch_notify
 0x81bb3e77	set_user_nice
 0x81bb593b	dev_pm_genpd_set_performance_state
+0x81d61713	current_alsps_info
 0x81daeed1	ip_local_out
 0x81ec4014	mtk_suspend_sysfs_root_entry_create
 0x81ede167	iommu_alloc_resv_region
@@ -2629,6 +2620,7 @@
 0x82472299	uart_get_baud_rate
 0x825b0f1d	iommu_get_domain_for_dev
 0x825ce65b	mtk_ipi_register
+0x825d871d	hf_device_unregister
 0x825e775a	gpiochip_unlock_as_irq
 0x82667f4d	gpufreq_get_shader_present
 0x827f89e7	is_mtk_mm_heap_dmabuf
@@ -2651,6 +2643,7 @@
 0x833bc630	v4l2_device_unregister_subdev
 0x8344afc1	cfg80211_inform_bss_data
 0x8363715e	__tracepoint_android_vh_sched_pelt_multiplier
+0x836e53d8	charger_dev_set_vbusovp
 0x836f0f34	pd_get_opp_freq_legacy
 0x837aa15b	mtk_loading_base_dvfs_step
 0x83920592	slbc_invalidate
@@ -2688,10 +2681,10 @@
 0x850ba952	of_mtk_icc_get
 0x850f2056	cmdq_pkt_reuse_value
 0x850fc24b	set_grp_dvfs_ctrl
-0x85124d17	charger_dev_safety_check
 0x8518a4a6	_raw_spin_trylock_bh
 0x85292f1d	cmdq_get_vcp_buf
 0x8549348b	pick_migrate_task
+0x854c6e60	charger_dev_set_vbatovp_alarm
 0x8553dcc8	mtk_uart_set_apdma_rx_state
 0x85540ebc	nvmem_cell_put
 0x855f0d1c	mtk_panel_remove
@@ -2708,16 +2701,17 @@
 0x8612f6da	register_vp_audio_notifier
 0x862258db	timecounter_init
 0x86347371	cmdq_pkt_copy
+0x8648989e	tcpm_dpm_pd_hard_reset
 0x864bb0c7	cfg80211_sched_scan_results
 0x864e6898	drm_crtc_vblank_put
 0x865ed66a	adapter_dev_is_cc
-0x867ca512	tcpc_dev_get_by_name
 0x8681cb8c	mtk_regmap_update_bits
 0x8685180b	mtk_uart_apdma_end_record
 0x868c4e79	drm_read
 0x86903274	mtk_rpmsg_destroy_rproc_subdev
 0x86ab091d	work_busy
 0x86ce8797	cmdq_util_get_first_err_mod
+0x86cea8a5	tcpm_typec_change_role_postpone
 0x86d43be9	sched_clock_register
 0x86f62e66	sched_updown_migration_enable_get
 0x86fa9be7	lpm_trace_event_init
@@ -2760,7 +2754,6 @@
 0x8896b0fb	net_ns_type_operations
 0x889b1370	_raw_read_trylock
 0x88cbdd57	xgf_atomic_read
-0x88d2562a	tcpci_is_plugged_in
 0x88db89e4	connsys_log_init
 0x88db9f48	__check_object_size
 0x88f2da8e	drm_mode_probed_add
@@ -2788,6 +2781,7 @@
 0x89db1c0d	drm_add_edid_modes
 0x89dd469e	conninfra_spi_write
 0x89dde4cc	mtk_get_dvfs_loading_mode_fp
+0x89ec14d8	current_nfc_info
 0x89ef9455	__tracepoint_android_rvh_can_migrate_task
 0x89f23712	cfg80211_rx_control_port
 0x89f8ef66	ufshcd_link_recovery
@@ -2797,6 +2791,7 @@
 0x8a22c515	snd_soc_jack_report
 0x8a38d2d9	dput
 0x8a4df5ef	sock_gettstamp
+0x8a55204a	hf_device_register_manager_create
 0x8a5dbd76	turn_off_vvip_balance_overutilized
 0x8a607195	conap_scp_send_message
 0x8a855afb	usbnet_link_change
@@ -2807,8 +2802,8 @@
 0x8b069ea6	snd_pcm_lib_preallocate_free_for_all
 0x8b07d14c	mtk_vcodec_dump_ctx_list
 0x8b149c36	clk_is_match
-0x8b1ce2b5	charger_dev_get_ibat
 0x8b2ba825	mtk_uart_get_apdma_rpt
+0x8b2c34dd	charger_dev_reset_ta
 0x8b325a54	smi_monitor_start
 0x8b37c47c	regulator_disable
 0x8b5c437d	mtk_vcodec_get_log
@@ -2817,6 +2812,7 @@
 0x8b6af8db	hci_get_route
 0x8b76fae3	ccci_util_cmpt_mem_dump
 0x8b90629a	hci_unregister_cb
+0x8b98893d	tcpci_is_plugged_in
 0x8bc827fe	pwmchip_remove
 0x8bd20a76	cmdq_get_event
 0x8bd4129a	devm_regulator_get_optional
@@ -2827,13 +2823,14 @@
 0x8be566ca	v4l2_async_nf_register
 0x8c00a168	ftrace_user_opp_v3_vcore
 0x8c0215f2	pm_system_wakeup
+0x8c02e205	tcpm_inquire_typec_remote_rp_curr
 0x8c03d20c	destroy_workqueue
 0x8c068ca1	UARTHUB_get_uart_cmm_rx_count
 0x8c07c1d7	dma_resv_reserve_fences
 0x8c1b8852	debugfs_create_u32
+0x8c1d3996	hf_manager_create
 0x8c2573d1	rhltable_init
 0x8c26d495	prepare_to_wait_event
-0x8c3b2135	charger_dev_set_boost_current_limit
 0x8c4309f6	drm_calc_timestamping_constants
 0x8c44482c	tty_kref_put
 0x8c56cba6	lowpan_header_decompress
@@ -2849,6 +2846,7 @@
 0x8cafe6f1	cmdq_pkt_get_va_by_offset
 0x8cb52646	rawbulk_alloc
 0x8cda41e8	ged_get_last_commit_stack_idx_fp
+0x8ce63881	charger_dev_send_ta20_current_pattern
 0x8cf38456	set_reboot_temperature
 0x8d1e88ae	conap_scp_is_ready
 0x8d22bb58	iommu_group_alloc
@@ -2860,7 +2858,6 @@
 0x8d701329	drm_dp_clock_recovery_ok
 0x8d73278e	hex_asc_upper
 0x8d761971	get_ddr_act_times
-0x8d86bc64	current_fingerprint_info
 0x8d937c9f	mt_dcm_array_register
 0x8d9d662a	mtk_btag_ufs_exit
 0x8dae9ed0	gpiod_set_raw_value
@@ -2887,14 +2884,12 @@
 0x8e7b4939	kthread_cancel_work_sync
 0x8e8548fc	vlan_vid_add
 0x8e92f7c4	static_key_slow_inc
-0x8e97e0bb	charger_dev_enable_safety_timer
 0x8ea8a514	ged_dvfs_write_sysram_last_commit_stack_idx
 0x8ea982ec	media_device_cleanup
 0x8eafae2a	spmi_dump_pmif_record_reg
 0x8ee7b6fa	ufshcd_hba_enable
 0x8ee8b549	inet_frag_queue_insert
 0x8ee95e88	cmdqCoreRegisterCB
-0x8f0c3f14	charger_dev_get_temperature
 0x8f1c7286	mtk_emimpu_md_handling_register
 0x8f1f9ba9	mmc_of_parse
 0x8f2b0c63	tty_unthrottle
@@ -2912,6 +2907,7 @@
 0x8fbf7e81	usb_composite_unregister
 0x8fca6f04	audio_task_register_callback
 0x8fd318d4	clk_divider_ops
+0x8fd74909	charger_dev_get_ibus
 0x8fdef678	adsp_register_notify
 0x8fea24bd	bt_sock_unregister
 0x8fed5478	get_grp_high_freq
@@ -2921,11 +2917,9 @@
 0x9028251a	skb_tstamp_tx
 0x9029cef2	devm_fwnode_pwm_get
 0x90396079	cmdq_util_hw_trace_dump
-0x905323f6	tcpm_inquire_pd_source_apdo
 0x905695ab	sg_copy_from_buffer
 0x90619014	cfg80211_ref_bss
 0x90694ef5	drm_gem_mmap
-0x906b526f	tcpm_resume
 0x906d9c8d	__v4l2_device_register_subdev_nodes
 0x907021cb	mtk_clk_notify
 0x90793c60	bt_sock_unlink
@@ -2946,9 +2940,9 @@
 0x91a488ac	__netdev_alloc_frag_align
 0x91bef507	mtk_uart_apdma_polling_rx_finish
 0x91ca7518	dev_set_threaded
-0x91d22ee7	charger_dev_set_vbusovp
 0x91d3c9d6	mmc_mtk_biolog_check
 0x91e33b04	chg_alg_notifier_call
+0x91e715c5	tcpm_inquire_pd_data_role
 0x91e767fe	skb_copy
 0x91eb5598	of_irq_get_byname
 0x91f44510	idr_alloc_cyclic
@@ -2964,12 +2958,10 @@
 0x926aa810	netif_tx_stop_all_queues
 0x926b344f	iio_channel_get
 0x926c00e4	smpu_clear_md_violation
-0x927eb2cf	unregister_tcp_dev_notifier
 0x92888700	skb_free_datagram
 0x928a9ca7	v4l2_event_unsubscribe
 0x928bd60b	gpueb_get_recv_PIN_ID_by_name_symbol
 0x92997ed8	_printk
-0x92bb7df7	charger_dev_reset_vbatovp_alarm
 0x92d2a53c	perf_event_read_local
 0x92d5838e	request_threaded_irq
 0x92dfafaa	ufs_mtk_cali_hold
@@ -2979,14 +2971,13 @@
 0x93039d7a	mtk_get_dsu_freq
 0x9309b7e9	of_iomap
 0x930b1259	ufs_mtk_eh_err_cnt
-0x930b7a46	tcpm_inquire_pd_vconn_role
 0x9318bcc8	devm_blk_crypto_profile_init
 0x931aa919	power_supply_unregister
 0x933dc050	__nla_validate
-0x9382de14	flashlight_dev_unregister
 0x9386a381	mtk_hcp_get_gce_buffer
 0x939fc2ef	hrtimer_start_range_ns
 0x93aa13a6	bt_sock_wait_state
+0x93b8e6be	tcpc_typec_handle_wd
 0x93bd86ce	cfg80211_report_obss_beacon_khz
 0x93bda7e5	mtk_destroy_client_msgdevice
 0x93c58c3a	usbnet_manage_power
@@ -2997,6 +2988,7 @@
 0x93e66ee6	unregister_lpm_sys_res_ops
 0x93eb7ab0	connsys_log_get_buf_size
 0x93fad802	usbnet_tx_timeout
+0x94067c9e	tcpm_check_suspend_pending
 0x941a2387	cmdq_util_prebuilt_init
 0x941f2aaa	eventfd_ctx_put
 0x9423d265	cmdq_pkt_flush
@@ -3007,7 +2999,6 @@
 0x94569246	drm_object_property_set_value
 0x94646ac0	snd_soc_register_component
 0x94715028	cpu_subsys
-0x9483b711	charger_dev_enable_hz
 0x94961283	vunmap
 0x94a1d0ed	lock_sock_nested
 0x94a22efd	get_turn_point_freq
@@ -3037,6 +3028,7 @@
 0x95fc090a	qos_rec_get_hist_data_bw
 0x96065e86	cmdq_core_should_print_msg
 0x96106b85	pppox_compat_ioctl
+0x96135349	hf_manager_destroy
 0x961b247c	__tracepoint_android_vh_is_fpsimd_save
 0x96388807	snd_soc_dapm_new_controls
 0x963aa2a9	blocking_notifier_chain_unregister
@@ -3060,10 +3052,11 @@
 0x973f30bd	blk_queue_logical_block_size
 0x97640e4f	__tracepoint_android_rvh_flush_task
 0x97680f44	aed_common_exception_api
+0x976950e1	tcpm_typec_role_swap
 0x978d697a	of_devfreq_cooling_register_power
+0x9796a5f2	tcpm_shutdown
 0x979fc78c	mtk_smi_dbg_dump_for_disp
 0x97bc586d	netif_device_attach
-0x97c6b261	charger_dev_get_min_input_current
 0x97d0a2dd	free_candev
 0x97e63aad	pinctrl_enable
 0x97ea9780	mminfra_debug_dump
@@ -3082,12 +3075,14 @@
 0x98b5f0dc	cpufreq_enable_fast_switch
 0x98c039dc	dma_fence_wait_timeout
 0x98cf60b3	strlen
+0x98da2eca	charger_dev_send_ta_current_pattern
 0x98f042db	drm_connector_update_edid_property
 0x9905a4c2	cmdq_util_test_set_ostd
 0x99078b39	trace_print_flags_seq
 0x992067ae	dev_driver_string
 0x9929df97	typec_switch_register
 0x992b6dbe	v4l2_fh_del
+0x992d1cfe	tcpm_inquire_typec_role_def
 0x993d17a3	device_property_read_u8_array
 0x9948e657	iommu_iova_to_phys
 0x996f6d67	crypto_destroy_tfm
@@ -3098,7 +3093,6 @@
 0x99cb6a2e	of_genpd_add_device
 0x99cfcf4a	usb_register_driver
 0x99e24762	kobject_create_and_add
-0x99ef6f3d	tcpc_typec_handle_cc_hi
 0x99f018c4	nvmem_cell_read
 0x99f32037	cmdq_pkt_flush_async
 0x99fc2812	drm_dev_unregister
@@ -3172,12 +3166,14 @@
 0x9d856127	trusted_mem_api_query_pa
 0x9d9799e5	__sock_queue_rcv_skb
 0x9d9f1180	drm_crtc_vblank_get
+0x9d9f261f	charger_dev_enable_discharge
 0x9da9550a	of_get_property
 0x9dcd6cfe	v4l2_fwnode_endpoint_parse
 0x9dcf7ea0	platform_find_device_by_driver
 0x9dd69341	cqhci_init
 0x9ddbf6c3	l2tp_xmit_skb
 0x9ddc3b88	vcorefs_get_src_req
+0x9ddf5c32	tcpc_typec_is_act_as_sink_role
 0x9dff6aea	rdev_get_dev
 0x9e24b052	lowpan_register_netdevice
 0x9e59fbda	connectivity_export_conap_scp_trigger_dfd_cmd
@@ -3189,6 +3185,7 @@
 0x9ec5e35d	devm_kmemdup
 0x9ec6ca96	ktime_get_real_ts64
 0x9ed12e20	kmalloc_large
+0x9ed9d5e7	charger_dev_get_charging_current
 0x9f083892	get_res_sig_stats
 0x9f0fef1e	chg_alg_state_to_str
 0x9f3fe1fe	__netlink_kernel_create
@@ -3208,13 +3205,13 @@
 0x9fd87e04	lowpan_nhc_add
 0x9fdecc31	unregister_netdevice_many
 0x9fe899b7	get_cpu_idle_time
+0x9feab4c9	register_tcp_dev_notifier
 0x9fef0d32	cpufreq_disable_fast_switch
 0xa0031b40	cfg80211_get_drvinfo
 0xa005b241	param_set_ulong
 0xa01713cf	skb_scrub_packet
 0xa01d3df6	font_vga_8x16
 0xa02f0ec2	napi_gro_receive
-0xa037e7d6	charger_dev_enable_discharge
 0xa0493d72	netif_tx_lock
 0xa04c730f	dev_pm_opp_find_freq_ceil
 0xa04f945a	cpus_read_lock
@@ -3225,6 +3222,7 @@
 0xa07d1b3c	tasklet_setup
 0xa080c5e5	smp_call_function_single_async
 0xa084749a	__bitmap_or
+0xa0bd6c6c	charger_dev_enable_safety_timer
 0xa0bf1958	cmdq_pkt_mem_move
 0xa0c2214c	bt_accept_dequeue
 0xa0c334cd	drm_panel_get_modes
@@ -3233,6 +3231,7 @@
 0xa0e7e691	ccci_get_per_md_data
 0xa0eae826	smp_call_function
 0xa0ec4913	regulator_set_voltage_time_sel
+0xa0fa7b76	charger_dev_is_vbuslowerr
 0xa0fbac79	wake_up_bit
 0xa1051fd8	dev_fetch_sw_netstats
 0xa10677fe	tty_port_register_device
@@ -3246,6 +3245,7 @@
 0xa1424581	__drm_atomic_helper_plane_destroy_state
 0xa158b102	mtk_gpu_fence_debug_dump_fp
 0xa15e744e	__tracepoint_android_vh_rwsem_write_finished
+0xa1674146	tcpm_inquire_typec_attach_state
 0xa1721c62	mtk_hcp_get_gce_mem_virt
 0xa18449ff	cmdq_register_device
 0xa18fff46	feature_table
@@ -3275,6 +3275,7 @@
 0xa26560aa	cpupri_find_fitness
 0xa2675780	device_create_with_groups
 0xa27d3133	pwm_apply_state
+0xa286666a	charger_dev_enable_termination
 0xa29533ba	drm_framebuffer_remove
 0xa2a0e3d7	sock_diag_unregister
 0xa2ad960a	conn_pwr_resume
@@ -3312,7 +3313,9 @@
 0xa3f12f69	__crypto_xor
 0xa3fde4a6	alloc_inst_rawbulk
 0xa4234d01	slbc_request
+0xa42cf45b	tcpm_reset_pd_charging_policy
 0xa440e0e3	mtk_dvfsrc_query_opp_info
+0xa453e6eb	charger_dev_get_zcv
 0xa454238c	ged_dvfs_get_last_commit_stack_idx
 0xa45c7b90	stack_trace_print
 0xa46394ea	usbnet_read_cmd
@@ -3321,7 +3324,6 @@
 0xa481015e	mtk_leds_unregister_notifier_symbol
 0xa48af803	get_vcore_ip_num
 0xa496f56c	cmdq_dump_pkt
-0xa4ae81ba	current_alsps_info
 0xa4b28c67	ccci_free_skb
 0xa4ba5148	v4l2_src_change_event_subscribe
 0xa4f4d318	check_rat_at_rt_setting
@@ -3342,7 +3344,7 @@
 0xa5976e4f	dev_base_lock
 0xa5b6f19f	regmap_field_read
 0xa5cd22db	mtk_suspend_sysfs_entry_node_add
-0xa5fb6e33	tcpci_notify_wd0_state
+0xa5e8c0ce	current_line_motor_info
 0xa60386f1	get_modem_is_enabled
 0xa61148a7	udp_set_csum
 0xa61a42f0	adjust_managed_page_count
@@ -3359,7 +3361,7 @@
 0xa6e6acfb	kthread_destroy_worker
 0xa6f6226c	kasan_flag_enabled
 0xa6facbf8	mtk_pinconf_bias_set_combo
-0xa70b4d8e	charger_dev_dump_registers
+0xa6fce7fb	get_charger_by_name
 0xa72c8e69	sock_diag_register
 0xa734d448	of_alias_get_id
 0xa73a0d9d	watchdog_set_restart_priority
@@ -3370,6 +3372,7 @@
 0xa77e7900	set_task_pd
 0xa7874699	dapm_kcontrol_get_value
 0xa793cd59	of_phandle_iterator_next
+0xa79c79c9	tcpc_typec_handle_fod
 0xa7c7febc	cpufreq_get_policy
 0xa7cd8806	mtk_imgsys_power_ctrl
 0xa7d5f92e	ida_destroy
@@ -3417,7 +3420,6 @@
 0xa9ae58c9	mtk_ltr_gpu_pmu_start_fp
 0xa9b58fb1	mminfra_power_cb
 0xa9c8888b	mt6878_set_lch_dc_compensation
-0xa9ce16db	tcpm_inquire_remote_cc
 0xa9d1a146	uart_get_divisor
 0xa9d3c029	mmc_cqe_request_done
 0xa9d5e9c6	dev_get_by_name
@@ -3464,7 +3466,6 @@
 0xabbbe571	get_net_ns_by_pid
 0xabc41d67	v4l2_fh_exit
 0xabe820ab	__pm_runtime_resume
-0xac000f88	tcpm_typec_change_role_postpone
 0xac073acf	pd_get_opp_capacity
 0xac0cb2cb	wiphy_apply_custom_regulatory
 0xac1534be	ccci_skb_enqueue
@@ -3490,7 +3491,6 @@
 0xad31bd5d	lowpan_header_compress
 0xad3f829d	vmap
 0xad524976	of_platform_device_create
-0xad5299bc	charger_device_unregister
 0xad5413dd	mtk_get_timer_base_dvfs_margin_fp
 0xad6ef96e	__folio_lock
 0xad728207	__dev_kfree_skb_irq
@@ -3499,6 +3499,7 @@
 0xada31e57	gen_pool_dma_alloc_align
 0xada47b9f	mmc_send_tuning
 0xadb03e1c	usb_put_function_instance
+0xadb85a13	charger_dev_get_input_current
 0xadbe369b	fstb_delete_render_info_fp
 0xadd0283e	__tracepoint_android_rvh_prepare_prio_fork
 0xadd140bf	mtk_sync_share_fence_create
@@ -3540,18 +3541,18 @@
 0xafaa6031	_find_next_and_bit
 0xafb63a66	mcupm_reserve_mem_get_size
 0xafc0a60c	__devm_alloc_percpu
+0xafc7dadb	charger_dev_get_vbus
 0xafc9bb32	bootprof_log_boot
 0xafe782ce	v4l2_fh_open
 0xafe8798f	class_dev_iter_next
 0xaff8b2ff	met_register
-0xaffc0517	tcpc_get_dev_data
 0xb004e4df	mtk_get_gpu_idle
 0xb022891d	register_set_p2p_mode_handler
 0xb025f316	scsi_execute_cmd
 0xb0513a4c	swpm_call_event_notifier
 0xb0617db4	wait_for_completion_state
+0xb061c40a	charger_dev_set_eoc_current
 0xb067dc9a	mtk_mmqos_remove
-0xb06ed4ec	charger_dev_set_ibatocp
 0xb077e70a	clk_unprepare
 0xb07d37cc	scp_send_message
 0xb08186c7	mtk_memif_set_enable
@@ -3575,6 +3576,7 @@
 0xb1441f23	dma_buf_map_attachment
 0xb14af7ad	conn_dbg_add_log
 0xb1515988	powerhal_adpf_get_hint_session_preferred_rate_fp
+0xb15d9458	tcpm_typec_change_role
 0xb15e0dca	cmdq_util_error_save_lst
 0xb1618a62	vcorefs_get_src_req_name
 0xb16a3d6d	netdev_err
@@ -3610,6 +3612,7 @@
 0xb2f375f1	conninfra_is_bus_hang
 0xb3055449	__cpu_present_mask
 0xb308c97d	wait_woken
+0xb309825b	hf_device_unregister_manager_destroy
 0xb30fc515	usbnet_get_endpoints
 0xb3149c9d	connsys_coredump_setup_dump_region
 0xb320cc0e	sg_init_one
@@ -3617,7 +3620,6 @@
 0xb33fa2f6	powerhal_adpf_close_fp
 0xb35d48bc	mtk_vcodec_enc_irq_setup
 0xb35eaea1	uclamp_eff_value
-0xb3618807	charger_dev_set_mivr
 0xb36db42d	thermal_apu_mbox_base
 0xb38ef37d	snd_soc_dapm_add_routes
 0xb3b01563	migrate_swap
@@ -3656,6 +3658,7 @@
 0xb513532d	proc_create_net_single
 0xb530b6bc	is_afe_need_triggered
 0xb54a31a9	__hci_cmd_sync
+0xb56b6dfb	charger_dev_set_boot_volt_times
 0xb5769105	free_netdev
 0xb5783cb2	dev_get_by_index
 0xb583abe2	udp_tunnel_xmit_skb
@@ -3673,15 +3676,16 @@
 0xb5f8323e	iio_read_channel_attribute
 0xb6006b29	xgf_get_process_id
 0xb61316b4	netif_inherit_tso_max
+0xb6254cf3	charger_dev_set_boost_current_limit
 0xb6261484	register_die_notifier
 0xb6366201	mtk_ipi_send_symbol
 0xb643b519	v4l2_subdev_call_wrappers
-0xb648e9ad	tcpm_dpm_pd_hard_reset
 0xb65a03d5	__tracepoint_android_vh_alter_rwsem_list_add
 0xb678366f	int_sqrt
 0xb67fec0e	uuid_parse
+0xb68f996c	tcpc_device_register
+0xb69503c4	charger_dev_get_adc_accuracy
 0xb6a88e0a	vm_event_states
-0xb6b3943a	tcpm_inquire_pd_power_role
 0xb6b95897	drm_panel_add
 0xb6bce8f8	__tracepoint_android_rvh_schedule
 0xb6bd1071	typec_register_partner
@@ -3691,12 +3695,12 @@
 0xb6e6d99d	clk_disable
 0xb6ea4eb1	sspm_reserve_mem_get_phys
 0xb6ee5d1a	fpsgo_rl_delete_render_info_fp
+0xb6f7d05d	charger_dev_get_mivr_state
 0xb70ba15d	trigger_vcp_halt
 0xb71ed69f	__hw_addr_unsync
 0xb72bd068	conn_pwr_register_event_cb
 0xb737b185	gen_pool_best_fit
 0xb7443d80	mtk_afe_pcm_copy_user
-0xb75a5e94	charger_dev_set_eoc_current
 0xb7623849	spmi_controller_alloc
 0xb76794fa	ftrace_user_opp_v3_vmm
 0xb770126c	pm_genpd_add_device
@@ -3706,11 +3710,12 @@
 0xb78e7543	kmalloc_trace
 0xb7926eb8	gpufreq_set_limit
 0xb79ca243	mtk_clk_gate_ops_setclr_inv
+0xb79e9214	register_charger_device_notifier
 0xb7a5f78d	regulator_list_voltage_linear_range
 0xb7ae49fc	connsys_coredump_start
+0xb7ae6675	charger_dev_get_min_charging_current
 0xb7c0f443	sort
 0xb7cab24f	build_skb
-0xb7cded18	charger_dev_enable_6pin_battery_charging
 0xb7ceb930	register_lpm_sys_res_ops
 0xb7d4c0d8	l2tp_tunnel_get_session
 0xb7ed5895	snd_soc_component_read
@@ -3737,7 +3742,6 @@
 0xb95709c2	cfg80211_rx_unexpected_4addr_frame
 0xb9693023	get_lpm_logger_mbrain_dbg_ops
 0xb97220ff	bitmap_parse
-0xb9840a7f	charger_dev_set_charging_current
 0xb996c292	__mmap_lock_do_trace_released
 0xb9ab15e7	of_get_named_gpio_flags
 0xb9b9f56e	stop_one_cpu
@@ -3759,6 +3763,7 @@
 0xba497f13	loops_per_jiffy
 0xba637490	ccci_dump_write
 0xba6882a1	mtk_hcp_set_KernelFence
+0xba6a5cd8	current_gsensor_info
 0xba6b2819	cmdq_mbox_buf_free
 0xba6f3ff6	inet_frags_init
 0xba7460e7	tty_port_close
@@ -3811,6 +3816,7 @@
 0xbcc61de4	cma_release
 0xbce59abf	platform_get_resource_byname
 0xbce78e3c	cmdq_pkt_jump
+0xbcee1574	charger_dev_run_aicl
 0xbcefcefe	mtk_rpmsg_create_rproc_subdev
 0xbcf1f0e6	zs_create_pool
 0xbd0884bb	mtk_cpuidle_sysfs_sub_entry_node_add
@@ -3867,6 +3873,7 @@
 0xbfb0935d	crypto_alloc_aead
 0xbfb5f86f	trace_event_printf
 0xbfc01b5d	devfreq_resume_device
+0xbfc54967	current_lcm_info
 0xbfe0ef07	mtk_ipi_mux_ops
 0xbfe1810d	mtk_get_gpu_limit_index_fp
 0xbfe5cfb0	trusty_get_api_version
@@ -3889,7 +3896,6 @@
 0xc0ca7489	mtk_chg_enable_vbus_ovp
 0xc0cbbbd0	get_lpm_sys_res_ops
 0xc0d1cb03	powerhal_adpf_resume_fp
-0xc0e52038	get_charger_by_name
 0xc0e61bae	mtk_clk_mux_register_callback
 0xc0fef9b8	hci_register_cb
 0xc1086e0c	sysrq_toggle_support
@@ -3936,12 +3942,10 @@
 0xc341ae6d	zs_map_object
 0xc34c3fbf	v4l2_m2m_buf_remove
 0xc34e95f5	of_count_phandle_with_args
-0xc371df70	tcpci_notify_wd_status
 0xc39b2362	is_valid_reg
 0xc3a27f2b	snd_jack_set_key
 0xc3af13bf	bdev_start_io_acct
 0xc3bc72ad	trace_print_array_seq
-0xc3fa324f	tcpm_inquire_typec_remote_rp_curr
 0xc4019a1f	get_em_wl
 0xc407682f	thermal_pressure
 0xc40bee71	connectivity_register_state_notifier
@@ -3959,6 +3963,7 @@
 0xc4b28304	bpf_trace_run2
 0xc4b4fc27	cfg80211_chandef_valid
 0xc4de8053	__tracepoint_SPM__resource_req_0
+0xc4e2a4d0	charger_dev_is_charging_done
 0xc4e69a85	rndis_test_reset_msg_cnt
 0xc4f0da12	ktime_get_with_offset
 0xc4f47221	mod_delayed_work_on
@@ -3979,9 +3984,11 @@
 0xc5933b1d	swpm_arm_pmu_enable_all
 0xc593883d	ged_dvfs_query_power_state_time
 0xc59e02fe	release_pages
+0xc5a18a21	charger_dev_enable_otg
 0xc5b0f293	get_ddr_freq_num
 0xc5b881fe	ieee802154_hdr_pull
 0xc5c8d4f4	snd_pcm_lib_free_pages
+0xc5e21e03	tcpc_device_unregister
 0xc5e5573a	frame_vector_to_pages
 0xc5f2329a	drm_atomic_helper_check_plane_state
 0xc5f73848	skb_pull_data
@@ -3994,6 +4001,7 @@
 0xc617f82c	unregister_oom_notifier
 0xc61a51b2	v4l2_ctrl_g_ctrl
 0xc633719c	bdev_end_io_acct
+0xc63f9788	tcpm_dpm_pd_get_source_cap_ext
 0xc6556f6c	dst_cache_destroy
 0xc66701da	rproc_shutdown
 0xc67465ed	sched_setscheduler
@@ -4015,6 +4023,7 @@
 0xc6fca5ad	v4l2_m2m_release
 0xc7086c08	unregister_netdevice_queue
 0xc7208c3a	serial8250_resume_port
+0xc7278022	sysfs_notify
 0xc730da4f	mcupm_reserve_mem_get_virt_symbol
 0xc74894f9	v4l2_async_nf_unregister
 0xc75c6ea7	bat_oc_set_ppb_mode
@@ -4042,6 +4051,7 @@
 0xc8c2dcfc	mtk_sync_te_level_decision_fp
 0xc8c81052	cfg80211_probe_status
 0xc8dcc62a	krealloc
+0xc8edec27	tcpm_inquire_usb_comm
 0xc904191f	ged_dvfs_gpu_freq_dual_commit_fp
 0xc905402b	log_write_mmio
 0xc911b66b	mtk_drm_disp_sec_cb_init
@@ -4083,7 +4093,6 @@
 0xcb1598f4	mtk_custom_get_gpu_freq_level_count
 0xcb31d2fd	devfreq_monitor_resume
 0xcb63ad00	set_curr_uclamp_hint
-0xcb6c5441	charger_dev_get_ibus
 0xcb74d57a	xgf_ema2_systrace
 0xcb7ab12a	__irq_resolve_mapping
 0xcb82ff30	unregister_vow_ipi_send_notifier
@@ -4098,7 +4107,6 @@
 0xcbe70f4f	get_pelt_emi_bw
 0xcbf61848	usbnet_set_msglevel
 0xcbfd0482	mtk_custom_get_gpu_freq_level_count_fp
-0xcc05bd6f	charger_dev_enable_powerpath
 0xcc1a7c48	cfg80211_is_element_inherited
 0xcc1b882a	idr_get_next_ul
 0xcc248d26	serial8250_suspend_port
@@ -4134,6 +4142,7 @@
 0xcdcf946d	put_user_ifreq
 0xcdd61926	exec_ccci_kern_func
 0xcdd6b02a	seq_release
+0xcde7e1ba	charger_dev_is_powerpath_enabled
 0xce01cfc4	proc_remove
 0xce0b2258	cfg80211_roamed
 0xce2252ae	dev_pm_qos_remove_notifier
@@ -4147,7 +4156,6 @@
 0xce7bb883	get_user_pages_fast_only
 0xce83d3b0	irq_set_chip_and_handler_name
 0xce880ed3	regulator_get_voltage
-0xce90f76e	charger_dev_plug_in
 0xcea67f4d	uart_update_timeout
 0xceae3dfa	of_property_read_u32_index
 0xceb4af5b	cpumask_any_and_distribute
@@ -4227,7 +4235,6 @@
 0xd17d3ad9	devm_of_icc_get
 0xd197876c	mtk_register_gpu_power_change
 0xd198fa9a	mtk_get_gpu_cur_oppidx_fp
-0xd19a5d0c	tcpm_inquire_typec_role_def
 0xd19a6c6f	css_next_child
 0xd1a0a186	usb_serial_handle_dcd_change
 0xd1a3e8e0	fsg_common_create_luns
@@ -4236,8 +4243,8 @@
 0xd1ed4e2c	display_exit_tui
 0xd1f609eb	vb2_buffer_done
 0xd1f9799d	unpin_user_pages_dirty_lock
-0xd1fbc6a1	tcpm_dpm_pd_get_source_cap_ext
 0xd1fcd174	perf_trace_run_bpf_submit
+0xd208803d	charger_device_unregister
 0xd217e9e6	trace_set_clr_event
 0xd22e85cb	dma_sync_single_for_device
 0xd241f9aa	component_unbind_all
@@ -4291,6 +4298,7 @@
 0xd4034828	system_freezable_wq
 0xd4221026	mmc_request_done
 0xd422dc84	pd_get_opp_capacity_legacy
+0xd44804df	tcpm_inquire_remote_cc
 0xd453bf45	cmdq_pkt_readback
 0xd45cc6ca	bin2hex
 0xd4616fc7	usb_ep_queue
@@ -4298,7 +4306,7 @@
 0xd46d2158	mtk_mmdvfs_debug_release_step0
 0xd47940be	afe_pcm_ipi_to_dsp
 0xd486fb9c	downgrade_write
-0xd4ab0732	tcpm_get_remote_power_cap
+0xd4874b90	board_id
 0xd4b590ed	device_property_present
 0xd4bc2c54	v4l2_m2m_job_finish
 0xd4bdcc28	connfem_epaelna_get_flags
@@ -4351,7 +4359,6 @@
 0xd6dc92c1	__cfg80211_radar_event
 0xd6e12eba	mtk_icc_node_destroy
 0xd6ee688f	vmalloc
-0xd6efa8d8	charger_dev_get_min_charging_current
 0xd6f57578	ccci_skb_queue_init
 0xd702d989	mtk_emicen_get_ch_cnt
 0xd7104bff	swpm_arm_dsu_pmu_get_status
@@ -4379,6 +4386,7 @@
 0xd83bf87a	cm_mgr_get_dram_opp_base
 0xd84b8cdb	pm_runtime_set_autosuspend_delay
 0xd8654f13	input_unregister_device
+0xd873c4d0	charger_dev_safety_check
 0xd87e3670	debugfs_create_u16
 0xd887beae	gpufreq_get_dynamic_power
 0xd894c586	__traceiter_md_tx_pwr_limit
@@ -4389,6 +4397,7 @@
 0xd8b7f4d8	vb2_dma_contig_memops
 0xd8bf8388	ufshcd_fixup_dev_quirks
 0xd8c0988a	conninfra_adie_top_ck_en_on
+0xd8c5c9f9	tcpm_suspend
 0xd8d401cc	drm_open
 0xd8d5d4a4	mtk_get_gpu_pmu_deinit_fp
 0xd8df8a29	snd_soc_dapm_get_pin_switch
@@ -4410,6 +4419,8 @@
 0xd9a5ea54	__init_waitqueue_head
 0xd9a6d5ea	KREE_UnregisterSharedmem
 0xd9ade0b0	check_preempt_curr
+0xd9c25817	tcpm_inquire_pd_power_role
+0xd9c2fee4	charger_dev_reset_vbusovp_alarm
 0xd9d37455	mtk_get_gpu_ceiling_index
 0xd9d5c58f	vlan_filter_push_vids
 0xd9dfbb98	spi_bus_type
@@ -4454,7 +4465,6 @@
 0xdbc1789a	mtk_custom_upbound_gpu_freq
 0xdbdb6c8e	mtk_hwv_mux_ops
 0xdbde3794	mtk_get_mmap_ul_buffer
-0xdbe70103	charger_dev_set_vbusovp_alarm
 0xdbeeece6	tracepoint_probe_unregister
 0xdc059dfd	mtk_clear_md_violation
 0xdc08b3d3	mtk_btag_mictx_get_data
@@ -4470,7 +4480,6 @@
 0xdca51c76	mmdvfs_rc_enable_set_fp
 0xdcb0a2c0	phylink_stop
 0xdcb764ad	memset
-0xdcc34871	current_gsensor_info
 0xdccf1550	get_md_sib_mem_info
 0xdcd6eee2	connsys_log_irq_handler
 0xdcdc0040	slhc_compress
@@ -4484,7 +4493,6 @@
 0xdd54bd2d	usb_create_shared_hcd
 0xdd64e639	strscpy
 0xdd74b260	mtk_vcodec_set_state_from
-0xdd78c7ff	charger_dev_plug_out
 0xdd8166a1	dma_fence_free
 0xdd8c58c9	set_clkdbg_ops
 0xdd953146	__tracepoint_android_rvh_sched_cpu_starting
@@ -4497,7 +4505,6 @@
 0xdde3c6c0	inst_spec_events
 0xdde97e81	qos_sram_read
 0xddf6ad7a	completion_done
-0xddfa1aa4	charger_dev_notify
 0xddfc1c21	usb_free_all_descriptors
 0xde115802	connsys_coredump_clean
 0xde16c4ef	devm_devfreq_register_notifier
@@ -4564,6 +4571,7 @@
 0xe0b2305f	scp_release_semaphore_3way
 0xe0c0f71c	cm_mgr_get_perf_enable
 0xe0c30afd	of_platform_populate
+0xe0d2c3ea	charger_dev_is_safety_timer_enabled
 0xe0d43b8e	usb_put_intf
 0xe0d4c188	usb_gadget_unmap_request
 0xe0dde8fc	_gate_ic_Power_off
@@ -4602,6 +4610,7 @@
 0xe228fd87	vcorefs_get_opp_info_name
 0xe22fac99	device_for_each_child
 0xe23f3795	netdev_update_features
+0xe2417e11	tcpm_inquire_pd_partner_inform
 0xe25f59ab	device_create_file
 0xe274a30f	skb_copy_datagram_iter
 0xe27d9b2f	pm_genpd_add_subdomain
@@ -4633,7 +4642,6 @@
 0xe416664f	netdev_notice
 0xe416cf51	irq_of_parse_and_map
 0xe4186d65	gpufreq_register_gpuppm_fp
-0xe43ba7fd	hf_device_unregister
 0xe43bcab1	gpueb_get_send_PIN_ID_by_name_symbol
 0xe45e4550	mbox_send_message
 0xe46021ca	_raw_spin_unlock_bh
@@ -4652,7 +4660,6 @@
 0xe4fcaad8	regmap_read
 0xe5107ad0	__tracepoint_android_rvh_cpu_cgroup_attach
 0xe51c410d	led_trigger_event
-0xe51cb4d2	tcpc_device_register
 0xe523ad75	synchronize_irq
 0xe537bee5	devm_platform_get_and_ioremap_resource
 0xe5562d03	update_pre_cal_status
@@ -4663,11 +4670,9 @@
 0xe570c27d	device_get_next_child_node
 0xe5714f41	usb_alloc_urb
 0xe5806ff6	gov_attr_set_get
-0xe5835753	charger_dev_set_vbatovp_alarm
 0xe5a66718	mipi_dsi_host_unregister
 0xe5ac5939	drm_atomic_helper_resume
 0xe5b45ca1	drm_atomic_helper_connector_destroy_state
-0xe5b8e2e3	tcpci_notify_vbus_short_cc_status
 0xe5cb6aaa	mtk_hcp_get_pqdip_mem_tdr_fd
 0xe5dbe114	fpsgo_notify_connect_fp
 0xe5e6e517	met_ondiemet_attr_init_sspm
@@ -4682,7 +4687,6 @@
 0xe67ef397	ieee802154_hdr_peek_addrs
 0xe687bb7c	mtk_get_gpu_cur_oppidx
 0xe68efe41	_raw_write_lock
-0xe69c2e57	current_msensor_info
 0xe6a25566	mtk_clear_smpu_log
 0xe6d2458e	do_trace_netlink_extack
 0xe6ee6646	cfg80211_check_station_change
@@ -4698,7 +4702,6 @@
 0xe7627b8d	v4l2_ctrl_handler_setup
 0xe769232e	sprint_symbol_no_offset
 0xe76b433c	ged_dvfs_set_gpu_core_mask_fp
-0xe76bd747	tcpci_unlock_typec
 0xe776fa9c	register_ultra_afe_hw_free_notifier
 0xe783e261	sysfs_emit
 0xe78c4046	mtk_hcp_partial_flush
@@ -4710,6 +4713,7 @@
 0xe7ab81f3	drm_is_current_master
 0xe7db6d8d	ufshcd_uic_hibern8_exit
 0xe7e36288	get_cpu_device
+0xe7eadff4	charger_dev_set_ibatocp
 0xe7edce8c	gpiod_get_raw_value
 0xe7fe0752	sysfs_merge_group
 0xe80265ab	set_am_ctrl
@@ -4717,6 +4721,7 @@
 0xe808d22f	mtk_clk_mminfra_hwv_power_ctrl_optional
 0xe80e5bdd	irq_create_of_mapping
 0xe816048f	tty_termios_copy_hw
+0xe81a6321	tcpm_set_apdo_charging_policy
 0xe827d155	alloc_io_pgtable_ops
 0xe83a2318	input_mt_report_slot_state
 0xe840192a	mtk_uart_apdma_data_dump
@@ -4729,6 +4734,7 @@
 0xe8ae8f94	clkchk_hwv_irq_init
 0xe8b6d861	__SetPageMovable
 0xe8bd9c98	sync_latest_data
+0xe8c5bbc1	charger_dev_enable
 0xe8d1aae9	usb_match_one_id
 0xe8decd2e	regulator_enable
 0xe8f7183d	single_release
@@ -4740,6 +4746,7 @@
 0xe91adbb5	devm_regulator_put
 0xe920b044	mtk_set_fastdvfs_mode
 0xe931d396	mtk_dma_sync_sg_range
+0xe93a33fa	charger_device_register
 0xe93acd86	mtk_cpuidle_sysfs_root_entry_create
 0xe93e49c3	devres_free
 0xe964785f	vcp_A_register_notify
@@ -4750,6 +4757,7 @@
 0xe999d9fc	__v4l2_ctrl_s_ctrl_compound
 0xe9a359eb	rpmb_dev_register
 0xe9b09d13	update_active_ratio_all
+0xe9b3f841	unregister_tcp_dev_notifier
 0xe9bc90dd	tipc_k_read
 0xe9c9605c	ipi_monitor_dump
 0xe9d29479	qos_ipi_to_sspm_scmi_command
@@ -4807,6 +4815,7 @@
 0xec19e146	KREE_TeeServiceCall
 0xec2a6a0f	mtk_register_swpm_ops
 0xec2e1c8f	proc_doulongvec_minmax
+0xec356d63	tcpm_dpm_pd_get_status
 0xec3754bc	clear_audiobuffer_hw
 0xec3d7995	mml_drm_racing_stop_sync
 0xec434633	qca_send_pre_shutdown_cmd
@@ -4819,7 +4828,6 @@
 0xeca5f2c6	wiphy_delayed_work_queue
 0xeca957d1	__bitmap_and
 0xecb67d01	fpsgo_get_fstb_active_fp
-0xecb9f828	tcpm_inquire_usb_comm
 0xecbbce20	mtk_smi_dbg_dump_for_mml
 0xecc09b4d	component_add
 0xecc3ae96	get_vcore_vol_duration
@@ -4841,6 +4849,7 @@
 0xed55cabd	mutex_unlock
 0xed5bd3c5	typec_unregister_partner
 0xed6418b1	xgf_event_buffer_size
+0xed677e6a	charger_dev_set_mivr
 0xed76a15a	get_ddr_data_ip_num
 0xed8a2d95	memset64
 0xed962ff1	regmap_bulk_read
@@ -4861,8 +4870,8 @@
 0xee91879b	rb_first_postorder
 0xeea1ccc8	skb_ensure_writable
 0xeeaecbe5	mtk_adsp_free_mem
-0xeebd80c6	tcpm_dpm_pd_get_status
 0xeecbe0a6	met_deregister
+0xeed6cdbe	charger_dev_get_temperature
 0xeedc15d6	cmdq_sec_helper_set_fp
 0xeedd3616	config_ep_by_speed
 0xeeee608f	mtk_free_clk_data
@@ -4890,9 +4899,9 @@
 0xeff56a13	ufs_mtk_cali_release
 0xeff75c0b	dma_heap_find
 0xf0063a3f	conninfra_reg_readable_for_coredump
-0xf02a1bfd	charger_dev_enable_chip
 0xf02aa937	wait_for_completion_interruptible_timeout
 0xf02b8396	irq_work_sync
+0xf04a5669	charger_dev_get_mivr
 0xf06cafdf	get_ddr_freq_data_ip_stats
 0xf081da3d	eth_header_parse
 0xf092ad6d	fstb_event_buffer_size
@@ -4924,6 +4933,7 @@
 0xf182d52c	kstrdup_quotable_cmdline
 0xf184d189	kernel_power_off
 0xf18f6a20	conap_scp_unregister_drv
+0xf1956a79	charger_dev_is_chip_enabled
 0xf1969a8e	__usecs_to_jiffies
 0xf1b258cf	adapter_dev_exit_mode
 0xf1b5340a	drm_mode_vrefresh
@@ -4936,11 +4946,11 @@
 0xf20c4b0b	dma_buf_export
 0xf20dc39d	drm_dp_dpcd_read
 0xf21e1f9b	disable_percpu_irq
-0xf22b759f	charger_dev_send_ta_current_pattern
 0xf23fcb99	__kfifo_in
 0xf24361b2	kstrtol_from_user
 0xf24483b2	input_mt_init_slots
 0xf2735ac5	mtk_imgsys_mmqos_init
+0xf276b1c8	tcpm_dpm_pd_data_swap
 0xf27a67e1	cdev_add
 0xf27ed00b	_dev_err
 0xf28b90d8	pm_relax
@@ -4949,10 +4959,11 @@
 0xf28ecabf	input_set_abs_params
 0xf28fdfd2	devm_nvmem_cell_get
 0xf2910de5	mtk_mbox_read
+0xf2c0219e	hf_device_register
 0xf2c43f3f	zlib_deflate
 0xf2cf3f0f	__tracepoint_android_vh_syscall_prctl_finished
 0xf2de9307	sbitmap_weight
-0xf2e56a5e	current_line_motor_info
+0xf2e494be	charger_dev_get_adc
 0xf2fdc614	mtk_gether_get_host_addr_u8
 0xf304bbbc	devfreq_monitor_suspend
 0xf307233c	ip_mc_join_group
@@ -4982,7 +4993,6 @@
 0xf45addc2	KREE_TeeServiceCallPlus
 0xf4659a5d	sock_wmalloc
 0xf4671bb6	fwnode_handle_put
-0xf4672203	hf_manager_destroy
 0xf469358a	bus_unregister
 0xf46b7726	extcon_get_state
 0xf46f2300	usb_del_gadget_udc
@@ -5020,7 +5030,6 @@
 0xf608ad2f	snd_soc_dapm_disable_pin
 0xf6141921	dma_unmap_resource
 0xf6309e9c	fpsgo_set_last_target_t_fp
-0xf6317679	tcpm_set_apdo_charging_policy
 0xf64e3899	vcp_set_fp
 0xf664200f	met_mcupm_api_ready
 0xf66612c4	cfg80211_external_auth_request
@@ -5049,7 +5058,6 @@
 0xf7165c3c	teec_release_shared_memory
 0xf71caf48	skb_try_coalesce
 0xf72a65ea	tty_get_char_size
-0xf740358f	charger_dev_kick_wdt
 0xf743f07c	ged_dvfs_write_sysram_last_commit_dual_test
 0xf76e2c32	vcp_deregister_feature_ex
 0xf77555cd	__memcpy_toio
@@ -5088,8 +5096,9 @@
 0xf93aae46	__arm_smccc_smc
 0xf95cc9b1	cmdq_util_error_save
 0xf95d44ce	mtk_unregister_gpu_power_change
+0xf95e5e52	tcpm_dpm_pd_get_pps_status
 0xf9677c4f	of_irq_get
-0xf96c03a3	tcpc_device_unregister
+0xf9678dba	charger_dev_kick_wdt
 0xf96f8cfd	apusys_boost_value_to_opp
 0xf977571c	DAL_Printf
 0xf97fc2d7	typec_get_drvdata
@@ -5139,12 +5148,10 @@
 0xfbe82964	thermal_zone_get_zone_by_name
 0xfc102d94	cmdq_mbox_enable
 0xfc1a4b98	netif_tx_unlock
-0xfc33da75	charger_dev_init_chip
 0xfc41cedb	RingBuf_getDataCount
 0xfc66b265	phy_power_on
 0xfc6fbbba	genl_unregister_family
 0xfc78d061	vb2_ioctl_create_bufs
-0xfc834f19	charger_dev_get_mivr_state
 0xfc86e386	simple_open
 0xfc8df340	typec_mux_put
 0xfc97a9d7	gpufreq_get_oppidx_by_freq
@@ -5165,15 +5172,13 @@
 0xfd587d2a	net_selftest
 0xfd706cc1	xgf_get_runtime
 0xfd77d74d	scsi_dma_unmap
-0xfd7bca2a	charger_dev_reset_ta
-0xfdbabe05	tcpm_inquire_pd_partner_inform
 0xfdc4df1d	vcorefs_get_opp_info
 0xfdcf9afc	ufs_mtk_dbg_register
 0xfddb6c8d	RingBuf_getFreeSpace
+0xfde34b0c	tcpc_typec_handle_ctd
 0xfdef445d	tty_driver_flush_buffer
 0xfdfa56a8	aee_rr_rec_kick
 0xfdfce2cf	met_ipi_api_ready
-0xfdfe16ee	charger_dev_enable
 0xfdff984a	drm_mode_object_put
 0xfe029963	unregister_inetaddr_notifier
 0xfe153f7a	__tracepoint_android_rvh_is_cpu_allowed
@@ -5214,4 +5219,5 @@
 0xffae8e8b	nsecs_to_jiffies
 0xffb7c514	ida_free
 0xffcd2f4e	usb_altnum_to_altsetting
+0xfff0aa09	tcpm_dpm_pd_power_swap
 0xfff10950	mc_wait_notification

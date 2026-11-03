@@ -22,16 +22,20 @@
 #   1. The **Volla UBports-installer bootstrap zip** (volla.tech/filedump)
 #      — the stock firmware set the ubports-installer flashes before it
 #      installs UT.  Its `super.img` carries the MediaTek **vendor**
-#      partition (Mali EGL, Android HALs, vendor init.rc) and, on the
-#      Plinius, `vendor_dlkm` + `system_dlkm` (the stock kernel-module
-#      trees).  Vendor content is firmware-derived, not OTA-updated.
+#      partition (Mali EGL, Android HALs, vendor init.rc).  Used for the
+#      X23's vendor; on the Plinius only its dtbo.img is still used (as a
+#      build-time check, see build_kernel.sh).
 #
 #   2. The **UBports system-image channel** — `device-<sha>.tar.xz`
 #      carries `system/var/lib/lxc/android/android-rootfs.img`, the
 #      Halium Android *system* root (init, hwservicemanager, bionic,
 #      the libhybris compat layers).  We rename it to
 #      halium_system_a.img.  The sibling `boot-<sha>.tar.xz` carries the
-#      pristine Halium boot chain, kept as a donor/restore kit.
+#      pristine Halium boot chain, kept as a donor/restore kit.  On the
+#      Plinius the channel's `firmware-<sha>.tar.xz` supplies the vendor,
+#      `vendor_dlkm` + `system_dlkm` (the stock kernel-module trees) and
+#      the flashable firmware set (dtbo, lk, preloader, co-processors):
+#      UT OTAs update the firmware, so it is newer than the bootstrap's.
 #
 # Why two sources?  Because the bootstrap zip's `system_a` inside
 # super.img is allocated but zero-filled: UBports' recovery flow
@@ -39,7 +43,7 @@
 # both devices (`xxd halium_system_a.img | head` — all zeros).
 #
 # Updating a pin: fetch the channel index, take images[-1], and update
-# the DEVICE_TAR_* / BOOT_TAR_* constants below:
+# the DEVICE_TAR_* / BOOT_TAR_* (/ FIRMWARE_TAR_*) constants below:
 #   curl -s <channel>/index.json | jq '.images[-1]'
 # The bootstrap zip pin follows the ubports-installer config:
 #   curl -s https://ubports.github.io/installer-configs/v2/devices/<codename>.json | jq .
@@ -221,38 +225,55 @@ pull_ansuz() {
 
     # Source 1 — bootstrap zip (VollaOS 14 stock firmware set; newest images
     # dated 2026-08-31).  Pin follows ubports installer-configs v2
-    # devices/ansuz.yml.
+    # devices/ansuz.yml.  Since the v4 firmware bump only its dtbo.img is
+    # used here: build_kernel.sh checks that the DTB still accepts it, for
+    # phones bootstrapped but not yet given the v4 firmware set.
     local BOOTSTRAP_URL="https://volla.tech/filedump/volla-ansuz-14.0-ubports-installer-bootstrap-v3.zip"
     local BOOTSTRAP_SHA256="b0f05235ea8e73cda5809f68f739ec59696e13c702298b2db1f1e2c795d7cdf2"
     local BOOTSTRAP_ZIP="$DL/bootstrap.zip"
 
     # Source 2 — system-image 24.04-1.x/arm64/android9plus/stable/ansuz,
-    # pinned to version 4 (tag 24.04-1.5, latest as of 2026-10-22).
+    # pinned to version 4 (tag 24.04-1.5; version 5 ships the same firmware).
     local DEVICE_TAR_URL="https://system-image.ubports.com/pool/device-457cb574165c2dcd9f39b2e2cd1c9856adcda3e4b8f85c6789396ada8afb31e3.tar.xz"
     local DEVICE_TAR_SHA256="faf45a65822b5ff4926b9791d60e8ee390fcd007d47ecfae696ad64a7935c065"
     local DEVICE_TAR="$DL/device.tar.xz"
-    # The boot tarball stays at version 3: version 4's vendor_boot carries the
-    # port repo's 29554f8 DTB, which the bootstrap v3 dtbo cannot be applied to
-    # (see build_kernel.sh ANSUZ_REPO_SHA).
-    local BOOT_TAR_URL="https://system-image.ubports.com/pool/boot-aa9bc6bf7ed80df227324b7b6fef076ca26d9d01e83a4efd0098c7c87e11215c.tar.xz"
-    local BOOT_TAR_SHA256="836c9ed146cbb795f085ac20675ab7fcfa091993901e5e5a4b7ac60d73c521c5"
+    local BOOT_TAR_URL="https://system-image.ubports.com/pool/boot-637bdb7343d083e07a991ece4669ca30c93b13e4e7e18f455b594530d08c6fa4.tar.xz"
+    local BOOT_TAR_SHA256="5ed5d4af48f66a888d009ba9cc47cc18d0d4fa84c57358f62e760b3b01e4aeb6"
     local BOOT_TAR="$DL/boot.tar.xz"
+    # The same version's firmware tarball: the VollaOS 20260828 generation
+    # (built 2026-09-07) that UT OTAs flash.  Its vendor_dlkm/system_dlkm are
+    # what the port repo's 29554f8 vendor_boot modules (mtk-pogo-usb for the
+    # Plinius Plus, new tcpc/charger classes) were built against: the
+    # bootstrap's older vendor_dlkm rejects them (touch, sensors, camera and
+    # accdet fail on symbol CRCs).  Its dtbo/lk/preloader/co-processor images
+    # go to halium-blobs/ansuz/firmware/ for `flash-native.sh --firmware`.
+    local FIRMWARE_TAR_URL="https://system-image.ubports.com/pool/firmware-da7620ded0f1904afa9a4fb4feabc1df81603728c464b6b13506b9e86745bc03.tar.xz"
+    local FIRMWARE_TAR_SHA256="4b8902d01033891ea007267c211b02048f81d04f54978457089d7cfbe2b42ad6"
+    local FIRMWARE_TAR="$DL/firmware.tar.xz"
 
-    # --- halium_{vendor,vendor_dlkm,system_dlkm}_a.img ----------------------
+    # --- halium_{vendor,vendor_dlkm,system_dlkm}_a.img + firmware/ ----------
+    # A stamp records which firmware pin the extracted images came from, so
+    # a tree that pulled an older pin re-extracts after a pin bump.
+    local STAMP="$BLOBS/.firmware-sha256"
     if [[ ! -f "$BLOBS/halium_vendor_a.img" \
        || ! -f "$BLOBS/halium_vendor_dlkm_a.img" \
-       || ! -f "$BLOBS/halium_system_dlkm_a.img" ]]; then
+       || ! -f "$BLOBS/halium_system_dlkm_a.img" \
+       || ! -d "$BLOBS/firmware" \
+       || "$(cat "$STAMP" 2>/dev/null)" != "$FIRMWARE_TAR_SHA256" ]]; then
+        fetch "$FIRMWARE_TAR_URL" "$FIRMWARE_TAR" "$FIRMWARE_TAR_SHA256" "578 MB"
+        echo "==> Extracting the firmware tarball…"
+        rm -rf "$DL/partitions" "$BLOBS/firmware"
+        tar xJf "$FIRMWARE_TAR" -C "$DL"
+        local p
+        for p in vendor vendor_dlkm system_dlkm; do
+            mv "$DL/partitions/$p.img" "$BLOBS/halium_${p}_a.img"
+            touch "$BLOBS/halium_${p}_a.img"   # see the halium_system_a note below
+        done
+        mv "$DL/partitions" "$BLOBS/firmware"
+        echo "$FIRMWARE_TAR_SHA256" > "$STAMP"
+    fi
+    if [[ ! -f "$BOOTSTRAP_ZIP" ]] && (( KEEP_DOWNLOADS )); then
         fetch "$BOOTSTRAP_URL" "$BOOTSTRAP_ZIP" "$BOOTSTRAP_SHA256" "816 MB"
-
-        local INNER_SUPER TMP_SUPER="$DL/stock-super.img"
-        INNER_SUPER="$(inner_super "$BOOTSTRAP_ZIP")"
-        echo "==> Extracting $INNER_SUPER from the bootstrap zip…"
-        unzip -p "$BOOTSTRAP_ZIP" "$INNER_SUPER" > "$TMP_SUPER"
-        unpack_super "$TMP_SUPER" "$DL" \
-            "vendor_a:$BLOBS/halium_vendor_a.img" \
-            "vendor_dlkm_a:$BLOBS/halium_vendor_dlkm_a.img" \
-            "system_dlkm_a:$BLOBS/halium_system_dlkm_a.img"
-        rm -f "$TMP_SUPER"
     fi
 
     # --- halium_system_a.img ------------------------------------------------
@@ -281,11 +302,14 @@ pull_ansuz() {
     # VollaOS ones.  Their kernel-module set matches this channel's kernel —
     # pair them with build_kernel.sh's boot.img only if you know what you
     # are doing (build_kernel.sh emits its own matched trio).
-    if [[ ! -f "$BLOBS/ut-boot/init_boot.img" ]]; then
-        fetch "$BOOT_TAR_URL" "$BOOT_TAR" "$BOOT_TAR_SHA256" "46 MB"
+    if [[ ! -f "$BLOBS/ut-boot/init_boot.img" \
+       || "$(cat "$BLOBS/ut-boot/.sha256" 2>/dev/null)" != "$BOOT_TAR_SHA256" ]]; then
+        fetch "$BOOT_TAR_URL" "$BOOT_TAR" "$BOOT_TAR_SHA256" "47 MB"
         echo "==> Extracting the pristine Halium boot chain…"
+        rm -rf "$BLOBS/ut-boot"
         mkdir -p "$BLOBS/ut-boot"
         tar xJf "$BOOT_TAR" -C "$BLOBS/ut-boot" --strip-components=1 partitions/
+        echo "$BOOT_TAR_SHA256" > "$BLOBS/ut-boot/.sha256"
     fi
 
     (( KEEP_DOWNLOADS )) || rm -rf "$DL"
@@ -293,6 +317,7 @@ pull_ansuz() {
     echo
     echo "Halium blobs ready:"
     ls -lh "$BLOBS"/halium_*.img "$BLOBS"/ut-boot/*.img
+    echo "Firmware set for flash-native.sh --firmware: $(ls "$BLOBS/firmware" | tr '\n' ' ')"
     echo
     echo "Next: bash device/board/oniro/hybris_generic/kernel/ansuz/build_super_img.sh"
     echo "      (bakes halium_{system,vendor,vendor_dlkm,system_dlkm}_a + a"

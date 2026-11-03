@@ -396,6 +396,44 @@ cp -a /lib/modules/. /root/mnt/kmodules/ 2>/dev/null \
     && echo "[init-chainload] stashed kernel modules in /mnt/kmodules" \
     || echo "[init-chainload] stash kmodules failed (non-fatal)"
 
+# ansuz: the Halium container's init loads vendor_dlkm with Android's
+# modprobe, which follows modules.dep.  Newer VollaOS firmware (UT firmware
+# tarball v4+) builds some modules the Halium GKI kernel has built in, e.g.
+# rfkill, and its modules.dep makes cfg80211 / mac80211 / wlan_drv_gen4m depend
+# on /system/lib/modules/rfkill.ko.  Loading that .ko fails ("exports
+# duplicate symbol rfkill_alloc (owned by kernel)"), modprobe gives up on
+# everything that depends on it, and there is no WiFi.  Drop dependencies on
+# modules built into the running kernel (a /sys/module entry without
+# initstate) from a copy of modules.dep and bind it over the original.
+# Older firmware has no such dependencies, so this leaves it untouched.
+# The kernel only creates /sys/module/<name> for a built-in that has
+# parameters (rfkill does); the ramdisk carries no modules.builtin to do
+# better, so a parameterless built-in would still need adding here.
+DLKM_DEP=/root/android/vendor_dlkm/lib/modules/modules.dep
+DLKM_SED=/root/mnt/.halium-modules.dep.sed
+if [ -f "$DLKM_DEP" ]; then
+    : > "$DLKM_SED"
+    dropped=
+    for m in /sys/module/*; do
+        [ -e "$m/initstate" ] && continue          # loadable module
+        n=${m##*/}
+        case "$n" in *_*) alt=$(echo "$n" | sed 's/_/-/g') ;; *) alt= ;; esac
+        for ko in "$n" $alt; do
+            if [ -f "/root/android/system_dlkm/lib/modules/$ko.ko" ] \
+               || [ -f "/root/android/vendor_dlkm/lib/modules/$ko.ko" ]; then
+                echo "s@ [^ ]*/$ko\\.ko@@g" >> "$DLKM_SED"
+                dropped="$dropped $ko"
+            fi
+        done
+    done
+    if [ -s "$DLKM_SED" ]; then
+        sed -f "$DLKM_SED" "$DLKM_DEP" > /root/mnt/.halium-modules.dep \
+            && mount --bind /root/mnt/.halium-modules.dep "$DLKM_DEP" \
+            && echo "[init-chainload] modules.dep: dropped deps on built-ins:$dropped" \
+            || echo "[init-chainload] modules.dep rewrite failed (non-fatal)"
+    fi
+fi
+
 mount -t selinuxfs none /sys/fs/selinux 2>/dev/null \
     || echo "[init-chainload] mount selinuxfs failed — was lsm=selinux in cmdline?"
 

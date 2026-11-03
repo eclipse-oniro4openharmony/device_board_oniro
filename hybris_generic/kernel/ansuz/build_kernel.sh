@@ -42,13 +42,21 @@ BASELINE_SYMVERS="$KERNEL_TREE/workdir/baseline-Module.symvers"
 
 # Pinned refs (recorded 2026-10-22; update consciously, together with the
 # blob pins in utils/host/pull-halium-blobs.sh and kmi/stock-module-versions.txt:
-# the port repo's vendor_boot module overlay, the bootstrap's vendor_dlkm and
-# this kernel's KMI have to match).
-# The port repo stays at f8c7581, the parent of 29554f8: that commit's DTB drops
-# the flashlights_ocp81378 label, which the bootstrap v3 dtbo still fixes up
-# against, so LK fails the overlay apply and the phone resets before the kernel.
+# the port repo's vendor_boot module overlay, the firmware tarball's
+# vendor_dlkm and this kernel's KMI have to match).
+# The port repo is at 29554f8 (VollaOS 20260828 prebuilts): it adds
+# mtk-pogo-usb.ko and the matching extcon/charger/TCPC modules + DTB, which
+# drive the Plinius Plus' pogo connector.  Those modules only load against
+# the same generation's vendor_dlkm, i.e. the UT firmware tarball v4 pinned
+# in pull-halium-blobs.sh (the bootstrap's older vendor_dlkm rejects them on
+# symbol CRCs).  The DTB drops the flashlights_ocp81378 label the bootstrap
+# v3 dtbo still fixes up against (LK fails the overlay apply and resets
+# before the kernel), so step 2 restores it with dtb_restore_labels.py and
+# checks that both the v3 and the firmware dtbo apply.
 ANSUZ_REPO_URL="https://gitlab.com/ubports/porting/reference-device-ports/halium-14/volla-phone-plinius/volla-ansuz.git"
-ANSUZ_REPO_SHA="f8c758198ed3b2735b9d5945a19b642f4dbbd6a3"
+ANSUZ_REPO_SHA="29554f8e716f76d8dd69b1b176c2b6f43478de6a"
+BOOTSTRAP_ZIP="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/ansuz/downloads/bootstrap.zip"
+FIRMWARE_DTBO="$OHOS_ROOT/device/board/oniro/hybris_generic/halium-blobs/ansuz/firmware/dtbo.img"
 BUILDTOOLS_URL="https://gitlab.com/ubports/community-ports/halium-generic-adaptation-build-tools.git"
 BUILDTOOLS_SHA="dd1afd8efc5bb895efc313b61960bd6537dee24a"
 KERNEL_SHA="994f2f422ca12fa39806bd0c405860117cce3252"   # android14-6.1-halium, 6.1.145
@@ -95,7 +103,25 @@ git -C "$KERNEL_SRC" clean -fdq
 # deviceinfo: run with the openharmony fragment appended for patched
 # builds; baseline uses upstream's list. deviceinfo is sourced from the
 # port-repo checkout — we edit a scratch copy via git, never permanently.
-git -C "$KERNEL_TREE" checkout -- deviceinfo
+git -C "$KERNEL_TREE" checkout -- deviceinfo volla-ansuz.dtb
+
+# DTB: restore the labels the bootstrap dtbo needs, then prove that both
+# dtbos a phone may carry apply to it — offline, the way LK will at boot:
+# the bootstrap v3 one (installed by the UBports installer) and the firmware
+# set's (flash-native.sh --firmware).
+DTBO_CHECK=()
+if [ -f "$BOOTSTRAP_ZIP" ]; then
+    unzip -p "$BOOTSTRAP_ZIP" dtbo.img > "$KERNEL_TREE/workdir/bootstrap-dtbo.img"
+    DTBO_CHECK+=(--dtbo "$KERNEL_TREE/workdir/bootstrap-dtbo.img")
+else
+    echo "WARN: $BOOTSTRAP_ZIP missing (pull-halium-blobs.sh -d ansuz) — bootstrap dtbo unchecked" >&2
+fi
+if [ -f "$FIRMWARE_DTBO" ]; then
+    DTBO_CHECK+=(--dtbo "$FIRMWARE_DTBO")
+else
+    echo "WARN: $FIRMWARE_DTBO missing (pull-halium-blobs.sh -d ansuz) — firmware dtbo unchecked" >&2
+fi
+python3 "$HERE/dtb_restore_labels.py" "$KERNEL_TREE/volla-ansuz.dtb" ${DTBO_CHECK[@]+"${DTBO_CHECK[@]}"}
 
 if [ "$MODE" != "--baseline" ]; then
     # ohos-adaptation.patch owns drivers/ + include/; hmdfs.patch owns

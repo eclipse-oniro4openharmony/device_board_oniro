@@ -189,7 +189,11 @@ the OHOS graphics/HAL stack can reach the hardware through **libhybris**.
 | Device | Codename | SoC | Halium / kernel | Chainload lives in |
 |---|---|---|---|---|
 | Volla Phone X23 | `vidofnir` | MT6789 (Helio G99) | Halium 12, 5.10 vendor kernel | `boot_a` (header v2) |
-| Volla Phone Plinius | `ansuz` | MT6878 (Dimensity 7300) | Halium 14, android14-6.1 GKI | `init_boot_a` (header v4) |
+| Volla Phone Plinius / Plinius Plus | `ansuz` | MT6878 (Dimensity 7300) | Halium 14, android14-6.1 GKI | `init_boot_a` (header v4) |
+
+The Plinius Plus is the Plinius with 12 GB RAM, 256 GB storage and a pogo
+connector on the back (a second USB port with charging, driven by
+`mtk-pogo-usb.ko`); it runs the same `ansuz` image.
 
 **One image set serves both devices.** They are told apart at *runtime* by
 `ohos.boot.hardware` (set from the per-device `vendor_boot` cmdline), which selects
@@ -197,7 +201,11 @@ the OHOS graphics/HAL stack can reach the hardware through **libhybris**.
 
 ### 📋 Prerequisites
 
-- The phone with an **unlocked bootloader**. 
+- The phone with an **unlocked bootloader**. On the Plinius from VollaOS: enable
+  Settings → System → Developer options → **OEM unlocking** first (otherwise LK
+  answers `Prohibit unlock operation`), then `fastboot flashing unlock` and press
+  **Volume Up** on the phone within ~5 s (the prompt times out to "no" and
+  fastboot still prints OKAY; check `fastboot getvar unlocked`).
 - **`fastboot`** (Android platform-tools) on whichever host the phone is plugged into.
 - An OHOS source tree, build container and prebuilts — see
   [Set up the build container](#-set-up-the-build-container) and
@@ -226,8 +234,8 @@ the OHOS graphics/HAL stack can reach the hardware through **libhybris**.
 
   | Source | Provides |
   |---|---|
-  | Volla's ubports-installer **bootstrap zip** (`volla.tech/filedump`) | the MediaTek `vendor` partition, and on the Plinius `vendor_dlkm` + `system_dlkm` — extracted straight out of the stock `super.img` |
-  | **UBports system-image** channel tarballs | `android-rootfs.img` (the Halium Android `/system`) and the pristine Halium boot chain |
+  | Volla's ubports-installer **bootstrap zip** (`volla.tech/filedump`) | X23: the MediaTek `vendor` partition, extracted straight out of the stock `super.img`. Plinius: only its `dtbo.img`, which the kernel build checks the DTB against |
+  | **UBports system-image** channel tarballs | `android-rootfs.img` (the Halium Android `/system`) and the pristine Halium boot chain; on the Plinius also the **firmware tarball**: `vendor`, `vendor_dlkm`, `system_dlkm` and the flashable firmware set in `halium-blobs/ansuz/firmware/` (dtbo, lk, preloader, modem, scp, tee, ...) |
 
   Downloads are ~1 GB per device and are cached under `halium-blobs/`
   (`--clean-downloads` deletes them afterwards). The pins are the constants at
@@ -300,24 +308,23 @@ checkout of the `android14-6.1-halium` branch, which gets rebased and
 force-pushed. `build_kernel.sh` therefore checks out its `KERNEL_SHA` (and the
 port repo and build tools pins) by hash after cloning, so trees synced weeks
 apart build the same kernel. The kernel, the port repo's `vendor_boot` module
-overlay and the bootstrap pin in `pull-halium-blobs.sh` move together: the KMI
+overlay and the firmware pin in `pull-halium-blobs.sh` move together: the KMI
 guard after the build diffs the new `Module.symvers` against
 `kernel/ansuz/kmi/stock-module-versions.txt` and fails if any symbol the stock
 MTK modules expect changed CRC. Regenerate that list with
 `kernel/ansuz/kmi/gen-stock-module-versions.sh` whenever the blob or port repo
 pins change.
 
-The co-processor firmware partitions (`modem`, `connsys_*`, `scp`, `sspm`,
-`tee`, ...) come from the same bootstrap zip, but `flash-native.sh` never writes
-them; they are whatever the phone was last bootstrapped with. After a
-bootstrap pin change, flash them from the zip once (`fastboot flash <part>_a
-<part>.img` for the zip's co-processor images; the preloader and `lk` are not
-needed unless they changed). The `dtbo` partition has to match the base DTB in
-the port repo's `vendor_boot`: LK applies the overlay at boot, and if one of its
-`__fixups__` labels is missing from the DTB the phone resets before the kernel
-starts. The port repo is pinned to f8c7581 for that reason — 29554f8 dropped the
-`flashlights_ocp81378` label that the bootstrap v3 dtbo still references. Check
-a new pin offline with `fdtoverlay -i <vendor_boot dtb> -o /dev/null <dtbo entry>`.
+On the Plinius the kernel modules come in one generation: the port repo's
+`vendor_boot` overlay (pinned at 29554f8, VollaOS 20260828, which adds the
+Plinius Plus' pogo driver) only loads against the `vendor_dlkm` of the same
+firmware tarball, and the `dtbo` partition has to accept the base DTB, or LK
+resets the phone before the kernel starts. The firmware partitions are not part
+of `super`, so after a firmware pin change flash them once per phone with
+`flash-native.sh --firmware` (below). `build_kernel.sh` restores the one DTB
+label the old bootstrap v3 dtbo needs (`dtb_restore_labels.py`) and checks
+offline that both the v3 and the firmware `dtbo` apply, so a phone that has
+not had `--firmware` yet still boots.
 
 ### ⚡ Flash
 
@@ -328,6 +335,17 @@ pass (slot `_a`):
 
 ```bash
 bash device/board/oniro/hybris_generic/utils/host/flash-native.sh -d x23     # or: -d ansuz
+```
+
+Plinius coming from VollaOS or Ubuntu Touch, or after a firmware pin bump: add
+`--firmware` once, so the dtbo, LK/preloader and co-processor images match the
+`vendor_dlkm` in `super` (`--wipe` too when coming from another OS: its `/data`
+cannot be mounted by OHOS). A phone straight from VollaOS first needs the
+bootstrap's `vbmeta` with verity off, the same step the UBports installer does:
+`fastboot --disable-verity flash vbmeta_a vbmeta.img` (from the bootstrap zip).
+
+```bash
+bash device/board/oniro/hybris_generic/utils/host/flash-native.sh -d ansuz --firmware --wipe
 ```
 
 ### 🔌 Verify
