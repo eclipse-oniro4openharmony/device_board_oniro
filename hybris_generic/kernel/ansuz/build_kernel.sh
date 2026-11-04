@@ -133,7 +133,12 @@ if [ "$MODE" != "--baseline" ]; then
     # ohos-dfx-staged owns drivers/staging/{hisysevent,zerohung,hungtask,
     # blackbox,ucollection} + anchors + include/dfx + blackbox headers +
     # the kernel/hung_task.c handoff hunks.
-    for p in ohos-adaptation hmdfs ohos-fs-staged ohos-dfx-staged; do
+    # ohos-usb-f-generic owns drivers/usb/gadget/function/{f_generic.c,
+    # u_generic.h} (OHOS linux-6.6, ported to 6.1: class_create arity,
+    # devnode signature, -Werror fixes) + anchors in the gadget Kconfig and
+    # function Makefile: the FunctionFS variant the HDF USB function DDK
+    # drives for MTP/PTP.
+    for p in ohos-adaptation hmdfs ohos-fs-staged ohos-dfx-staged ohos-usb-f-generic; do
         echo "Applying $p.patch..."
         git -C "$KERNEL_SRC" apply --whitespace=nowarn "$HERE/patches/kernel-source/$p.patch"
     done
