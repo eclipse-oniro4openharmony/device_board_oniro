@@ -1,0 +1,69 @@
+From 0db30c00d6b2cfaaaff8ed538fd65ffd8bcc2b3b Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 4 Nov 2026 13:23:12 +0000
+Subject: [PATCH] fcodec: product override of the default surface pixel format
+
+When the caller leaves the output format to it, FCodec decodes into NV12.
+On the Oniro hybris phones an NV12 surface maps to the flexible
+YCbCr_420_888, which MediaTek's gralloc lays out Cr-first, so the GPU
+sampled every played video with U and V swapped (purple turns maroon).
+
+const.media.fcodec.surface_pixel_format=nv21 makes FCodec write NV21 into
+a display surface instead, which maps to YCrCb_420_SP and displays
+correctly. Only the defaulted case on a surface changes; an explicit
+pixel format and buffer-mode output keep their behaviour.
+
+Change-Id: Ibd1f6715c34b6bc02ba0e5a482e6b3ba0c5fc85d
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/engine/codec/video/fcodec/fcodec.cpp      | 14 ++++++++++++++
+ .../engine/codec/video/fcodec/include/fcodec.h     |  1 +
+ 2 files changed, 15 insertions(+)
+
+diff --git a/services/engine/codec/video/fcodec/fcodec.cpp b/services/engine/codec/video/fcodec/fcodec.cpp
+index b4850543f..81c0d2298 100755
+--- a/services/engine/codec/video/fcodec/fcodec.cpp
++++ b/services/engine/codec/video/fcodec/fcodec.cpp
+@@ -384,6 +384,7 @@ int32_t FCodec::Configure(const Format &format)
+         }
+     }
+     GetSurfaceCfgFromFmt(format);
++    outputPixelFmtDefaulted_ = (outputPixelFmt_ == VideoPixelFormat::UNKNOWN);
+     if (outputPixelFmt_ == VideoPixelFormat::UNKNOWN) {
+         outputPixelFmt_ = VideoPixelFormat::NV12;
+         format_.PutIntValue(FMTKey::VIDEO_PIXEL_FORMAT, static_cast<int32_t>(VideoPixelFormat::NV12));
+@@ -1863,6 +1864,19 @@ int32_t FCodec::SetOutputSurface(sptr<Surface> surface)
+     if (state_ == State::FLUSHED || state_ == State::RUNNING || state_ == State::EOS) {
+         return ReplaceOutputSurfaceWhenRunning(surface);
+     }
++    /*
++     * A product whose display stack samples NV12 with the chroma swapped
++     * (MediaTek gralloc under libhybris lays the flexible YCbCr_420_888 that
++     * NV12 surfaces map to out Cr-first) can ask for NV21 surface output
++     * instead.  Only when the caller left the format to the decoder.
++     */
++    if (outputPixelFmtDefaulted_ && state_ == State::CONFIGURED &&
++        OHOS::system::GetParameter("const.media.fcodec.surface_pixel_format", "") == "nv21") {
++        std::lock_guard<std::mutex> fLock(formatMutex_);
++        outputPixelFmt_ = VideoPixelFormat::NV21;
++        format_.PutIntValue(FMTKey::VIDEO_PIXEL_FORMAT, static_cast<int32_t>(VideoPixelFormat::NV21));
++        AVCODEC_LOGI("surface output pixel format NV21 (const.media.fcodec.surface_pixel_format)");
++    }
+     UnRegisterListenerToSurface(sInfo_.surface);
+     uint64_t surfaceId = surface->GetUniqueId();
+     sInfo_.surface = surface;
+diff --git a/services/engine/codec/video/fcodec/include/fcodec.h b/services/engine/codec/video/fcodec/include/fcodec.h
+index 99f786f70..6fa766c5a 100644
+--- a/services/engine/codec/video/fcodec/include/fcodec.h
++++ b/services/engine/codec/video/fcodec/include/fcodec.h
+@@ -196,6 +196,7 @@ private:
+     bool isConverted_ = false;
+     bool isOutBufSetted_ = false;
+     VideoPixelFormat outputPixelFmt_ = VideoPixelFormat::UNKNOWN;
++    bool outputPixelFmtDefaulted_ = false; // NV12 picked by Configure, not asked for
+     RawVideoPixelFormat rawvideoPixFmt_ = RawVideoPixelFormat::UNKNOWN;
+     // Running
+     std::vector<std::shared_ptr<FBuffer>> buffers_[2];
+-- 
+2.50.1
+
