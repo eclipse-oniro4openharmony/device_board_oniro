@@ -1,0 +1,60 @@
+From f08a3eac814120bf9fda6aca611da0aa6eff990f Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 4 Nov 2026 09:03:26 +0000
+Subject: [PATCH] dhcp_server: send whole, terminated replies
+
+Two bugs left every DHCP reply from the OHOS DHCP server unusable for strict
+clients (NetworkManager's n-dhcp4 rejects the lease with N_DHCP4_E_UNSET,
+"failed to accept lease (code 8)", so USB tethering got no IPv4):
+
+* DHCP_MSG_HEADER_SIZE was 234, but the fixed BOOTP header (op..giaddr 28 +
+  chaddr 16 + sname 64 + file 128) is 236 bytes, so every reply was sent two
+  bytes short and its last option lost its last two bytes -- in an ACK that
+  is the server identifier. The receive path computed the end of a request's
+  options two bytes too far for the same reason.
+* CreateOptionNode() rejects zero-length options, which includes the END
+  option ParseReplyOptions() appends ("failed to create option node"), so
+  replies were never terminated either. Accept END and PAD.
+
+Verified: a NetworkManager host on the phone's RNDIS tether now takes and
+keeps its 192.168.11.x lease and reaches the internet through the phone.
+
+Change-Id: I101e0e8a0dd3b11949497bd34c71f07c7bbe48d5
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/dhcp_server/include/dhcp_message.h | 3 ++-
+ services/dhcp_server/src/dhcp_option.cpp    | 4 +++-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/services/dhcp_server/include/dhcp_message.h b/services/dhcp_server/include/dhcp_message.h
+index 41e4693..5af1ac8 100644
+--- a/services/dhcp_server/include/dhcp_message.h
++++ b/services/dhcp_server/include/dhcp_message.h
+@@ -23,7 +23,8 @@
+ #define BOOTREQUEST 1
+ #define BOOTREPLY 2
+ 
+-#define DHCP_MSG_HEADER_SIZE 234
++/* op..giaddr (28) + chaddr (16) + sname (64) + file (128): the fixed BOOTP header */
++#define DHCP_MSG_HEADER_SIZE 236
+ 
+ enum DhcpMessageType {
+     DHCPDISCOVER = 1,
+diff --git a/services/dhcp_server/src/dhcp_option.cpp b/services/dhcp_server/src/dhcp_option.cpp
+index ccf9d06..ea03516 100644
+--- a/services/dhcp_server/src/dhcp_option.cpp
++++ b/services/dhcp_server/src/dhcp_option.cpp
+@@ -35,7 +35,9 @@ PDhcpOptionNode CreateOptionNode(PDhcpOption opt)
+     }
+     pNode->option.code = opt->code;
+     pNode->option.length = opt->length;
+-    if (opt == nullptr || opt->length == 0) {
++    /* END and PAD carry no length byte payload; ParseReplyOptions relies on
++     * the END node to terminate every reply. */
++    if (opt == nullptr || (opt->length == 0 && opt->code != END_OPTION && opt->code != PAD_OPTION)) {
+         free(pNode);
+         return nullptr;
+     }
+-- 
+2.50.1
+
