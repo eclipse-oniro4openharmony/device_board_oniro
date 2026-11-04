@@ -1,7 +1,7 @@
-From c143f0e76fa17c04c6e6598cfd49d494c520b93c Mon Sep 17 00:00:00 2001
+From 4ce4724cd0e2838c8a695771f985613d87f31593 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Fri, 23 Oct 2026 09:36:38 +0000
-Subject: [PATCH 4/4] hybris_generic: let vendor/oniro replace the camera
+Subject: [PATCH 3/4] hybris_generic: let vendor/oniro replace the camera
  picker hap too
 
 With the Oniro HAP set opted in, com.ohos.camera's Camera.hap comes from
@@ -23,10 +23,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 8 insertions(+), 2 deletions(-)
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 73d57532..dc71add2 100755
+index 27d4117..0852cb1 100755
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -550,7 +550,10 @@ group("hap") {
+@@ -531,7 +531,10 @@ group("hap") {
      # instead: a rebuild of //applications/standard/camera that fixes the
      # viewfinder and the saved JPEG being 90/180 degrees out. Both install
      # app/com.ohos.camera/Camera.hap, so exactly one must be active or ninja
@@ -38,7 +38,7 @@ index 73d57532..dc71add2 100755
      #
      # The arg is false by default, so out of the box nothing changes here and
      # the stock hap still ships. The import sits inside the branch so products
-@@ -560,7 +563,10 @@ group("hap") {
+@@ -541,7 +544,10 @@ group("hap") {
      # prebuilt is refreshed. See vendor/oniro/oniro-haps/.
      import("//vendor/oniro/oniro-haps/oniro_haps.gni")
      if (oniro_install_custom_haps) {

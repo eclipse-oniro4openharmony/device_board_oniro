@@ -348,6 +348,14 @@ bootstrap's `vbmeta` with verity off, the same step the UBports installer does:
 bash device/board/oniro/hybris_generic/utils/host/flash-native.sh -d ansuz --firmware --wipe
 ```
 
+Images built before November 2026 shipped an older CallUI signed with another
+certificate, and BMS will not replace it on a kept `/data` ("install sign info
+inconsistent"). The phone then keeps the old in-call screen, which cannot hang
+up an answered incoming call. Flash once with `--wipe`, or move
+`/system/app/com.ohos.callui` aside and back across two reboots, bumping
+`const.product.software.version` in `/system/etc/param/ohos.para` each time, so
+the OTA scan first uninstalls the old app and then installs the new one.
+
 ### 🔌 Verify
 
 ~60–70 s after reboot the phone enumerates over USB and answers hdc; the Oniro

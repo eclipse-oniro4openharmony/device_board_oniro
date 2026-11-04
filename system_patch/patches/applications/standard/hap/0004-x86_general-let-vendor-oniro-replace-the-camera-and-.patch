@@ -1,7 +1,7 @@
-From 61667fea5f0549eaf0eb27fda8bf4f9d676623bc Mon Sep 17 00:00:00 2001
+From 15f2ffb75dcc9fba8dd36304bf5d776d420108cb Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Fri, 23 Oct 2026 11:49:49 +0000
-Subject: [PATCH] x86_general: let vendor/oniro replace the camera and
+Subject: [PATCH 4/4] x86_general: let vendor/oniro replace the camera and
  settingsdata haps
 
 The emulator now takes the Oniro HAP set too (oniro_install_custom_haps),
@@ -17,10 +17,10 @@ Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
  1 file changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/BUILD.gn b/BUILD.gn
-index dc71add2..3e04c2a6 100755
+index 0852cb1..bf847bf 100755
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -545,7 +545,11 @@ group("hap") {
+@@ -526,7 +526,11 @@ group("hap") {
    } else if (defined(product_name) && product_name == "ohos-arm64") {
      deps +=
          [ "//applications/standard/admin_provisioning:adminprovisioning_hap" ]
