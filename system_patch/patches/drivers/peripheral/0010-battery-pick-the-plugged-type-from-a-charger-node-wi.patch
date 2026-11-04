@@ -1,0 +1,104 @@
+From 1f7f1c4ef6867377a6d3401216cc7ff9e6a15054 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 3 Nov 2026 20:51:05 +0000
+Subject: [PATCH] battery: pick the plugged type from a charger node with a
+ known type
+
+GetPluggedTypeName takes the first power_supply node whose "online"
+reads non-zero. On MediaTek phones that is the fuel gauge or a charger
+IC node (mtk-gauge, mtk-master-charger): always online, type "Unknown",
+so pluggedType stayed NONE while charging. A node whose "online" read
+fails (a standalone charge pump returns EINVAL) also left the previous
+node's value in the buffer and aborted the whole lookup.
+
+Skip nodes whose online read fails or whose type does not map to a
+plugged type, so the real USB/Mains/Wireless supply (primary_chg) is
+reported.
+
+Change-Id: I9eb26c45d921b2dacd3c19a5081c9c78177c07d4
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../include/power_supply_provider.h           |  1 +
+ .../hdi_service/src/power_supply_provider.cpp | 29 ++++++++++++++-----
+ 2 files changed, 23 insertions(+), 7 deletions(-)
+
+diff --git a/battery/interfaces/hdi_service/include/power_supply_provider.h b/battery/interfaces/hdi_service/include/power_supply_provider.h
+index e7eb72928..987787377 100644
+--- a/battery/interfaces/hdi_service/include/power_supply_provider.h
++++ b/battery/interfaces/hdi_service/include/power_supply_provider.h
+@@ -146,6 +146,7 @@ private:
+     int32_t ReadSysfsFile(const char* path, char* buf, size_t size);
+     int32_t ReadBatterySysfsToBuff(const char* path, char* buf, size_t size);
+     void GetPluggedTypeName(char* buf, size_t size);
++    bool IsKnownPluggedNode(const std::string& node);
+     int32_t PluggedTypeEnumConverter(const char* str) const;
+     int32_t ParsePluggedMaxCurrent(int32_t* maxCurrent);
+     int32_t ParsePluggedMaxVoltage(int32_t* maxVoltage);
+diff --git a/battery/interfaces/hdi_service/src/power_supply_provider.cpp b/battery/interfaces/hdi_service/src/power_supply_provider.cpp
+index 9fea0afa0..5188c9dbd 100644
+--- a/battery/interfaces/hdi_service/src/power_supply_provider.cpp
++++ b/battery/interfaces/hdi_service/src/power_supply_provider.cpp
+@@ -335,6 +335,17 @@ int32_t PowerSupplyProvider::ReadBatterySysfsToBuff(const char* path, char* buf,
+     return HDF_SUCCESS;
+ }
+ 
++bool PowerSupplyProvider::IsKnownPluggedNode(const std::string& node)
++{
++    char typeBuf[MAX_BUFF_SIZE] = {0};
++    std::string typePath = path_ + "/" + node + "/" + "type";
++    if (ReadSysfsFile(typePath.c_str(), typeBuf, sizeof(typeBuf)) != HDF_SUCCESS) {
++        return false;
++    }
++    Trim(typeBuf);
++    return PluggedTypeEnumConverter(typeBuf) != PLUGGED_TYPE_BUTT;
++}
++
+ void PowerSupplyProvider::GetPluggedTypeName(char* buf, size_t size)
+ {
+     std::string onlineNode = "USB";
+@@ -342,7 +353,7 @@ void PowerSupplyProvider::GetPluggedTypeName(char* buf, size_t size)
+     int32_t online;
+     std::string onlinePath = path_ + "/" + onlineNode + "/" + "online";
+     ret = ReadSysfsFile(onlinePath.c_str(), buf, size);
+-    online = ParseInt(buf);
++    online = (ret == HDF_SUCCESS) ? ParseInt(buf) : 0;
+     auto iter = nodeNames_.begin();
+     while (!online && iter != nodeNames_.end()) {
+         if (*iter == "USB") {
+@@ -352,9 +363,17 @@ void PowerSupplyProvider::GetPluggedTypeName(char* buf, size_t size)
+         onlinePath = path_ + "/" + *iter + "/" + "online";
+         ret = ReadSysfsFile(onlinePath.c_str(), buf, size);
+         if (ret != HDF_SUCCESS) {
++            /* e.g. a standalone charge pump whose online node returns EINVAL:
++             * skip it instead of parsing the previous node's stale buffer */
+             BATTERY_HILOGD(FEATURE_BATT_INFO, "read online path failed in loop, ret: %{public}d", ret);
++            iter++;
++            continue;
+         }
+         online = ParseInt(buf);
++        if (online && !IsKnownPluggedNode(*iter)) {
++            /* e.g. MTK gauge/charger-IC nodes: online, but type "Unknown" */
++            online = 0;
++        }
+         if (online) {
+             onlineNode = *iter;
+             break;
+@@ -362,13 +381,9 @@ void PowerSupplyProvider::GetPluggedTypeName(char* buf, size_t size)
+         iter++;
+     }
+ 
+-    if (ret != HDF_SUCCESS) {
+-        BATTERY_HILOGD(FEATURE_BATT_INFO, "read online path failed, ret: %{public}d", ret);
+-        return;
+-    }
+-
+     if (!online) {
+-        BATTERY_HILOGW(FEATURE_BATT_INFO, "charger is not online, so no type return");
++        BATTERY_HILOGD(FEATURE_BATT_INFO, "charger is not online, so no type return");
++        buf[0] = '\0';
+         return;
+     }
+ 
+-- 
+2.50.1
+

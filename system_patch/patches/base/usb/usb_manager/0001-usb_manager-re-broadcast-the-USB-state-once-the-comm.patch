@@ -1,0 +1,91 @@
+From 7d8951c48593bb1a8a9dd50156f03c7ab15770e8 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 4 Nov 2026 07:14:11 +0000
+Subject: [PATCH] usb_manager: re-broadcast the USB state once the common event
+ service is up
+
+usb_service starts early and, with the gadget already connected at boot,
+publishes its first USB_STATE before the common event service exists.
+PublishCommonEvent then fails silently, so the sticky event is never stored:
+anything that subscribes later (Settings' USB tethering, netmanager's
+network sharing) believes USB is disconnected until the cable is replugged.
+
+Listen for COMMON_EVENT_SERVICE_ID and publish the current state again when
+it appears.
+
+Change-Id: If2711597aaa58ac6a1abfa6509fb2953aeee26a1
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/native/include/usb_device_manager.h |  1 +
+ services/native/src/usb_device_manager.cpp   | 15 +++++++++++++++
+ services/native/src/usb_service.cpp          |  9 +++++++++
+ 3 files changed, 25 insertions(+)
+
+diff --git a/services/native/include/usb_device_manager.h b/services/native/include/usb_device_manager.h
+index 9eba5ce2..bc7234b0 100644
+--- a/services/native/include/usb_device_manager.h
++++ b/services/native/include/usb_device_manager.h
+@@ -70,6 +70,7 @@ public:
+     void SetChargeFlag(bool isReverseCharge);
+     int32_t GetCurrentFunctions(int32_t& funcs);
+     int32_t SetCurrentFunctions(int32_t funcs);
++    void RebroadcastState();
+ private:
+     void ProcessFunctionSwitchWindow(bool connected);
+     void ProcessFunctionNotifier(bool connected, int32_t func);
+diff --git a/services/native/src/usb_device_manager.cpp b/services/native/src/usb_device_manager.cpp
+index be5a2a84..162f9ab9 100644
+--- a/services/native/src/usb_device_manager.cpp
++++ b/services/native/src/usb_device_manager.cpp
+@@ -551,6 +551,21 @@ void UsbDeviceManager::BroadcastFuncChange(bool connected, int32_t currentFunc)
+     ReportDevicePlugSysEvent(currentFunc, connected);
+ }
+ 
++/*
++ * Publish the current USB_STATE again.  The first one can go out before the
++ * common event service is up (usb_service starts early and the gadget is
++ * usually already connected); PublishCommonEvent then fails silently and the
++ * sticky event never exists, so Settings' USB tethering stays "USB not
++ * connected" until the cable is replugged.  UsbService calls this once CES
++ * appears.
++ */
++void UsbDeviceManager::RebroadcastState()
++{
++    USB_HILOGI(MODULE_USB_DEVICE, "%{public}s: connected %{public}d, currentFunc %{public}d", __func__,
++        connected_, currentFunctions_);
++    BroadcastFuncChange(connected_, currentFunctions_);
++}
++
+ void UsbDeviceManager::ProcessFuncChange(bool connected, int32_t currentFunc)
+ {
+     USB_HILOGI(MODULE_USB_DEVICE, "%{public}s: connected %{public}d, currentFunc %{public}d, isDisableDialog "
+diff --git a/services/native/src/usb_service.cpp b/services/native/src/usb_service.cpp
+index e87f7952..3810cf7d 100644
+--- a/services/native/src/usb_service.cpp
++++ b/services/native/src/usb_service.cpp
+@@ -244,6 +244,12 @@ void UsbService::OnAddSystemAbility(int32_t systemAbilityId, const std::string &
+         Memory::MemMgrClient::GetInstance().NotifyProcessStatus(getpid(), 1, 1, USB_SYSTEM_ABILITY_ID);
+         Memory::MemMgrClient::GetInstance().SetCritical(getpid(), true, USB_SYSTEM_ABILITY_ID);
+     }
++#ifdef USB_MANAGER_FEATURE_DEVICE
++    if (systemAbilityId == COMMON_EVENT_SERVICE_ID && usbDeviceManager_ != nullptr) {
++        // see UsbDeviceManager::RebroadcastState
++        usbDeviceManager_->RebroadcastState();
++    }
++#endif // USB_MANAGER_FEATURE_DEVICE
+ }
+ // LCOV_EXCL_STOP
+ 
+@@ -335,6 +341,9 @@ void UsbService::OnStart()
+         return;
+     }
+     AddSystemAbilityListener(MEMORY_MANAGER_SA_ID);
++#ifdef USB_MANAGER_FEATURE_DEVICE
++    AddSystemAbilityListener(COMMON_EVENT_SERVICE_ID);
++#endif // USB_MANAGER_FEATURE_DEVICE
+     if (!Publish(g_serviceInstance)) {
+         USB_HILOGE(MODULE_USB_SERVICE, "OnStart register to system ability manager failed.");
+         return;
+-- 
+2.50.1
+
