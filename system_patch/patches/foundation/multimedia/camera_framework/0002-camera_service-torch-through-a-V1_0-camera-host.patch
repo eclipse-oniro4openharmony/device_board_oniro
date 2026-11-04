@@ -1,0 +1,71 @@
+From 2268674a46f9ecd6189cf0d655110db68a0b4ae2 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 4 Nov 2026 16:40:39 +0000
+Subject: [PATCH] camera_service: torch through a V1_0 camera host
+
+CameraManager.setTorchMode only reaches the HDI as SetFlashlight_V1_2 on
+a V1_2 host. The stock VDI-based camera_host is V1_0, so with it the torch
+call failed ("cameraHostProxyV1_2_ is null"). Its status never reached the
+torch listeners either, because only OnFlashlightStatus_V1_2 feeds
+OnTorchStatus.
+
+On a host without V1_2:
+* SetTorchLevel switches the first camera that advertises a flash with the
+  V1_0 SetFlashlight(cameraId, level > 0).
+* OnFlashlightStatus also drives OnTorchStatus.
+
+Change-Id: I507dbe5306908edd946807a94a9035519b4797b2
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../src/hcamera_host_manager.cpp              | 28 +++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/services/camera_service/src/hcamera_host_manager.cpp b/services/camera_service/src/hcamera_host_manager.cpp
+index 56f4db3..db067e6 100644
+--- a/services/camera_service/src/hcamera_host_manager.cpp
++++ b/services/camera_service/src/hcamera_host_manager.cpp
+@@ -458,6 +458,28 @@ int32_t HCameraHostManager::CameraHostInfo::SetFlashlight(const std::string& cam
+ int32_t HCameraHostManager::CameraHostInfo::SetTorchLevel(float level)
+ {
+     std::lock_guard<std::mutex> lock(mutex_);
++    if (cameraHostProxyV1_2_ == nullptr && cameraHostProxy_ != nullptr) {
++        // A V1_0-only host (the stock VDI-based camera_host) has no
++        // SetFlashlight_V1_2: switch the torch of the first camera that
++        // advertises a flash through the per-camera V1_0 call instead.
++        for (const auto& cameraId : cameraIds_) {
++            std::vector<uint8_t> abilityVec;
++            CHECK_CONTINUE(cameraHostProxy_->GetCameraAbility(cameraId, abilityVec) != HDI::Camera::V1_0::NO_ERROR);
++            std::shared_ptr<OHOS::Camera::CameraMetadata> ability;
++            OHOS::Camera::MetadataUtils::ConvertVecToMetadata(abilityVec, ability);
++            camera_metadata_item_t item;
++            bool hasFlash = ability != nullptr &&
++                OHOS::Camera::FindCameraMetadataItem(ability->get(), OHOS_ABILITY_FLASH_AVAILABLE, &item) ==
++                CAM_META_SUCCESS && item.count > 0 && item.data.u8[0] == 1;
++            CHECK_CONTINUE(!hasFlash);
++            CamRetCode rc = (CamRetCode)(cameraHostProxy_->SetFlashlight(cameraId, level > 0));
++            MEDIA_INFO_LOG("CameraHostInfo::SetTorchLevel %{public}f via V1_0 SetFlashlight(%{public}s): %{public}d",
++                level, cameraId.c_str(), rc);
++            return rc == HDI::Camera::V1_0::NO_ERROR ? CAMERA_OK : HdiToServiceError(rc);
++        }
++        MEDIA_ERR_LOG("CameraHostInfo::SetTorchLevel no camera with a flash");
++        return CAMERA_UNKNOWN_ERROR;
++    }
+     CHECK_RETURN_RET_ELOG(cameraHostProxyV1_2_ == nullptr, CAMERA_UNKNOWN_ERROR,
+         "CameraHostInfo::SetTorchLevel cameraHostProxyV1_2_ is null");
+     HDI::Camera::V1_2::CamRetCode rc = (HDI::Camera::V1_2::CamRetCode)(cameraHostProxyV1_2_->SetFlashlight_V1_2(level));
+@@ -719,6 +741,12 @@ int32_t HCameraHostManager::CameraHostInfo::OnFlashlightStatus(const std::string
+             return CAMERA_UNKNOWN_ERROR;
+     }
+     statusCallback->OnFlashlightStatus(cameraId, flashStatus);
++    if (cameraHostProxyV1_2_ == nullptr) {
++        // No OnFlashlightStatus_V1_2 will ever come from a V1_0 host: the
++        // per-camera status is the torch status (see SetTorchLevel).
++        statusCallback->OnTorchStatus(status == FLASHLIGHT_ON ? TorchStatus::TORCH_STATUS_ON :
++            status == FLASHLIGHT_OFF ? TorchStatus::TORCH_STATUS_OFF : TorchStatus::TORCH_STATUS_UNAVAILABLE);
++    }
+     return CAMERA_OK;
+ }
+ // LCOV_EXCL_STOP
+-- 
+2.50.1
+
