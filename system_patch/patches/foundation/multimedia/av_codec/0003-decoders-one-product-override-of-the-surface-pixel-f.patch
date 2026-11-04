@@ -1,0 +1,70 @@
+From 33f8791185390c8db75298f87cf8a0c1298ee08e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 4 Nov 2026 14:16:56 +0000
+Subject: [PATCH] decoders: one product override of the surface pixel format
+
+The HEVC, VP8/VP9 and AV1 decoders share RenderSurface, which picks NV12
+for a display surface when the caller leaves the format open -- the same
+default FCodec has, and the same colour swap on the Oniro hybris phones,
+where NV12 surfaces map to MediaTek's Cr-first YCbCr_420_888.
+
+Honour the override there too, and rename it to
+const.media.decoder.surface_pixel_format now that it is not FCodec's alone.
+
+Change-Id: I297a01a68f61ace208926035bdfd3ea7ebbd693d
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../engine/codec/video/decoderbase/render_surface.cpp | 11 ++++++++++-
+ services/engine/codec/video/fcodec/fcodec.cpp         |  4 ++--
+ 2 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/services/engine/codec/video/decoderbase/render_surface.cpp b/services/engine/codec/video/decoderbase/render_surface.cpp
+index 94f8a0f99..76b9cd425 100644
+--- a/services/engine/codec/video/decoderbase/render_surface.cpp
++++ b/services/engine/codec/video/decoderbase/render_surface.cpp
+@@ -15,6 +15,7 @@
+ 
+ #include "render_surface.h"
+ #include "avcodec_trace.h"
++#include "syspara/parameters.h"
+ 
+ namespace OHOS {
+ namespace MediaAVCodec {
+@@ -299,7 +300,15 @@ int32_t RenderSurface::SetSurfaceFormat()
+ int32_t RenderSurface::SetSurfaceCfg()
+ {
+     if (outputPixelFmt_ == VideoPixelFormat::UNKNOWN) {
+-        format_.PutIntValue(MediaDescriptionKey::MD_KEY_PIXEL_FORMAT, static_cast<int32_t>(VideoPixelFormat::NV12));
++        /*
++         * A product whose display stack samples NV12 with the chroma swapped
++         * (MediaTek gralloc under libhybris lays the flexible YCbCr_420_888
++         * that NV12 surfaces map to out Cr-first) can ask for NV21 surface
++         * output instead.  Only when the caller left the format to the decoder.
++         */
++        bool nv21 = OHOS::system::GetParameter("const.media.decoder.surface_pixel_format", "") == "nv21";
++        format_.PutIntValue(MediaDescriptionKey::MD_KEY_PIXEL_FORMAT,
++                            static_cast<int32_t>(nv21 ? VideoPixelFormat::NV21 : VideoPixelFormat::NV12));
+     }
+     int32_t val32 = 0;
+     format_.GetIntValue(MediaDescriptionKey::MD_KEY_PIXEL_FORMAT, val32);
+diff --git a/services/engine/codec/video/fcodec/fcodec.cpp b/services/engine/codec/video/fcodec/fcodec.cpp
+index 81c0d2298..92e67c747 100755
+--- a/services/engine/codec/video/fcodec/fcodec.cpp
++++ b/services/engine/codec/video/fcodec/fcodec.cpp
+@@ -1871,11 +1871,11 @@ int32_t FCodec::SetOutputSurface(sptr<Surface> surface)
+      * instead.  Only when the caller left the format to the decoder.
+      */
+     if (outputPixelFmtDefaulted_ && state_ == State::CONFIGURED &&
+-        OHOS::system::GetParameter("const.media.fcodec.surface_pixel_format", "") == "nv21") {
++        OHOS::system::GetParameter("const.media.decoder.surface_pixel_format", "") == "nv21") {
+         std::lock_guard<std::mutex> fLock(formatMutex_);
+         outputPixelFmt_ = VideoPixelFormat::NV21;
+         format_.PutIntValue(FMTKey::VIDEO_PIXEL_FORMAT, static_cast<int32_t>(VideoPixelFormat::NV21));
+-        AVCODEC_LOGI("surface output pixel format NV21 (const.media.fcodec.surface_pixel_format)");
++        AVCODEC_LOGI("surface output pixel format NV21 (const.media.decoder.surface_pixel_format)");
+     }
+     UnRegisterListenerToSurface(sInfo_.surface);
+     uint64_t surfaceId = surface->GetUniqueId();
+-- 
+2.50.1
+
