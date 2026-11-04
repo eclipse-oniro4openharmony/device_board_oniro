@@ -318,6 +318,50 @@ static int poll_for(int (*cond)(void), int ms)
 // connac2 the netdev is registered by the 'P' probe long before the
 // function is armed, so wlan0's presence proves nothing.  See the file
 // header.
+static int p2p0_present(void)
+{
+	struct stat st;
+
+	return stat("/sys/class/net/p2p0", &st) == 0;
+}
+
+// SoftAP interface.  gen4m cannot switch wlan0 itself to AP mode
+// (NL80211_CMD_SET_INTERFACE -> -EFAULT), and refuses a new AP interface
+// (NL80211_CMD_NEW_INTERFACE -> -EINVAL, kmsg "P2P index full": both of
+// its role slots are already taken).  Its P2P role netdev, p2p0, does
+// switch to AP mode.  The OHOS framework only runs an AP on wlan0, or on
+// wlan1 when the chip reports STA/AP coexistence -- which the vendor wifi
+// HAL now does (device/soc/oniro/hybris_generic/hardware/wlan/
+// wifi_hal_hybris.cpp) -- so give p2p0 that name.  The chip HDI then finds
+// wlan1 already present, skips creating it, and hostapd brings it up as an
+// AP next to the live STA link on wlan0.  Nothing on the OHOS side uses
+// p2p0 (OHOS P2P expects p2p-dev-wlan0).  Best effort: a failure only
+// leaves the hotspot unavailable.
+static void rename_p2p_for_softap(void)
+{
+	struct stat st;
+	struct ifreq ifr;
+	int s;
+
+	if (stat("/sys/class/net/wlan1", &st) == 0)
+		return;
+	if (!poll_for(p2p0_present, 2000)) {
+		trace("softap: no p2p0, nothing to rename");
+		return;
+	}
+	s = socket(AF_INET, SOCK_DGRAM, 0);
+	if (s < 0)
+		return;
+	memset(&ifr, 0, sizeof(ifr));
+	strncpy(ifr.ifr_name, "p2p0", IFNAMSIZ - 1);
+	strncpy(ifr.ifr_newname, "wlan1", IFNAMSIZ - 1);
+	if (ioctl(s, SIOCSIFNAME, &ifr) == 0)
+		trace("softap: renamed p2p0 -> wlan1");
+	else
+		trace("softap: rename p2p0 -> wlan1 failed: %s", strerror(errno));
+	close(s);
+}
+
 static int do_wifi_on(void)
 {
 	// No early exit on wlan0_ready(): always write at least once.  The
@@ -365,6 +409,7 @@ static int do_wifi_on(void)
 
 		if (poll_for(wlan0_ready, WIFI_ON_SETTLE_MS)) {
 			trace("wifi-on OK on attempt %d", i);
+			rename_p2p_for_softap();
 			SetParameter(WIFI_ARMED_PARAM, "1");
 			return 0;
 		}
