@@ -32,7 +32,7 @@ allow wmtdetect proc_uptime_file:file { getattr open read };
 # Progress also goes to kmsg.
 dontaudit wmtdetect data_file:dir search;
 dontaudit wmtdetect data_log:dir { search write add_name };
-dontaudit wmtdetect data_log:file { create open write };
+dontaudit wmtdetect data_log:file { create open write getattr ioctl };
 dontaudit wmtdetect self:capability dac_override;
 allow wmtdetect paramservice_socket:sock_file write;
 allow wmtdetect kernel:unix_stream_socket connectto;

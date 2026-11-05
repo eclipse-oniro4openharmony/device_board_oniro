@@ -56,6 +56,7 @@ allow hybris_client halium_device:file { getattr open read map };
 # ashmem regions and gralloc buffers handed over by Halium services.
 allow hybris_client halium_device:chr_file { getattr ioctl map read write };
 allow hybris_client halium_domain:fd use;
+allow hybris_client tmpfs:file getattr;          # memfd-backed buffers
 
 # The container's binder: AIDL HALs and the Android servicemanager.
 allow hybris_client halium_binder_device:chr_file { getattr open read write ioctl map };
@@ -86,8 +87,8 @@ dontaudit { riladapter_host location_host } domain:file { getattr open read };
 
 # libhybris' property_set goes to the OHOS parameter service, whose socket
 # init creates before the policy loads (so it carries kernel's label).
-allow { allocator_host audio_host } kernel:unix_stream_socket connectto;
-allow { allocator_host audio_host } paramservice_socket:sock_file write;
+allow { allocator_host audio_host camera_host } kernel:unix_stream_socket connectto;
+allow { allocator_host audio_host camera_host } paramservice_socket:sock_file write;
 
 # The MediaTek audio HAL: ALSA, the audio DSP, its calibration under
 # /data/vendor.
@@ -99,7 +100,9 @@ allow audio_host dev_snd_file:chr_file { getattr open read write ioctl map };
 allowxperm audio_host dev_snd_file:chr_file ioctl { 0x4100-0x41ff 0x5400-0x54ff 0x5500-0x55ff };
 allow audio_host proc_asound_file:file { getattr open read };
 allow audio_host data_file:dir search;
-allow audio_host data_vendor:dir { getattr search open read };
+allow audio_host data_vendor:dir { getattr search open read watch watch_reads };
+# Realtime audio threads.
+allow audio_host self:capability sys_nice;
 
 # Crash dumps of hybris clients unwind through Android libraries.
 allow processdump halium_file:dir { getattr search };
@@ -126,3 +129,8 @@ allow blue_host dev_stpbt:chr_file { getattr open read write ioctl };
 
 # Halium's labels on its own tmpfs (/dev, /data, /dev/__properties__).
 allow { halium_file halium_property halium_device } tmpfs:filesystem associate;
+
+# The MediaTek HALs' privileges inside OHOS's capability limits.
+typeattribute audio_host cap_violator_sysnice;
+typeattribute composer_host cap_violator_dacoverride;
+allow composer_host self:capability dac_override;

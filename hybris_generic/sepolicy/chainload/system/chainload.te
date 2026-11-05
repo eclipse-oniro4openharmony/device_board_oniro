@@ -37,12 +37,17 @@ allow init dev_file:filesystem mount;
 allow init dev_file:dir { setattr remove_name rmdir };
 allow init { dev_binder_file dev_hwbinder_file dev_vndbinder_file }:chr_file setattr;
 allow init dev_pts_file:dir { mounton setattr };
+allow init devpts:filesystem mount;
+allow init dev_input_file:chr_file setattr;
+# init logs to /dev/kmsg before its restorecon of /dev.
+allow { init kernel } device:chr_file write;
 allow init dev_bus_usb_file:dir { search write add_name create };
 
 # appspawn.cfg mounts a pids cgroup on /dev/pids, which this kernel lacks:
 # the directory stays on devtmpfs, labeled cgroup so appspawn's per-app
 # pid directories work as they would on the cgroup.
 allow cgroup device:filesystem associate;
+allow init cgroup:dir { mounton relabelto };
 
 allow ueventd device:{ chr_file blk_file lnk_file } { getattr setattr relabelfrom };
 allow ueventd dev_attr:chr_file { getattr setattr relabelto };
@@ -58,6 +63,7 @@ typeattribute ueventd vendor_etc_file_violator_file_open;
 typeattribute ueventd vendor_etc_file_violator_file_read;
 typeattribute ueventd vendor_etc_file_violator_file_getattr;
 allow ueventd vendor_etc_file:file { getattr open read };
+allow ueventd sysfs_switch:dir { open read };
 
 # devtmpfs also has the kernel create nodes for devices that appear after
 # the policy load.  ueventd creates them anyway (its job on stock OHOS,

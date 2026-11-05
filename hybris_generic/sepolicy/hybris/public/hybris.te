@@ -32,4 +32,4 @@ type dev_hf_manager, dev_attr;       # /dev/hf_manager: sensor hub (sensor VDI)
 type dev_stpbt, dev_attr;            # /dev/stpbt: BT controller (libbt_vendor)
 type dev_wmt, dev_attr;              # /dev/wmtWifi, /dev/wmtdetect: connsys power (wmtdetect-init)
 type dev_pmsg, dev_attr;             # /dev/pmsg0: Android liblog persistent log
-type dev_mtk_audio, dev_attr;        # /dev/{audio_ipi,adsp_*,scp,usip,vow}: audio DSP (MTK audio HAL)
+type dev_mtk_audio, dev_attr;        # /dev/{audio_ipi,adsp_*,scp,usip,vow,ccci_aud}: audio DSP, modem audio

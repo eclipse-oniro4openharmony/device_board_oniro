@@ -10,3 +10,4 @@
 /dev/scp                     u:object_r:dev_mtk_audio:s0
 /dev/usip                    u:object_r:dev_mtk_audio:s0
 /dev/vow                     u:object_r:dev_mtk_audio:s0
+/dev/ccci_aud                u:object_r:dev_mtk_audio:s0

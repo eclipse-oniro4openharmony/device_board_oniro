@@ -5,10 +5,16 @@ Policy added on top of the OHOS policy (`selinux_adapter_build_path` in
 
 | dir | what |
 |-----|------|
-| `halium/` | The Halium (Android) container as one permissive island: `halium_init` (Android init), `halium_domain` (every other Android process), `halium_file`, `halium_property`. |
-| `halium/system/halium_compat*.te` | **Generated.** Every Android type name of the Plinius and X23 Halium policies as an alias of one of the four types, and the exec transition Android init needs. |
-| `androidd/` | The OHOS daemon that provisions the container and execs Android init into `halium_init`. |
+| `halium/` | The Halium (Android) container as one permissive island: `halium_init` (Android init), `halium_domain` (every other Android process), `halium_file`, `halium_property`, `halium_device`. |
+| `halium/system/halium_compat*.te` | **Generated.** Every Android type name of the Plinius and X23 Halium policies as an alias of one of the five types, and the exec transition Android init needs. |
+| `androidd/` | The OHOS daemon that provisions the container and execs Android init into `halium_init` (permissive, like the container). |
+| `hybris/` | `hybris_client`: the OHOS domains that load Android libraries through libhybris (HDI hosts, render_service, bootanimation, av_codec_service), Halium's binder, the MediaTek nodes the VDIs use, binderfs labels. |
+| `chainload/` | What the chainload changes: `/dev` is the ramdisk's devtmpfs (init relabels kernel-created nodes, ueventd fixes existing ones), binderfs and devpts mounted from the board cfgs, `/dev/.ohos-cmdline` over `/proc/cmdline`. |
+| `daemons/` | Oniro daemons: `wmtdetect` (wmtdetect-init), `location_timezone`, `usb_udc_bind`; the `ohos.hybris.*` parameters. |
+| `config/` | Product configuration Oniro installs on sys_prod (and the board's ressched config on /vendor), readable where it is used. |
 | `upstream_gaps/` | Domains named by OHOS 7.0 service cfgs that have no policy in the 7.0 tree. |
+| `debug/` | `su` (hdc's root shell) permissive on root builds. |
+| `*.json` | Whitelists and baselines `selinux_check` reads from every policy dir. |
 
 ## Why aliases
 
@@ -28,6 +34,28 @@ property service) check classes the OHOS policy does not define
 builds the policy with `--handle-unknown=allow` (system_patch
 `base/security/selinux_adapter` 0003), so those checks pass instead of
 failing closed.
+
+androidd keeps Android's labeling inside the container (`selinux_overlays()`
+in `launcher/androidd.c`): Halium's domains are permissive, so their relabels
+would go through, and sysfs and the nodes bound in from OHOS's `/dev` are
+shared objects. Android's file_contexts entries for them become `<<none>>`,
+and init.rc's `seclabel u:r:ueventd:s0` (also an OHOS domain) becomes
+`halium_domain`.
+
+## Platform notes
+
+* `/data` created before the policy existed is entirely `unlabeled`: a phone
+  moving to this image needs a userdata wipe (app data labels come from the
+  bundle manager at install time; `restorecon` cannot recreate them).
+* `/apex` (`halium_apex.img`) is labeled at pack time by
+  `kernel/ansuz/build_super_img.sh` (e2fsdroid); `mke2fs -d` writes no
+  labels.
+* Collecting every denial of a boot needs the printk ratelimit off (kauditd
+  prints through it): build the vendor_boot with
+  `OHOS_CMDLINE_DEBUG="log_buf_len=16M sysctl.kernel.printk_ratelimit=0"`.
+* `enforcing=0` on the OHOS cmdline (the same variable) overrides the
+  config file: the way back from an enforcing image that does not boot.
+* OHOS's `restorecon` takes one path and no `-R`.
 
 ## Regenerating `halium_compat*.te`
 
