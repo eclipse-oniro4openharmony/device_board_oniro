@@ -1,0 +1,10 @@
+{
+    "baseline": {
+        "user": {
+            "system_public_parameter_attr": [
+                "hybris_param"
+            ]
+        },
+        "developer": {}
+    }
+}
