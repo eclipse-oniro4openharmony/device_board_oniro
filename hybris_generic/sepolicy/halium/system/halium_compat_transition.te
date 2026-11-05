@@ -5,6 +5,7 @@
 # Every exec by Halium's Android init lands in halium_domain.
 type_transition halium_init {
     halium_file
+    halium_device
     unlabeled
     binder_device
     bluetooth_service

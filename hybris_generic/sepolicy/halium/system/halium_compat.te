@@ -1128,8 +1128,8 @@ typealias halium_property alias {
     zygote_wrap_prop
 };
 
-# 2449 names
-typealias halium_file alias {
+# 438 names
+typealias halium_device alias {
     AD5820AF_device
     AK7345AF_device
     BOOT_device
@@ -1142,10 +1142,7 @@ typealias halium_file alias {
     DW9714A_device
     DW9718AF_device
     DW9814AF_device
-    DcxoSetCap_exec
-    DockObserver_service
     FM50AF_device
-    IProxyService_service
     LC898122AF_device
     LC898212AF_device
     M4U_device_device
@@ -1155,8 +1152,6 @@ typealias halium_file alias {
     MAINAF_device
     MATV_device
     MJC_device
-    MPED_data_file
-    MPED_socket
     MT6516_H264_DEC_device
     MT6516_Int_SRAM_device
     MT6516_MM_QUEUE_device
@@ -1173,6 +1168,415 @@ typealias halium_file alias {
     Vcodec_device
     aal_als_device
     accdet_device
+    adsp_device
+    aed_device
+    agnss_proxy_device
+    agps_device
+    alarm_device
+    als_ps_device
+    ampc0_device
+    ancservice_device
+    android_device
+    aol_flp_device
+    aol_geofence_device
+    apuext_device
+    apusys_device
+    ashmem_device
+    ashmem_libcutils_device
+    audio_device
+    audio_dsp_block_device
+    audio_ipi_device
+    audio_scp_device
+    barometer_device
+    biometric_device
+    block_device
+    bmtpool_device
+    boot_block_device
+    boot_para_block_device
+    bootdevice_block_device
+    bootimg_device
+    bsg_device
+    bt_device
+    btif_device
+    btn_device
+    cache_block_device
+    cache_device
+    cam_vpu_block_device
+    camera_device
+    camera_dip_device
+    camera_dpe_device
+    camera_eeprom_device
+    camera_fdvt_device
+    camera_gepf_device
+    camera_isp_device
+    camera_mem_device
+    camera_mfb_device
+    camera_owe_device
+    camera_pda_device
+    camera_pipemgr_device
+    camera_rsc_device
+    camera_sysram_device
+    camera_tsf_device
+    camera_wpe_device
+    ccci_aud_device
+    ccci_ccb_device
+    ccci_device
+    ccci_mdl_device
+    ccci_mdmonitor_device
+    ccci_monitor_device
+    ccci_vts_device
+    ccci_wifi_proxy_device
+    ccu_device
+    charger_ftm_device
+    conn_dbg_dev_device
+    conn_pwr_device
+    conn_scp_device
+    connfem_device
+    conninfra_device
+    connsys_bt_block_device
+    connsys_gnss_block_device
+    connsys_wifi_block_device
+    console_device
+    coredump_wifi_device
+    cpu_dma_latency_device
+    devmap_device
+    dkb_block_device
+    dm_device
+    dm_user_device
+    dmabuf_heap_device
+    dmabuf_mtk_sapu_page_device
+    dmabuf_mtk_slc_heap_device
+    dmabuf_system_heap_device
+    dmabuf_system_secure_heap_device
+    dpm_block_device
+    dri_device
+    dsp_block_device
+    dtbo_block_device
+    dummy_cam_cal_device
+    ebc_device
+    ebr_device
+    eemcs_device
+    em_sensor_jni_device
+    emd_device
+    etb_device
+    expdb_block_device
+    expdb_device
+    fat_device
+    ff_device
+    fingerprint_device
+    flashlight_device
+    fm_device
+    frp_block_device
+    fscklogs
+    fuse_device
+    fw_log_bt_device
+    fw_log_btmcu_device
+    fw_log_gps_device
+    fw_log_gpsmcu_device
+    fw_log_ics_device
+    fw_log_wifi_device
+    fw_log_wifimcu_device
+    fw_log_wmt_device
+    gdix_mt_wrapper_device
+    gdix_thp_device
+    geo_device
+    gnss_device
+    goodixfingerprintd_device
+    gps2scp_device
+    gps_emi_device
+    gps_pwr_device
+    gpsdl_device
+    gpsmdl_device
+    gpsstrg_device
+    gpu_device
+    gpueb_device
+    graphics_device
+    gsensor_device
+    gsm0710muxd_device
+    gyroscope_device
+    gz_block_device
+    gz_device
+    gzvm_device
+    hallsensor_device
+    hci_attach_dev
+    hf_manager_device
+    hid_keyboard_device
+    hidraw_device
+    hrm_device
+    humidity_device
+    hw_random_device
+    hwbinder_device
+    hwmsensor_device
+    hwzram0_device
+    icusb_device
+    iio_device
+    init_boot_block_device
+    input_device
+    ion_device
+    irtx_device
+    ise_block_device
+    kb_block_device
+    kd_camera_flashlight_device
+    kd_camera_hw_bus2_device
+    kd_camera_hw_device
+    keyblock_device
+    keychord_device
+    keystore_block_device
+    kick_powerkey_device
+    kmsg_debug_device
+    kmsg_device
+    kvm_device
+    lens_device
+    lirc_device
+    lk_block_device
+    loader_ext_block_device
+    logo_block_device
+    logo_device
+    loop-control_device
+    loop_control_device
+    loop_device
+    lowpan_device
+    m_acc_misc_device
+    m_act_misc_device
+    m_als_misc_device
+    m_baro_misc_device
+    m_batch_misc_device
+    m_bio_misc_device
+    m_fusion_misc_device
+    m_gyro_misc_device
+    m_hmdy_misc_device
+    m_mag_misc_device
+    m_pedo_misc_device
+    m_ps_misc_device
+    m_situ_misc_device
+    m_step_c_misc_device
+    mbim_device
+    mbr_device
+    mcf_ota_block_device
+    mcupmfw_block_device
+    md1arm7_block_device
+    md1dsp_block_device
+    md1img_block_device
+    md32_device
+    md3img_block_device
+    md_block_device
+    mddp_device
+    mdla_device
+    mdlog_device
+    mdp_device
+    met_device
+    metadata_block_device
+    misc2_block_device
+    misc2_device
+    misc_block_device
+    misc_device
+    misc_sd_device
+    mmcblk1_block_device
+    mmcblk1p1_block_device
+    mmcblk_device
+    mml_pq_device
+    mmp_device
+    mnld_device
+    mobicore_admin_device
+    mobicore_tui_device
+    mobicore_user_device
+    mrdump_device
+    msensor_device
+    mt6516_IDP_device
+    mt6516_isp_device
+    mt6516_jpeg_device
+    mt9p012_device
+    mt_mdp_device
+    mt_otg_test_device
+    mtd_device
+    mtfreqhopping_device
+    mtgpio_device
+    mtk-adc-cali_device
+    mtk_aov_device
+    mtk_ccd_device
+    mtk_cmdq_device
+    mtk_dfrc_device
+    mtk_fmt_device
+    mtk_fmt_sync_device
+    mtk_hcp_device
+    mtk_jpeg_device
+    mtk_kpd_device
+    mtk_mbraink_device
+    mtk_mdp_device
+    mtk_mdp_sync_device
+    mtk_radio_device
+    mtk_rrc_device
+    mtk_sched_device
+    mtk_usb_offload_device
+    mtk_v4l2_media_device
+    mtk_wwan_device
+    mtkg2d_device
+    mtp_device
+    mvpu_algo_device
+    network_device
+    nfc_device
+    nlop_device
+    null_device
+    nvcfg_block_device
+    nvcfg_device
+    nvdata_device
+    nvram_device
+    nwkopt_device
+    odm_block_device
+    oem_block_device
+    oemkeystore_block_device
+    offloadservice_device
+    otp_device
+    otp_part_block_device
+    owntty_device
+    para_block_device
+    persist_block_device
+    pi_img_device
+    pix_manager_device
+    pmem_multimedia_device
+    pmic_ftm_device
+    pmsg_device
+    pmt_device
+    port_device
+    postinstall_block_device
+    ppl_block_device
+    ppp_device
+    preloader_block_device
+    preloader_device
+    pro_info_device
+    properties_device
+    properties_serial
+    property_info
+    protect1_block_device
+    protect2_block_device
+    protect_f_device
+    protect_s_device
+    psaux_device
+    pstore_block_device
+    ptmx_device
+    ptyp_device
+    pvmfw_block_device
+    qemu_pipe_device
+    qtaguid_device
+    radio_device
+    ram_device
+    random_device
+    rebootescrow_device
+    recovery_block_device
+    recovery_device
+    rfkill_device
+    root_block_device
+    rootdisk_sysdev
+    rpmb_block_device
+    rpmb_device
+    rpmsg_device
+    rtc_device
+    sa_log_wifi_device
+    sar_device
+    scp_block_device
+    scp_device
+    sdcard_block_device
+    sec1_block_device
+    sec_device
+    sec_ro_device
+    seccfg_block_device
+    seccfg_device
+    secro_block_device
+    secure_element_device
+    seninf_device
+    seninf_n3d_device
+    sensor_device
+    sensorlist_device
+    sensors_device
+    serial_device
+    shf_device
+    smartpa1_device
+    smartpa_device
+    snapshot_device
+    spm_device
+    spmfw_block_device
+    sspm_block_device
+    sspm_device
+    st21nfc_device
+    st54spi_device
+    stpant_device
+    stpbt_device
+    stpgps_device
+    stpwmt_device
+    super_block_device
+    sw_sync_device
+    swap_block_device
+    system_block_device
+    tahiti_device
+    tee_block_device
+    tee_device
+    tee_part_device
+    teei_client_device
+    teei_config_device
+    teei_fp_device
+    teei_rpmb_device
+    teei_vfs_device
+    teeperf_device
+    tgt_device
+    thinmd_ee_device
+    tkcore_admin_device
+    tkcore_block_device
+    touch_device
+    tpd_em_log_device
+    ttyACM_device
+    ttyGS_device
+    ttyMT_device
+    ttySDIO_device
+    ttyS_device
+    ttyp_device
+    tun_device
+    tx_device
+    ublk_block_device
+    ublk_control_device
+    uboot_device
+    uhid_device
+    uibc_device
+    uinput_device
+    uio0_device
+    uio_device
+    usb_device
+    usb_serial_device
+    usbaccessory_device
+    userdata_block_device
+    userdata_sysdev
+    usrdata_device
+    ut_keymaster_device
+    utr_tui_device
+    vbmeta_block_device
+    vcp_device
+    vcu_device
+    vd_device
+    vendor_block_device
+    vfio_device
+    video_device
+    vmodem_device
+    vndbinder_device
+    vold_device
+    vow_device
+    vpu_device
+    vpud_device
+    watchdog_device
+    widevine_drv_device
+    wmtWifi_device
+    wmtdetect_device
+    xt_qtaguid_device
+    zero_device
+    zoned_block_device
+    zram0_device
+};
+
+# 2011 names
+typealias halium_file alias {
+    DcxoSetCap_exec
+    DockObserver_service
+    IProxyService_service
+    MPED_data_file
+    MPED_socket
     accessibility_service
     accessibility_trace_data_file
     account_service
@@ -1192,8 +1596,6 @@ typealias halium_file alias {
     adbd_exec
     adbd_socket
     adservices_manager_service
-    adsp_device
-    aed_device
     aee_aedv_exec
     aee_core_data_file
     aee_core_vendor_file
@@ -1203,24 +1605,15 @@ typealias halium_file alias {
     aee_exp_data_file
     aee_exp_vendor_file
     aee_hal_exec
-    agnss_proxy_device
     agnss_proxy_exec
     agnss_proxy_socket
-    agps_device
     agpsd_data_file
     agpsd_socket
     aidl_lazy_test_server_exec
     aidl_lazy_test_service
-    alarm_device
     alarm_service
-    als_ps_device
     ambient_context_service
-    ampc0_device
-    ancservice_device
-    android_device
     anr_data_file
-    aol_flp_device
-    aol_geofence_device
     apc_service
     apex_appsearch_data_file
     apex_art_data_file
@@ -1263,8 +1656,6 @@ typealias halium_file alias {
     appdomain_tmpfs
     appops_service
     appwidget_service
-    apuext_device
-    apusys_device
     archive_service
     art_apex_dir
     art_boot_exec
@@ -1277,8 +1668,6 @@ typealias halium_file alias {
     asec_apk_file
     asec_image_file
     asec_public_file
-    ashmem_device
-    ashmem_libcutils_device
     assetatlas_service
     atci-audio_socket
     atci_service_exec
@@ -1288,10 +1677,6 @@ typealias halium_file alias {
     attention_service
     attestation_verification_service
     audio_data_file
-    audio_device
-    audio_dsp_block_device
-    audio_ipi_device
-    audio_scp_device
     audio_service
     audio_socket
     audiocmdservice_atci_exec
@@ -1309,7 +1694,6 @@ typealias halium_file alias {
     backup_data_file
     backup_service
     backuprestore_socket
-    barometer_device
     battery_service
     batteryproperties_service
     batterystats_service
@@ -1321,7 +1705,6 @@ typealias halium_file alias {
     binderfs_logs_proc
     binderfs_logs_stats
     binfmt_miscfs
-    biometric_device
     biometric_service
     biosensord_nvram_exec
     bip_ap_exec
@@ -1330,22 +1713,16 @@ typealias halium_file alias {
     blank_screen_exec
     blkid_exec
     blob_store_service
-    block_device
     bluetooth_data_file
     bluetooth_efs_file
     bluetooth_logs_data_file
     bluetooth_manager_service
     bluetooth_socket
     bluetooth_userfaultfd
-    bmtpool_device
-    boot_block_device
-    boot_para_block_device
     bootanim_data_file
     bootanim_exec
     bootanim_oem_file
     bootchart_data_file
-    bootdevice_block_device
-    bootimg_device
     bootstat_data_file
     bootstat_exec
     boottrace_data_file
@@ -1356,68 +1733,35 @@ typealias halium_file alias {
     bpfloader_exec
     brightness_sysfs
     broadcastradio_service
-    bsg_device
     bt_a2dp_stream_socket
     bt_data_file
-    bt_device
     bt_dump_data_file
     bt_dump_exec
     bt_int_adp_socket
-    btif_device
-    btn_device
     bufferhubd_exec
     bugreport_service
     c2k_file
     cache_backup_file
-    cache_block_device
-    cache_device
     cache_file
     cache_private_backup_file
     cache_recovery_file
     cacheinfo_service
-    cam_vpu_block_device
     camera_data_file
-    camera_device
-    camera_dip_device
-    camera_dpe_device
-    camera_eeprom_device
-    camera_fdvt_device
-    camera_gepf_device
-    camera_isp_device
-    camera_mem_device
-    camera_mfb_device
-    camera_owe_device
-    camera_pda_device
-    camera_pipemgr_device
-    camera_rsc_device
-    camera_sysram_device
-    camera_tsf_device
-    camera_wpe_device
     cameraproxy_service
     cameraserver_exec
     cameraserver_service
     cameraserver_tmpfs
     canhalconfigurator_exec
-    ccci_aud_device
-    ccci_ccb_device
     ccci_cfg_file
     ccci_data_md1_file
-    ccci_device
     ccci_fsd_exec
     ccci_mdinit_exec
-    ccci_mdl_device
-    ccci_mdmonitor_device
-    ccci_monitor_device
     ccci_rpcd_exec
-    ccci_vts_device
-    ccci_wifi_proxy_device
     cct_data_file
-    ccu_device
     cgroup_desc_api_file
     cgroup_desc_file
     cgroup_rc_file
     cgroup_v2
-    charger_ftm_device
     charon_exec
     checkin_data_file
     chg_info
@@ -1437,21 +1781,12 @@ typealias halium_file alias {
     composd_exec
     config_data_file
     config_gz
-    conn_dbg_dev_device
-    conn_pwr_device
-    conn_scp_device
     connectivity_native_service
     connectivity_service
-    connfem_device
-    conninfra_device
     conninfra_loader_exec
     connmetrics_service
-    connsys_bt_block_device
-    connsys_gnss_block_device
     connsys_vendor_file
-    connsys_wifi_block_device
     connsyslog_data_vendor_file
-    console_device
     consumer_ir_service
     consyslog_data_file
     content_capture_service
@@ -1460,11 +1795,9 @@ typealias halium_file alias {
     contexthub_service
     contextual_search_service
     coredump_file
-    coredump_wifi_device
     country_detector_service
     coverage_service
     cppreopts_exec
-    cpu_dma_latency_device
     cpu_monitor_service
     cpuinfo_service
     crash_dump_exec
@@ -1546,7 +1879,6 @@ typealias halium_file alias {
     deviceidle_service
     devicelock_service
     devicestoragemonitor_service
-    devmap_device
     dex2oat_exec
     dex2oat_userfaultfd
     dexopt_chroot_setup_exec
@@ -1561,14 +1893,6 @@ typealias halium_file alias {
     dhcp_exec
     diskstats_service
     display_service
-    dkb_block_device
-    dm_device
-    dm_user_device
-    dmabuf_heap_device
-    dmabuf_mtk_sapu_page_device
-    dmabuf_mtk_slc_heap_device
-    dmabuf_system_heap_device
-    dmabuf_system_secure_heap_device
     dmc_core_exec
     dmesgd_data_file
     dmesgd_exec
@@ -1579,18 +1903,13 @@ typealias halium_file alias {
     doe_vendor_data_file
     domain_verification_service
     dontpanic_data_file
-    dpm_block_device
     dreams_service
-    dri_device
     drm_data_file
     drmserver_exec
     drmserver_service
     drmserver_socket
     dropbox_data_file
     dropbox_service
-    dsp_block_device
-    dtbo_block_device
-    dummy_cam_cal_device
     dummy_type_meant_to_prevent_selinux_compilation_from_failing_when_system_ext_public_dir_has_nothing_but_attributes
     dumpstate_exec
     dumpstate_service
@@ -1601,27 +1920,19 @@ typealias halium_file alias {
     e2fs_exec
     eara_io_data_file
     eara_io_exec
-    ebc_device
-    ebr_device
     ecm_enhanced_confirmation_service
-    eemcs_device
     efs_file
     em_hidl_exec
-    em_sensor_jni_device
     emcamera_app_userfaultfd
-    emd_device
     emdloggerv_exec
     emergency_affordance_service
     emergency_data_file
     environ_system_data_file
     epdg_wod_exec
     ephemeral_app_userfaultfd
-    etb_device
     ethernet_service
     evsmanagerd_exec
     evsmanagerd_service
-    expdb_block_device
-    expdb_device
     external_vibrator_service
     extra_free_kbytes_exec
     face_service
@@ -1631,17 +1942,14 @@ typealias halium_file alias {
     factory_exec
     factory_vendor_file
     fastbootd_iouring
-    fat_device
     fd_server_exec
     feature_flags_service
     ff_data_file
-    ff_device
     ff_hwservice
     ff_service
     ff_ta_exec
     file_contexts_file
     file_integrity_service
-    fingerprint_device
     fingerprint_service
     fingerprint_vendor_data_file
     fingerprintd_data_file
@@ -1650,14 +1958,11 @@ typealias halium_file alias {
     firmware_file
     flags_health_check_exec
     flashlessd_exec
-    flashlight_device
-    fm_device
     fm_hidl_service_exec
     fon_image_data_file
     font_data_file
     font_service
     fpsgo_native_exec
-    frp_block_device
     frs_socket
     fs_bpf_loader
     fs_bpf_net_private
@@ -1668,24 +1973,14 @@ typealias halium_file alias {
     fs_bpf_uprobestats
     fs_bpf_vendor
     fsck_exec
-    fscklogs
     fsverity_init_exec
     fuelgauged_exec
     fuelgauged_nvram_exec
     fuse
-    fuse_device
     fuseblk
     fuseblkd_exec
     fuseblkd_untrusted_exec
     fusectlfs
-    fw_log_bt_device
-    fw_log_btmcu_device
-    fw_log_gps_device
-    fw_log_gpsmcu_device
-    fw_log_ics_device
-    fw_log_wifi_device
-    fw_log_wifimcu_device
-    fw_log_wmt_device
     fwk_altitude_service
     fwk_automotive_display_hwservice
     fwk_automotive_display_service
@@ -1707,53 +2002,33 @@ typealias halium_file alias {
     gatekeeper_service
     gatekeeperd_exec
     gbe_native_exec
-    gdix_mt_wrapper_device
-    gdix_thp_device
-    geo_device
     getgameserver_exec
     gfxinfo_service
     gki_apex_prepostinstall_exec
     gmscore_app_userfaultfd
     gnss_daemon_exec
     gnss_data_file
-    gnss_device
     gnss_time_update_service
     goodix_data_file
     goodix_fingerprint_service
     goodix_fingerprint_vndservice
-    goodixfingerprintd_device
-    gps2scp_device
     gps_control
     gps_data_file
     gps_dump_exec
-    gps_emi_device
-    gps_pwr_device
-    gpsdl_device
-    gpsmdl_device
-    gpsstrg_device
-    gpu_device
     gpu_dump_vendor_file
     gpu_service
-    gpueb_device
     gpunn_data_file
     gpuservice_exec
     grammatical_inflection_service
-    graphics_device
     graphicsstats_service
-    gsensor_device
     gsi_data_file
     gsi_metadata_file
     gsi_persistent_data_file
     gsi_public_metadata_file
     gsi_service
     gsid_exec
-    gsm0710muxd_device
     gsm0710muxd_exec
     gsmrild_socket
-    gyroscope_device
-    gz_block_device
-    gz_device
-    gzvm_device
     hal_allocator_default_exec
     hal_atrace_default_exec
     hal_atrace_hwservice
@@ -1980,10 +2255,8 @@ typealias halium_file alias {
     hal_wifi_supplicant_default_exec
     hal_wifi_supplicant_hwservice
     hal_wifi_supplicant_service
-    hallsensor_device
     hardware_properties_service
     hardware_service
-    hci_attach_dev
     hdmi_control_service
     healthconnect_service
     healthd_exec
@@ -1991,32 +2264,21 @@ typealias halium_file alias {
     heapprofd_exec
     heapprofd_socket
     heapprofd_tmpfs
-    hf_manager_device
-    hid_keyboard_device
     hidl_allocator_hwservice
     hidl_base_hwservice
     hidl_lazy_test_server_exec
     hidl_manager_hwservice
     hidl_memory_hwservice
     hidl_token_hwservice
-    hidraw_device
     hint_service
     horcali_app_userfaultfd
     hostapd_data_file
-    hrm_device
     http_proxy_cfg_data_file
-    humidity_device
-    hw_random_device
-    hwbinder_device
-    hwmsensor_device
     hwservice_contexts_file
     hwservicemanager_exec
-    hwzram0_device
     icon_file
-    icusb_device
     idmap_exec
     idmap_service
-    iio_device
     imei_restore_exec
     imms_service
     ims_ipsec_data_file
@@ -2028,12 +2290,10 @@ typealias halium_file alias {
     incidentd_exec
     incremental_control_file
     incremental_service
-    init_boot_block_device
     init_insmod_sh_exec
     init_pstore_blk_sh_exec
     init_thh_service_exec
     init_tmpfs
-    input_device
     input_method_service
     input_service
     inputflinger_exec
@@ -2041,7 +2301,6 @@ typealias halium_file alias {
     install_data_file
     installd_exec
     installd_service
-    ion_device
     iorap_inode2filename_exec
     iorap_inode2filename_tmpfs
     iorap_prefetcherd_exec
@@ -2057,49 +2316,32 @@ typealias halium_file alias {
     iris_vendor_data_file
     irqmon_graphtracer_exec
     irqmon_vendor_file
-    irtx_device
-    ise_block_device
     iso9660
     isolated_app_userfaultfd
     isolated_compute_app_userfaultfd
     iw_exec
     jobscheduler_service
-    kb_block_device
-    kd_camera_flashlight_device
-    kd_camera_hw_bus2_device
-    kd_camera_hw_device
     key_install_data_file
-    keyblock_device
     keychain_data_file
-    keychord_device
     keystore2_key_contexts_file
-    keystore_block_device
     keystore_compat_hal_service
     keystore_data_file
     keystore_exec
     keystore_maintenance_service
     keystore_metrics_service
     keystore_service
-    kick_powerkey_device
     kisd_exec
-    kmsg_debug_device
-    kmsg_device
-    kvm_device
     launcherapps_service
     lbs_dbg_ext_socket
     lbs_hidl_service_exec
     legacy_permission_service
     legacykeystore_service
-    lens_device
     light_service
     linkerconfig_exec
     linkerconfig_file
-    lirc_device
-    lk_block_device
     llkd_exec
     lmkd_exec
     lmkd_socket
-    loader_ext_block_device
     locale_service
     location_service
     location_time_zone_manager_service
@@ -2115,47 +2357,17 @@ typealias halium_file alias {
     loghidlvendorservice_exec
     logmisc_data_file
     logmuch_data_file
-    logo_block_device
-    logo_device
     logo_updater_exec
     logtemp_data_file
-    loop-control_device
-    loop_control_device
-    loop_device
     looper_stats_service
     lost_found_data_file
-    lowpan_device
     lowpan_service
     lpdump_service
     lpdumpd_exec
-    m_acc_misc_device
-    m_act_misc_device
-    m_als_misc_device
-    m_baro_misc_device
-    m_batch_misc_device
-    m_bio_misc_device
-    m_fusion_misc_device
-    m_gyro_misc_device
-    m_hmdy_misc_device
-    m_mag_misc_device
-    m_pedo_misc_device
-    m_ps_misc_device
-    m_situ_misc_device
-    m_step_c_misc_device
     mac_perms_file
     mal_data_file
     mal_mfi_socket
-    mbim_device
-    mbr_device
-    mcf_ota_block_device
     mcf_ota_file
-    mcupmfw_block_device
-    md1arm7_block_device
-    md1dsp_block_device
-    md1img_block_device
-    md32_device
-    md3img_block_device
-    md_block_device
     md_monitor_exec
     md_monitor_vendor_file
     md_rfs_data_vendor_file
@@ -2163,21 +2375,17 @@ typealias halium_file alias {
     md_rfs_mdlpm_file
     md_rfs_mdota2_file
     mddb_data_file
-    mddp_device
     mdl_coll_data_vendor_file
     mdl_coll_exec
     mdl_ctrl_exec
     mdl_ctrl_mgr_data_vendor_file
     mdl_ctrl_mgr_exec
-    mdla_device
     mdlog_data_file
     mdlog_data_vendor_file
-    mdlog_device
     mdns_service
     mdns_socket
     mdnsd_exec
     mdnsd_socket
-    mdp_device
     media_communication_service
     media_data_file
     media_metrics_service
@@ -2211,33 +2419,20 @@ typealias halium_file alias {
     meminfo_service
     memtrackproxy_service
     merged_hal_service_exec
-    met_device
     meta_atci_socket
     meta_tst_exec
-    metadata_block_device
     metadata_bootstat_file
     metadata_file
     method_trace_data_file
     midi_service
     migrate_legacy_obb_data_exec
     mirror_data_file
-    misc2_block_device
-    misc2_device
-    misc_block_device
-    misc_device
     misc_logd_file
-    misc_sd_device
     misc_user_data_file
     misctrl_exec
     mm_events_exec
     mmc_ffu_exec
-    mmcblk1_block_device
-    mmcblk1p1_block_device
-    mmcblk_device
-    mml_pq_device
-    mmp_device
     mnld_data_file
-    mnld_device
     mnld_exec
     mnld_socket
     mnt_expand_file
@@ -2248,39 +2443,18 @@ typealias halium_file alias {
     mnt_sdcard_file
     mnt_user_file
     mnt_vendor_file
-    mobicore_admin_device
     mobicore_app_userfaultfd
     mobicore_data_file
     mobicore_exec
-    mobicore_tui_device
-    mobicore_user_device
     mobicore_vendor_file
     modemdbfilter_service_exec
     mount_service
-    mrdump_device
-    msensor_device
-    mt6516_IDP_device
-    mt6516_isp_device
-    mt6516_jpeg_device
-    mt9p012_device
-    mt_mdp_device
-    mt_otg_test_device
-    mtd_device
     mtectrl_exec
     mtee_trusty_file
-    mtfreqhopping_device
-    mtgpio_device
-    mtk-adc-cali_device
     mtk_agpsd_exec
-    mtk_aov_device
     mtk_audiohal_data_file
-    mtk_ccd_device
-    mtk_cmdq_device
     mtk_dconfig_exec
-    mtk_dfrc_device
     mtk_disp_pq_data_file
-    mtk_fmt_device
-    mtk_fmt_sync_device
     mtk_hal_aee_hwservice
     mtk_hal_aee_service
     mtk_hal_aov_service
@@ -2389,37 +2563,22 @@ typealias halium_file alias {
     mtk_hal_wfo_exec
     mtk_hal_wfo_hwservice
     mtk_hal_wifi_exec
-    mtk_hcp_device
-    mtk_jpeg_device
-    mtk_kpd_device
     mtk_lbs_service_exec
     mtk_mbrainj_service
-    mtk_mbraink_device
     mtk_mdm_hidl_server
-    mtk_mdp_device
-    mtk_mdp_sync_device
     mtk_pkm_service_exec
     mtk_powerhal_data_file
     mtk_radio_data_file
-    mtk_radio_device
     mtk_remotefsd_exec
-    mtk_rrc_device
-    mtk_sched_device
     mtk_thinmd_exec
     mtk_thp_data_file
-    mtk_usb_offload_device
-    mtk_v4l2_media_device
     mtk_wmt_launcher_exec
-    mtk_wwan_device
-    mtkg2d_device
     mtkpower_applist_exec
     mtkrild_exec
-    mtp_device
     mtp_exec
     mtpd_socket
     music_recognition_service
     muxreport_exec
-    mvpu_algo_device
     nativetest_data_file
     nearby_service
     net_data_file
@@ -2434,7 +2593,6 @@ typealias halium_file alias {
     netstats_service
     netutils_wrapper_exec
     netutils_wrapper_exec_bin
-    network_device
     network_management_service
     network_score_service
     network_stack_service
@@ -2444,27 +2602,18 @@ typealias halium_file alias {
     network_watchlist_service
     nfc_data_file
     nfc_data_vendor_file
-    nfc_device
     nfc_logs_data_file
     nfc_socket_file
     nfc_userfaultfd
     nfcstackp_vendor_exec
-    nlop_device
     nonplat_service_contexts_file
     notification_service
-    null_device
-    nvcfg_block_device
-    nvcfg_device
     nvcfg_file
-    nvdata_device
     nvdata_file
     nvram_daemon_exec
     nvram_data_file
-    nvram_device
-    nwkopt_device
     nxpnfc_hwservice
     oatdump_exec
-    odm_block_device
     odrefresh_data_file
     odrefresh_exec
     odrefresh_userfaultfd
@@ -2473,11 +2622,8 @@ typealias halium_file alias {
     odsign_exec
     odsign_key
     odsign_metrics_file
-    oem_block_device
     oem_lock_service
     oemfs
-    oemkeystore_block_device
-    offloadservice_device
     omadm_data_file
     omadm_misc_file
     ondevicepersonalization_system_service
@@ -2491,16 +2637,12 @@ typealias halium_file alias {
     otadexopt_service
     otapreopt_chroot_exec
     otapreopt_slot_exec
-    otp_device
-    otp_part_block_device
     overlay_service
     overlayfs_file
-    owntty_device
     pac_proxy_service
     package_native_service
     package_service
     packages_list_file
-    para_block_device
     password_slot_metadata_file
     pcba_featurex_help_fw_service
     pdx_bufferhub_client_channel_socket
@@ -2530,22 +2672,13 @@ typealias halium_file alias {
     permission_service
     permissioncontroller_app_userfaultfd
     permissionmgr_service
-    persist_block_device
     persist_data_file
     persist_file
     persistent_data_block_service
-    pi_img_device
     pinner_service
-    pix_manager_device
     platform_app_userfaultfd
     platform_compat_service
-    pmem_multimedia_device
-    pmic_ftm_device
-    pmsg_device
-    pmt_device
-    port_device
     postinstall_apex_mnt_dir
-    postinstall_block_device
     postinstall_dexopt_exec
     postinstall_dexopt_tmpfs
     postinstall_exec
@@ -2554,12 +2687,8 @@ typealias halium_file alias {
     power_service
     powerstats_service
     ppl_agent_exec
-    ppl_block_device
     ppp_data_file
-    ppp_device
     ppp_exec
-    preloader_block_device
-    preloader_device
     preloads_copy_exec
     preloads_data_file
     preloads_media_file
@@ -2576,7 +2705,6 @@ typealias halium_file alias {
     prize_sysfs_batteryinfo
     prng_seeder_exec
     prng_seeder_socket
-    pro_info_device
     proc
     proc_abi
     proc_aed
@@ -2781,37 +2909,20 @@ typealias halium_file alias {
     profiling_service
     profman_dump_data_file
     profman_exec
-    properties_device
-    properties_serial
     property_contexts_file
     property_data_file
-    property_info
     property_socket
-    protect1_block_device
-    protect2_block_device
     protect_f_data_file
-    protect_f_device
     protect_s_data_file
-    protect_s_device
     provision_file
-    psaux_device
-    pstore_block_device
-    ptmx_device
-    ptyp_device
-    pvmfw_block_device
     pwrctl_cmd_exec
-    qemu_pipe_device
-    qtaguid_device
     racoon_exec
     racoon_socket
     radio_core_data_file
     radio_data_file
-    radio_device
     radio_service
     radio_userfaultfd
     radvd_data_file
-    ram_device
-    random_device
     rawfs
     rcs_rild_socket
     rcs_ua_proxy_socket
@@ -2819,10 +2930,7 @@ typealias halium_file alias {
     rcs_volte_stack_exec
     rcs_volte_stack_socket
     reboot_readiness_service
-    rebootescrow_device
-    recovery_block_device
     recovery_data_file
-    recovery_device
     recovery_persist_exec
     recovery_refresh_exec
     recovery_service
@@ -2841,7 +2949,6 @@ typealias halium_file alias {
     resources_manager_service
     restrictions_service
     resume_on_reboot_key
-    rfkill_device
     rild-dongle_socket
     rild2_md2_socket
     rild2_socket
@@ -2880,22 +2987,15 @@ typealias halium_file alias {
     role_service
     rollback_data_file
     rollback_service
-    root_block_device
-    rootdisk_sysdev
     rpc_socket
-    rpmb_block_device
-    rpmb_device
-    rpmsg_device
     rs_data_file
     rs_exec
     rss_hwm_reset_exec
-    rtc_device
     rttmanager_service
     runas_app_userfaultfd
     runas_exec
     runtime_event_log_tags_file
     runtime_service
-    sa_log_wifi_device
     safety_center_service
     same_process_hal_file
     samplingprofiler_service
@@ -2903,11 +3003,7 @@ typealias halium_file alias {
     sap_log_data_vendor_file
     sap_log_exec
     sap_remotefs_data_file
-    sar_device
     scheduling_policy_service
-    scp_block_device
-    scp_device
-    sdcard_block_device
     sdcardd_exec
     sdcardfs
     sdk_sandbox_34_userfaultfd
@@ -2919,31 +3015,18 @@ typealias halium_file alias {
     seapp_contexts_file
     search_service
     search_ui_service
-    sec1_block_device
-    sec_device
     sec_key_att_app_id_provider_service
-    sec_ro_device
-    seccfg_block_device
-    seccfg_device
-    secro_block_device
-    secure_element_device
     secure_element_service
     secure_element_userfaultfd
     security_state_service
     securityfs
     selection_toolbar_service
-    seninf_device
-    seninf_n3d_device
     sensitive_content_protection_service
     sensor_data_file
-    sensor_device
     sensor_privacy_service
     sensorhub_app_userfaultfd
-    sensorlist_device
-    sensors_device
     sensorservice_service
     sepolicy_file
-    serial_device
     server_configurable_flags_data_file
     service_contexts_file
     service_manager_service
@@ -2960,7 +3043,6 @@ typealias halium_file alias {
     shell_key
     shell_test_data_file
     shell_userfaultfd
-    shf_device
     shortcut_manager_icons
     shortcut_service
     shutdown_checkpoints_system_data_file
@@ -2971,10 +3053,7 @@ typealias halium_file alias {
     slice_service
     slpd_exec
     smartcharging_exec
-    smartpa1_device
-    smartpa_device
     smartspace_service
-    snapshot_device
     snapshotctl_exec
     snapshotctl_log_data_file
     snapuserd_exec
@@ -2988,13 +3067,7 @@ typealias halium_file alias {
     soc_vt_tcv_socket
     soundtrigger_middleware_service
     speech_recognition_service
-    spm_device
     spm_loader_exec
-    spmfw_block_device
-    sspm_block_device
-    sspm_device
-    st21nfc_device
-    st54spi_device
     st54spi_hal_secure_element_exec
     staged_install_file
     staging_data_file
@@ -3020,19 +3093,12 @@ typealias halium_file alias {
     storagestats_service
     stp_dump3_exec
     stp_dump_data_file
-    stpant_device
-    stpbt_device
-    stpgps_device
-    stpwmt_device
     stroke_exec
     su_key
     su_userfaultfd
-    super_block_device
     surfaceflinger_exec
     surfaceflinger_service
     surfaceflinger_tmpfs
-    sw_sync_device
-    swap_block_device
     sys_ddr_emmc_led
     sys_lcd_brightness_file
     sys_led_brightness_file
@@ -3226,7 +3292,6 @@ typealias halium_file alias {
     system_app_service
     system_app_userfaultfd
     system_asan_options_file
-    system_block_device
     system_bootstrap_lib_file
     system_config_service
     system_data_file
@@ -3258,22 +3323,15 @@ typealias halium_file alias {
     system_wpa_socket
     system_zoneinfo_file
     systemkeys_data_file
-    tahiti_device
     tare_service
     task_profiles_api_file
     task_profiles_file
     task_service
     tcpdump_exec
-    tee_block_device
     tee_data_file
-    tee_device
     tee_exec
-    tee_part_device
-    teei_client_device
-    teei_config_device
     teei_control_file
     teei_data_file
-    teei_fp_device
     teei_hal_capi_exec
     teei_hal_capi_hwservice
     teei_hal_ifaa_exec
@@ -3284,9 +3342,6 @@ typealias halium_file alias {
     teei_hal_tui_hwservice
     teei_hal_wechat_exec
     teei_hal_wechat_hwservice
-    teei_rpmb_device
-    teei_vfs_device
-    teeperf_device
     telecom_service
     tesiai_hal_hdcp_exec
     tesiai_hal_hdcp_hwservice
@@ -3296,7 +3351,6 @@ typealias halium_file alias {
     textclassifier_data_file
     textservices_service
     texttospeech_service
-    tgt_device
     thermal_core_data_file
     thermal_core_exec
     thermal_exec
@@ -3307,14 +3361,11 @@ typealias halium_file alias {
     thermal_socket
     thermalloadalgod_exec
     thinmd_data_vendor_file
-    thinmd_ee_device
     thinmd_fw_file
     threadnetwork_service
     timedetector_service
     timezone_service
     timezonedetector_service
-    tkcore_admin_device
-    tkcore_block_device
     tkcore_data_file
     tkcore_log_file
     tkcore_protect_data_file
@@ -3328,9 +3379,7 @@ typealias halium_file alias {
     tombstoned_java_trace_socket
     toolbox_exec
     touch_boost_exec
-    touch_device
     touch_press
-    tpd_em_log_device
     trace_data_file
     traced_consumer_socket
     traced_exec
@@ -3347,31 +3396,15 @@ typealias halium_file alias {
     trust_service
     tsa_hal_hdcp_exec
     tsa_hal_hdcp_service
-    ttyACM_device
-    ttyGS_device
-    ttyMT_device
-    ttySDIO_device
-    ttyS_device
-    ttyp_device
-    tun_device
     tv_ad_service
     tv_iapp_service
     tv_input_service
     tv_tuner_resource_mgr_service
-    tx_device
     tzdatacheck_exec
     uart_launcher_exec
-    ublk_block_device
-    ublk_control_device
-    uboot_device
     uce_service
     ueventd_tmpfs
-    uhid_device
-    uibc_device
     uimode_service
-    uinput_device
-    uio0_device
-    uio_device
     uncrypt_exec
     uncrypt_socket
     unencrypted_data_file
@@ -3393,28 +3426,16 @@ typealias halium_file alias {
     uprobestats_exec
     uri_grants_service
     usagestats_service
-    usb_device
-    usb_serial_device
-    usbaccessory_device
     usbd_exec
     usbfs
     user_profile_data_file
     user_profile_root_file
     user_service
-    userdata_block_device
-    userdata_sysdev
     usermodehelper
     userspace_reboot_metadata_file
-    usrdata_device
-    ut_keymaster_device
-    utr_tui_device
     uwb_service
-    vbmeta_block_device
     vcn_management_service
     vcodec_file
-    vcp_device
-    vcu_device
-    vd_device
     vdc_exec
     vehicle_binding_util_exec
     vendor_aconfig_storage_file
@@ -3423,7 +3444,6 @@ typealias halium_file alias {
     vendor_app_file
     vendor_bin_crossbuild_file
     vendor_bip_socket
-    vendor_block_device
     vendor_boringssl_self_test_exec
     vendor_camera_data_file
     vendor_camera_dump_file
@@ -3458,11 +3478,9 @@ typealias halium_file alias {
     vendor_uuid_mapping_config_file
     vendor_vm_data_file
     vendor_vm_file
-    vfio_device
     viarild_exec
     vibrator_manager_service
     vibrator_service
-    video_device
     viewcompiler_exec
     viewcompiler_tmpfs
     virtmanager_exec
@@ -3476,14 +3494,11 @@ typealias halium_file alias {
     virtualizationmanager_exec
     virtualizationservice_data_file
     virtualizationservice_exec
-    vmodem_device
-    vndbinder_device
     vndk_sp_file
     vndservice_contexts_file
     vndservicemanager_exec
     voiceinteraction_service
     vold_data_file
-    vold_device
     vold_exec
     vold_key
     vold_metadata_file
@@ -3507,11 +3522,8 @@ typealias halium_file alias {
     volte_uce_ua_hwservice
     volte_ut_socket
     volte_vt_socket
-    vow_device
     vpn_data_file
     vpn_management_service
-    vpu_device
-    vpud_device
     vpud_native_exec
     vr_hwc_exec
     vr_hwc_service
@@ -3522,7 +3534,6 @@ typealias halium_file alias {
     wait_for_keymaster_exec
     wallpaper_effects_generation_service
     wallpaper_file
-    watchdog_device
     watchdog_metadata_file
     watchdogd_exec
     wearable_sensing_service
@@ -3532,7 +3543,6 @@ typealias halium_file alias {
     webviewupdate_service
     wfca_exec
     wfca_socket
-    widevine_drv_device
     wifi_data_file
     wifi_dump_data_file
     wifi_dump_exec
@@ -3547,9 +3557,7 @@ typealias halium_file alias {
     window_service
     wlan_assistant_exec
     wm_trace_data_file
-    wmtWifi_device
     wmt_loader_exec
-    wmtdetect_device
     wo_charon_exec
     wo_epdg_client_exec
     wo_epdg_ipsec_socket
@@ -3570,11 +3578,7 @@ typealias halium_file alias {
     wpantund_service
     xcap_exec
     xgff_test_native_exec
-    xt_qtaguid_device
-    zero_device
-    zoned_block_device
     zoneinfo_data_file
-    zram0_device
     zygote_exec
     zygote_socket
     zygote_tmpfs

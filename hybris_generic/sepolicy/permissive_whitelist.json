@@ -9,6 +9,8 @@
             "partner_device_agent",
             "video_processing_service"
         ],
-        "developer": []
+        "developer": [
+            "su"
+        ]
     }
 }

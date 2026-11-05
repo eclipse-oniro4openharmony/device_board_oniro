@@ -107,6 +107,18 @@ if [[ -f "$BLOBS/halium_system_a.img" && -f "$BLOBS/halium_vendor_a.img" ]]; the
         mke2fs -q -t ext4 -d "$APEX_WORK/staging" -L halium_apex "$APEX_IMG.tmp" 192m
         mv "$APEX_IMG.tmp" "$APEX_IMG"
     fi
+    # SELinux: mke2fs -d writes no security.selinux xattrs, and the
+    # chainload mounts this before the policy loads (so no context=
+    # option): label everything halium_file, the type OHOS-side libhybris
+    # users are allowed to read and map (hybris_generic/sepolicy).
+    # Idempotent, so images built before this get labeled too.
+    E2FS_BIN="$OHOS_ROOT/out/hybris_generic/clang_x64/thirdparty/e2fsprogs"
+    APEX_FC="$(mktemp)"
+    printf '/apex(/.*)?    u:object_r:halium_file:s0\n' > "$APEX_FC"
+    LD_LIBRARY_PATH="$E2FS_BIN:$OHOS_ROOT/out/hybris_generic/clang_x64/thirdparty/selinux:$OHOS_ROOT/out/hybris_generic/clang_x64/thirdparty/pcre2" \
+        "$E2FS_BIN/e2fsdroid" -e -a /apex -S "$APEX_FC" "$APEX_IMG" >/dev/null \
+        || { rm -f "$APEX_FC"; echo "ERROR: e2fsdroid could not label $APEX_IMG" >&2; exit 1; }
+    rm -f "$APEX_FC"
     add_part halium_apex_a "$APEX_IMG"
 else
     echo "WARN: halium-blobs/ansuz not populated — OHOS-only super (no libhybris graphics)"

@@ -1,0 +1,2 @@
+/system/bin/wmtdetect-init       u:object_r:wmtdetect_exec:s0
+/system/bin/location_timezone    u:object_r:location_timezone_exec:s0

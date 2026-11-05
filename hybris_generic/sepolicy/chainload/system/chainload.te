@@ -1,0 +1,51 @@
+# Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The chainload (hybris_generic/launcher/init-chainload.sh) hands OHOS the
+# ramdisk's devtmpfs as /dev and execs init straight into its second stage.
+# Stock OHOS mounts a tmpfs on /dev in the first stage and ueventd creates
+# every node already labeled; here the kernel creates the nodes, they carry
+# the devtmpfs label `device` until init's restorecon of /dev after the
+# policy load, and ueventd fixes the mode and owner of nodes that exist.
+
+# dev_lperf and dev_graphics_file are reserved device types with no
+# exception for init or ueventd; their nodes do not exist on this kernel.
+allow init device:{ dir file chr_file blk_file sock_file lnk_file } { getattr relabelfrom };
+allow init dev_attr:{ dir chr_file sock_file lnk_file } { getattr relabelto };
+allow init { dev_attr -dev_lperf }:blk_file { getattr relabelto };
+allow init proc_cmdline_file:file { getattr relabelto };
+
+allow ueventd device:{ chr_file blk_file lnk_file } { getattr setattr relabelfrom };
+allow ueventd dev_attr:chr_file { getattr setattr relabelto };
+allow ueventd { dev_attr -dev_lperf }:blk_file { getattr setattr relabelto };
+allow ueventd dev_attr:dir { getattr search relabelto };
+
+# devtmpfs also has the kernel create nodes for devices that appear after
+# the policy load.  ueventd creates them anyway (its job on stock OHOS,
+# where the kernel never does), and several device types are reserved to
+# named domains, so the kernel's attempt is refused quietly.
+dontaudit kernel dev_attr:dir { search write add_name remove_name };
+dontaudit kernel dev_attr:{ chr_file blk_file } { create getattr setattr };
+
+# Everything init and ueventd label under /dev lives on devtmpfs, including
+# the parameter workspace files in /dev/__parameters__ and the socket dir.
+allow { dev_attr parameter_attr } device:filesystem associate;
+allow proc_cmdline_file device:filesystem associate;
+
+# init reads the product and hardware parameter files
+# (/sys_prod/etc/param/product_hybris_generic.para,
+# /chip_prod/etc/param/hardware_hybris_generic.para).
+allow init { sys_prod_file chip_prod_file }:dir { getattr open read search };
+allow init { sys_prod_file chip_prod_file }:file { getattr open read };

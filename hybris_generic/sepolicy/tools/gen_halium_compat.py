@@ -28,6 +28,7 @@ Declaring each Android type name as an alias keeps every Android context
 valid without importing Android's rules:
   * Android domains        -> halium_domain
   * Android property types -> halium_property
+  * Android device types   -> halium_device
   * everything else        -> halium_file
 Names that already exist in the OHOS policy (65 on 7.0: init, kernel,
 ueventd, system_file, vendor_file, ...) keep their OHOS meaning and are left
@@ -52,7 +53,8 @@ import argparse
 import re
 import sys
 
-ONIRO_TYPES = {"halium_init", "halium_domain", "halium_property", "halium_file"}
+ONIRO_TYPES = {"halium_init", "halium_domain", "halium_property", "halium_device",
+               "halium_file"}
 VERSION_SUFFIX = re.compile(r"^(.+)_[0-9]+_[0-9]+$")
 # Labels no Halium policy defines but that are on disk: the persist and
 # firmware partitions were formatted by the stock VollaOS system, whose
@@ -136,7 +138,11 @@ def main():
                                    {"property_type", "system_property_type",
                                     "vendor_property_type"})}
 
-    buckets = {"halium_domain": [], "halium_property": [], "halium_file": []}
+    devs = {unversion(t, android_types)
+            for t in attr_members(args.android_cil, {"dev_type"})}
+
+    buckets = {"halium_domain": [], "halium_property": [], "halium_device": [],
+               "halium_file": []}
     skipped = sorted((android_types | set(android_aliases)) & (ohos | ONIRO_TYPES))
     for name in sorted(android_types | set(android_aliases)):
         if name in ohos or name in ONIRO_TYPES:
@@ -146,6 +152,8 @@ def main():
             buckets["halium_domain"].append(name)
         elif actual in props:
             buckets["halium_property"].append(name)
+        elif actual in devs:
+            buckets["halium_device"].append(name)
         else:
             buckets["halium_file"].append(name)
 
@@ -169,7 +177,7 @@ def main():
         # equals its own ("no domain transition"), even when permissive, and
         # an executable can carry any Android label, an OHOS-colliding one
         # (ueventd is system_file) or none at all (unlabeled).
-    exec_like = ["halium_file", "unlabeled"] + [
+    exec_like = ["halium_file", "halium_device", "unlabeled"] + [
         n for n in skipped if n not in domains and n in android_types]
     with open(args.transition_output, "w", encoding="utf-8") as out:
         out.write("# Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.\n"
@@ -181,9 +189,10 @@ def main():
         for n in exec_like:
             out.write("    %s\n" % n)
         out.write("}:process halium_domain;\n")
-    print("domains %d, properties %d, files %d, kept-OHOS %d" % (
+    print("domains %d, properties %d, devices %d, files %d, kept-OHOS %d" % (
         len(buckets["halium_domain"]), len(buckets["halium_property"]),
-        len(buckets["halium_file"]), len(skipped)), file=sys.stderr)
+        len(buckets["halium_device"]), len(buckets["halium_file"]),
+        len(skipped)), file=sys.stderr)
 
 
 if __name__ == "__main__":

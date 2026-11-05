@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Oniro native daemons.
+# OHOS keeps capabilities and sh to an enumerated set of domains, with
+# *_violator attributes for the exceptions: wmtdetect renames interfaces
+# (net_admin), and usb_udc_bind is a shell loop.
+type wmtdetect, native_system_domain, domain, cap_violator_netadmin;
+type wmtdetect_exec, exec_attr, file_attr, system_file_attr;
+# A native client of the location and time SAs (passes binder objects to
+# samgr, which OHOS otherwise reserves to SAs).
+type location_timezone, native_system_domain, domain, samgr_binder_violator;
+type location_timezone_exec, exec_attr, file_attr, system_file_attr;
+type usb_udc_bind, native_system_domain, domain, sh_exec_violator;  # binds the USB gadget to the UDC
+
+# ohos.hybris.*: Oniro hybris platform state (e.g. ohos.hybris.wifi_armed).
+type hybris_param, parameter_attr;

@@ -9,7 +9,10 @@
         "rgm_violator_sadomain": [],
         "hap_domain": [],
         "native_system_domain": [
-            "androidd"
+            "androidd",
+            "wmtdetect",
+            "location_timezone",
+            "usb_udc_bind"
         ],
         "hdfdomain": [],
         "native_chipset_domain": [

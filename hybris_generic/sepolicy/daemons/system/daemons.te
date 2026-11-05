@@ -1,0 +1,64 @@
+# Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# --- wmtdetect-init (vendor/oniro/hybris_generic/etc/init/init.*.cfg) ---
+# Powers the connsys WiFi on (/dev/wmtWifi, or /dev/wmtdetect ioctls on the
+# X23), brings wlan0 up, renames p2p0, and reports
+# ohos.hybris.wifi_armed, which the WiFi HAL waits on.
+init_daemon_domain(wmtdetect)
+use_hilog(wmtdetect)
+allow wmtdetect dev_wmt:chr_file { getattr open read write ioctl };
+allow wmtdetect dev_kmsg_file:chr_file { open write };
+allow wmtdetect self:capability net_admin;
+allow wmtdetect self:udp_socket { create ioctl };
+allow wmtdetect sysfs_net:dir { getattr search };
+allow wmtdetect sys_file:dir { getattr search };
+allow wmtdetect sys_file:lnk_file read;
+allow wmtdetect sysfs_attr:file { getattr open read };
+allow wmtdetect proc_uptime_file:file { getattr open read };
+# Its /data/log tuning log is for hand runs: OHOS reserves writes there.
+# Progress also goes to kmsg.
+dontaudit wmtdetect data_file:dir search;
+dontaudit wmtdetect data_log:dir { search write add_name };
+allow wmtdetect paramservice_socket:sock_file write;
+allow wmtdetect kernel:unix_stream_socket connectto;
+allow wmtdetect hybris_param:parameter_service set;
+
+# --- location_timezone (vendor/oniro/location_timezone) ---
+# Location SA client that sets the time zone through the time service.
+init_daemon_domain(location_timezone)
+use_hilog(location_timezone)
+binder_call(location_timezone, samgr)
+binder_call(location_timezone, foundation)
+binder_call(location_timezone, param_watcher)
+allow location_timezone samgr:binder transfer;
+allow location_timezone system_usr_file:dir search;
+allow location_timezone system_usr_file:file { getattr open read map };   # ICU data
+allow location_timezone system_etc_ffrt_file:dir search;
+allow location_timezone system_etc_ffrt_file:file { getattr open read };
+allow location_timezone tracefs:dir search;
+allow location_timezone tracefs_trace_marker_file:file { open write };
+
+# --- usb_udc_bind (init.<device>.usb.cfg) ---
+# A shell loop that writes the UDC name into the configfs gadget.  Its cfg
+# names the domain (secon): no automatic transition on sh_exec.
+domain_transition_pattern(init, sh_exec, usb_udc_bind)
+allow usb_udc_bind sh_exec:file { execute map read getattr open };
+allow usb_udc_bind toybox_exec:file { execute execute_no_trans map read getattr open };
+allow usb_udc_bind configfs:dir { search write add_name };
+allow usb_udc_bind configfs:file { create getattr open read write };
+
+# ohos.hybris.* is readable by every native domain.
+allow { domain -hap_domain } hybris_param:file { map open read };

@@ -1,0 +1,6 @@
+/apex(/.*)?                  u:object_r:halium_file:s0
+/dev/hf_manager              u:object_r:dev_hf_manager:s0
+/dev/stpbt                   u:object_r:dev_stpbt:s0
+/dev/wmtWifi                 u:object_r:dev_wmt:s0
+/dev/wmtdetect               u:object_r:dev_wmt:s0
+/dev/pmsg0                   u:object_r:dev_pmsg:s0

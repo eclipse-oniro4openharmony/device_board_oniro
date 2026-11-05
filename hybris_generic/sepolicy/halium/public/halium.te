@@ -15,7 +15,7 @@
 
 # The Halium container (Android init + vendor HALs, started by androidd)
 # shares the kernel, and therefore the one loaded SELinux policy, with
-# OHOS.  Its Android type names are aliases of these four types
+# OHOS.  Its Android type names are aliases of these five types
 # (halium_compat.te, generated).  The container is one permissive island:
 # it is not confined by this policy, but everything it does is audited
 # under these names, and OHOS domains are granted access to Halium objects
@@ -27,9 +27,14 @@ type halium_init, domain, native_chipset_domain;
 type halium_domain, domain, native_chipset_domain;
 # Android property-area files under /dev/__properties__ (shared with the
 # OHOS-side libhybris users).
-type halium_property, file_attr;
-# Files on the Halium partitions and APEXes, and anything Android labels.
-type halium_file, file_attr;
+type halium_property, file_attr, vendor_file_attr;
+# Device nodes of the container's own /dev (ashmem regions handed to OHOS).
+type halium_device, dev_attr;
+# Files on the Halium partitions and APEXes, and anything else Android
+# labels.  OHOS-side libhybris users map Android libraries from them, so
+# they are an exec exception (violator_exec_file_attr) like other vendor
+# code outside the exec types.
+type halium_file, file_attr, vendor_file_attr, violator_exec_file_attr;
 
 permissive halium_init;
 permissive halium_domain;
