@@ -89,6 +89,21 @@ input policy defines; add them to `EXTRA_FILE_TYPES` in the generator.
 
 ## State
 
-Permissive (`selinux_adapter_enforce = false`): the policy is loaded and
-OHOS services run in their domains, and denials are audited
+Permissive (`selinux_adapter_enforce = false`): the policy is loaded,
+OHOS services run in their domains, denials are audited
 (`dmesg | grep avc`).
+
+Enforcing at runtime (`echo 1 > /sys/fs/selinux/enforce` after boot) was
+tested on the Plinius Plus on a fresh /data: camera preview and capture,
+the shutter sound through the MediaTek audio HAL, WiFi and Bluetooth on,
+sensors, Settings and the Control Center all work.
+
+Booting enforcing does not work yet: the boot loops (init's
+critical-service panic about 67 s in).  storage_daemon's `sdc filecrypt
+init_main_user` cannot reach samgr, the per-user /data directories are not
+created, and later every service falls back from /dev/binderfs/binder to
+the /dev/binder link.  Enforcing from the pre-init job onwards boots fine,
+so the cause sits between the policy load and pre-init (the services
+started there: ueventd, samgr, storage_daemon, hdf_devmgr, appspawn, ...).
+No log of that window survived the loops yet: pstore keeps a stale console,
+and no /data logger ran before the failure.
