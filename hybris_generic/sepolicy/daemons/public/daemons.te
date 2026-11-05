@@ -26,4 +26,4 @@ type location_timezone_exec, exec_attr, file_attr, system_file_attr;
 type usb_udc_bind, native_system_domain, domain, sh_exec_violator;  # binds the USB gadget to the UDC
 
 # ohos.hybris.*: Oniro hybris platform state (e.g. ohos.hybris.wifi_armed).
-type hybris_param, parameter_attr, system_parameter_attr;
+type hybris_param, parameter_attr, system_parameter_attr, system_public_parameter_attr;
