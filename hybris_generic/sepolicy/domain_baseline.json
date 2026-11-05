@@ -1,0 +1,28 @@
+{
+    "user": {
+        "sadomain": [
+            "cast_engine_service",
+            "fusion_ranging",
+            "partner_device_agent",
+            "video_processing_service"
+        ],
+        "rgm_violator_sadomain": [],
+        "hap_domain": [],
+        "native_system_domain": [
+            "androidd"
+        ],
+        "hdfdomain": [],
+        "native_chipset_domain": [
+            "halium_domain",
+            "halium_init"
+        ]
+    },
+    "developer": {
+        "sadomain": [],
+        "rgm_violator_sadomain": [],
+        "hap_domain": [],
+        "native_system_domain": [],
+        "hdfdomain": [],
+        "native_chipset_domain": []
+    }
+}
