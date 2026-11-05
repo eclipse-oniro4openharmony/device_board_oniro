@@ -34,6 +34,16 @@ allow ueventd device:{ chr_file blk_file lnk_file } { getattr setattr relabelfro
 allow ueventd dev_attr:chr_file { getattr setattr relabelto };
 allow ueventd { dev_attr -dev_lperf }:blk_file { getattr setattr relabelto };
 allow ueventd dev_attr:dir { getattr search relabelto };
+# Block devices that appear later (USB storage) are created unlabeled first.
+allow ueventd dev_file:blk_file { create getattr setattr relabelfrom };
+allow ueventd dev_file:lnk_file create;
+# The vendor's device permissions (/vendor/etc/ueventd.config: owners of the
+# MediaTek nodes the hybris VDIs open), behind OHOS's vendor-isolation
+# exceptions.
+typeattribute ueventd vendor_etc_file_violator_file_open;
+typeattribute ueventd vendor_etc_file_violator_file_read;
+typeattribute ueventd vendor_etc_file_violator_file_getattr;
+allow ueventd vendor_etc_file:file { getattr open read };
 
 # devtmpfs also has the kernel create nodes for devices that appear after
 # the policy load.  ueventd creates them anyway (its job on stock OHOS,

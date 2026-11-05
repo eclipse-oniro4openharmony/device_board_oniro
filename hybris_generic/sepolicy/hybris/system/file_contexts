@@ -4,3 +4,4 @@
 /dev/wmtWifi                 u:object_r:dev_wmt:s0
 /dev/wmtdetect               u:object_r:dev_wmt:s0
 /dev/pmsg0                   u:object_r:dev_pmsg:s0
+/dev/audio_ipi               u:object_r:dev_audio_ipi:s0

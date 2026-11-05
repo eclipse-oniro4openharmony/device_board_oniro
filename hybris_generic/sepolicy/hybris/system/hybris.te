@@ -48,8 +48,11 @@ typeattribute bootanimation vendor_file_violator_dir_read;
 allow { render_service bootanimation } vendor_file:dir { getattr open read };
 dontaudit { render_service bootanimation av_codec_service } vendor_file:lnk_file read;
 
-# Android property area (libbase/libcutils property reads).
+# Android property area (libbase/libcutils property reads): the directory
+# and property_info carry Android device-type labels.
 allow hybris_client halium_property:file { getattr open read map };
+allow hybris_client halium_device:dir { getattr search };
+allow hybris_client halium_device:file { getattr open read map };
 # ashmem regions and gralloc buffers handed over by Halium services.
 allow hybris_client halium_device:chr_file { getattr ioctl map read write };
 allow hybris_client halium_domain:fd use;
@@ -58,6 +61,8 @@ allow hybris_client halium_domain:fd use;
 allow hybris_client halium_binder_device:chr_file { getattr open read write ioctl map };
 allow hybris_client halium_domain:binder { call transfer };
 allow hybris_client dev_file:lnk_file read;    # /dev/{binder,hwbinder,vndbinder} links
+allow hybris_client binderfs_features_file:dir search;
+allow hybris_client binderfs_features_file:file { getattr open read };
 
 # Mali GPU through the Android EGL/GLES stack.
 allow hybris_client dev_mali:chr_file { getattr open read write ioctl map };
@@ -72,11 +77,29 @@ dontaudit hybris_client dev_pmsg:chr_file { open write };
 # search path through them hits a halium_file dir.  Harmless to refuse.
 dontaudit domain halium_file:dir search;
 
-# The RIL VDI looks the container's rild up by scanning /proc.
-allow riladapter_host halium_domain:dir search;
-allow riladapter_host halium_domain:file { getattr open read };
-dontaudit riladapter_host domain:dir search;
-dontaudit riladapter_host domain:file { getattr open read };
+# The RIL and GNSS VDIs look the container's daemons up by scanning /proc.
+allow { riladapter_host location_host } { halium_domain halium_init }:dir search;
+allow { riladapter_host location_host } { halium_domain halium_init }:file { getattr open read };
+dontaudit { riladapter_host location_host } domain:dir search;
+dontaudit { riladapter_host location_host } domain:file { getattr open read };
+
+# libhybris' property_set goes to the OHOS parameter service, whose socket
+# init creates before the policy loads (so it carries kernel's label).
+allow { allocator_host audio_host } kernel:unix_stream_socket connectto;
+allow { allocator_host audio_host } paramservice_socket:sock_file write;
+
+# The MediaTek audio HAL: ALSA, the audio DSP, its calibration under
+# /data/vendor.
+allow audio_host dev_audio_ipi:chr_file { getattr open read write ioctl map };
+allow audio_host dev_snd_file:dir { getattr search open read };
+allow audio_host dev_snd_file:chr_file { getattr open read write ioctl map };
+allow audio_host proc_asound_file:file { getattr open read };
+allow audio_host data_file:dir search;
+allow audio_host data_vendor:dir { getattr search open read };
+
+# Camera HAL buffers go to render_service and ashmem.
+allow camera_host render_service:binder transfer;
+allow camera_host dev_ashmem_file:chr_file open;
 
 # Sensor hub (sensor VDI), BT controller (libbt_vendor).
 allow sensor_host dev_hf_manager:chr_file { getattr open read write ioctl };

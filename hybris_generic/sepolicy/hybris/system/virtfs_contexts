@@ -7,3 +7,4 @@ genfscon binder /android-binder        u:object_r:halium_binder_device:s0
 genfscon binder /anbox-binder          u:object_r:halium_binder_device:s0
 genfscon binder /anbox-hwbinder        u:object_r:halium_binder_device:s0
 genfscon binder /anbox-vndbinder       u:object_r:halium_binder_device:s0
+genfscon binder /features             u:object_r:binderfs_features_file:s0

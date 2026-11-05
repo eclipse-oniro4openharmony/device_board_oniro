@@ -1,0 +1,4 @@
+/sys_prod/etc/telephony(/.*)?     u:object_r:sys_prod_oniro_config_file:s0
+/sys_prod/etc/window(/.*)?        u:object_r:sys_prod_oniro_config_file:s0
+/sys_prod/etc/display(/.*)?       u:object_r:sys_prod_oniro_config_file:s0
+/sys_prod/devices(/.*)?           u:object_r:sys_prod_oniro_config_file:s0

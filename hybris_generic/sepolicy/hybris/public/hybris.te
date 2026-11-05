@@ -23,6 +23,8 @@ attribute hybris_client;
 # binderfs nodes of the Android containers: android-binder (Halium's
 # /dev/binder) and anbox-* (Waydroid).
 type halium_binder_device, dev_attr;
+# binderfs features/ (Android's libbinder probes features/extended_error).
+type binderfs_features_file, fs_attr;
 
 # MediaTek kernel interfaces used from OHOS (hybris VDIs, Oniro daemons).
 type hybris_proc_ged, fs_attr, proc_attr;   # /proc/ged: GPU/GED driver (Mali EGL)
@@ -30,3 +32,4 @@ type dev_hf_manager, dev_attr;       # /dev/hf_manager: sensor hub (sensor VDI)
 type dev_stpbt, dev_attr;            # /dev/stpbt: BT controller (libbt_vendor)
 type dev_wmt, dev_attr;              # /dev/wmtWifi, /dev/wmtdetect: connsys power (wmtdetect-init)
 type dev_pmsg, dev_attr;             # /dev/pmsg0: Android liblog persistent log
+type dev_audio_ipi, dev_attr;        # /dev/audio_ipi: audio DSP IPI (MTK audio HAL)

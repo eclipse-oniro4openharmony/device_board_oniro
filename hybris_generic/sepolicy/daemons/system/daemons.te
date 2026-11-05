@@ -32,18 +32,31 @@ allow wmtdetect proc_uptime_file:file { getattr open read };
 # Progress also goes to kmsg.
 dontaudit wmtdetect data_file:dir search;
 dontaudit wmtdetect data_log:dir { search write add_name };
+dontaudit wmtdetect data_log:file { create open write };
+dontaudit wmtdetect self:capability dac_override;
 allow wmtdetect paramservice_socket:sock_file write;
 allow wmtdetect kernel:unix_stream_socket connectto;
 allow wmtdetect hybris_param:parameter_service set;
 
 # --- location_timezone (vendor/oniro/location_timezone) ---
-# Location SA client that sets the time zone through the time service.
+# Location SA client that sets the time zone through the time service; the
+# SAs call its callbacks back.
 init_daemon_domain(location_timezone)
 use_hilog(location_timezone)
 binder_call(location_timezone, samgr)
 binder_call(location_timezone, foundation)
 binder_call(location_timezone, param_watcher)
-allow location_timezone samgr:binder transfer;
+binder_call(location_timezone, accountmgr)
+binder_call(location_timezone, locationhub)
+allow location_timezone { samgr locationhub }:binder transfer;
+binder_call(samgr, location_timezone)
+binder_call(foundation, location_timezone)
+binder_call(param_watcher, location_timezone)
+binder_call(locationhub, location_timezone)
+allow accountmgr location_timezone:binder transfer;
+allow location_timezone persist_param:file { map open read };
+allow location_timezone hiviewdfx_hiview_param:file { map open read };
+allow location_timezone self:unix_dgram_socket { getopt setopt };
 allow location_timezone system_usr_file:dir search;
 allow location_timezone system_usr_file:file { getattr open read map };   # ICU data
 allow location_timezone system_etc_ffrt_file:dir search;
@@ -59,6 +72,10 @@ allow usb_udc_bind sh_exec:file { execute map read getattr open };
 allow usb_udc_bind toybox_exec:file { execute execute_no_trans map read getattr open };
 allow usb_udc_bind configfs:dir { search write add_name };
 allow usb_udc_bind configfs:file { create getattr open read write };
+allow usb_udc_bind system_bin_file:lnk_file read;    # grep -> toybox
+allow usb_udc_bind tty_device:chr_file { open read write };
+dontaudit usb_udc_bind self:capability { dac_override dac_read_search };
+dontaudit usb_udc_bind data_file:dir search;
 
 # ohos.hybris.* is readable by every native domain.
 allow { domain -hap_domain } hybris_param:file { map open read };
