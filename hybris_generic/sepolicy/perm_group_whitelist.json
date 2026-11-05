@@ -1,0 +1,11 @@
+{
+    "whitelist": [
+        {
+            "name": "execute and execute_no_trans",
+            "user": [
+                "usb_udc_bind toybox_exec"
+            ],
+            "developer": []
+        }
+    ]
+}
