@@ -1,0 +1,13 @@
+{
+    "whitelist": [
+        {
+            "path": "/dev",
+            "permissive_list": {
+                "user": [
+                    "/dev/\\.ohos-cmdline"
+                ],
+                "developer": []
+            }
+        }
+    ]
+}
