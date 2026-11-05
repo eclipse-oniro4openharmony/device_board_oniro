@@ -18,4 +18,4 @@
 # manager and brightness configuration, and the per-device overlays under
 # /sys_prod/devices/<device> (camera profiles, display manager and HGM
 # configuration).  Public data, readable by every domain.
-type sys_prod_oniro_config_file, sys_prod_file_attr, file_attr;
+type sys_prod_oniro_config_file, sys_prod_file_attr, sys_prod_etc_file_attr, file_attr;
