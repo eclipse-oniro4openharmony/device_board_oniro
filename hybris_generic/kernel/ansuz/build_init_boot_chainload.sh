@@ -22,6 +22,11 @@
 #         lsm=selinux                (SELinux instead of AppArmor — same
 #                                     rationale as the X23; vndservicemanager
 #                                     aborts without /sys/fs/selinux)
+#         log_buf_len=4M             (the default 128 KiB ring holds ~45 s
+#                                     under the WiFi driver's logging, so
+#                                     boot-time SELinux denials and init
+#                                     errors were gone before anyone could
+#                                     read them)
 #       The UT-flashable vendor_boot from build_kernel.sh stays pristine
 #       (UT needs AppArmor) — never flash this one under UT.
 #
@@ -58,7 +63,7 @@ DONOR_VENDOR_BOOT="${DONOR_VENDOR_BOOT:-$KERNEL_TREE/out/vendor_boot.img}"
 [ -f "$DONOR_VENDOR_BOOT" ] || DONOR_VENDOR_BOOT="$BLOBS/backups/vendor_boot_a.img"
 [ -f "$DONOR_VENDOR_BOOT" ] || DONOR_VENDOR_BOOT="$BLOBS/ut-boot/vendor_boot.img"
 
-OHOS_CMDLINE_EXTRA="ohos.boot.hardware=ansuz lsm=selinux"
+OHOS_CMDLINE_EXTRA="ohos.boot.hardware=ansuz lsm=selinux log_buf_len=4M"
 
 for f in "$DONOR_INIT_BOOT" "$DONOR_VENDOR_BOOT" "$CHAINLOAD_INIT" "$MKBOOTIMG"; do
     [ -e "$f" ] || { echo "Error: $f missing" >&2; exit 1; }
