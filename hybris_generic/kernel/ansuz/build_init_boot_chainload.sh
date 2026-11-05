@@ -64,6 +64,12 @@ DONOR_VENDOR_BOOT="${DONOR_VENDOR_BOOT:-$KERNEL_TREE/out/vendor_boot.img}"
 [ -f "$DONOR_VENDOR_BOOT" ] || DONOR_VENDOR_BOOT="$BLOBS/ut-boot/vendor_boot.img"
 
 OHOS_CMDLINE_EXTRA="ohos.boot.hardware=ansuz lsm=selinux log_buf_len=4M"
+# Extra tokens for a debug image, e.g. collecting every SELinux denial:
+#   OHOS_CMDLINE_DEBUG="enforcing=0 log_buf_len=16M sysctl.kernel.printk_ratelimit=0"
+# (kauditd prints through printk_ratelimit; at boot it drops thousands.)
+if [ -n "${OHOS_CMDLINE_DEBUG:-}" ]; then
+    OHOS_CMDLINE_EXTRA="$OHOS_CMDLINE_EXTRA $OHOS_CMDLINE_DEBUG"
+fi
 
 for f in "$DONOR_INIT_BOOT" "$DONOR_VENDOR_BOOT" "$CHAINLOAD_INIT" "$MKBOOTIMG"; do
     [ -e "$f" ] || { echo "Error: $f missing" >&2; exit 1; }
