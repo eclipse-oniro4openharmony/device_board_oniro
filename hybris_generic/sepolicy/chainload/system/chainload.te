@@ -22,8 +22,11 @@
 
 # dev_lperf and dev_graphics_file are reserved device types with no
 # exception for init or ueventd; their nodes do not exist on this kernel.
-allow init device:{ dir file chr_file blk_file sock_file lnk_file } { getattr relabelfrom };
-allow init dev_attr:{ dir chr_file sock_file lnk_file } { getattr relabelto };
+allow init device:{ dir file chr_file blk_file lnk_file } { getattr relabelfrom };
+allow init dev_attr:{ dir chr_file lnk_file } { getattr relabelto };
+# The parameter service socket is created before the policy loads.
+allow init device:sock_file { getattr relabelfrom };
+allow init paramservice_socket:sock_file { getattr relabelto };
 allow init { dev_attr -dev_lperf }:blk_file { getattr relabelto };
 allow init proc_cmdline_file:file { getattr relabelto };
 

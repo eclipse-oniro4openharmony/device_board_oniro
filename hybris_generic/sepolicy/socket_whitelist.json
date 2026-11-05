@@ -1,0 +1,8 @@
+{
+    "whitelist": {
+        "user": [
+            "device"
+        ],
+        "developer": []
+    }
+}
