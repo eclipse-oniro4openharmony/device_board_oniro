@@ -1,0 +1,18 @@
+{
+    "whitelist": {
+        "user": [
+            "hybris_client dev_mali chr_file",
+            "hybris_client dev_dma_heap_file chr_file",
+            "hybris_client halium_binder_device chr_file",
+            "hybris_client halium_device chr_file",
+            "hybris_client hybris_proc_ged file",
+            "normal_hap_attr hybris_proc_ged dir",
+            "sensor_host dev_hf_manager chr_file",
+            "blue_host dev_stpbt chr_file",
+            "wmtdetect dev_wmt chr_file",
+            "wmtdetect self udp_socket",
+            "init sh_exec file"
+        ],
+        "developer": []
+    }
+}

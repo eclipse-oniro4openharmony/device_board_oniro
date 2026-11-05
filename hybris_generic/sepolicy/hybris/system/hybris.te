@@ -25,15 +25,15 @@ typeattribute riladapter_host hybris_client;
 typeattribute location_host hybris_client;
 
 # Halium partitions, /apex, the Android libraries the VDIs dlopen.
-allow hybris_client halium_file:dir read_dir_perms;
-allow hybris_client halium_file:file { read_file_perms execute map };
+allow hybris_client halium_file:dir { getattr search open read };
+allow hybris_client halium_file:file { getattr open read map execute };
 allow hybris_client halium_file:lnk_file { getattr read };
 # Android labels most of Halium's /vendor (the partition root, lib64, many
 # libraries) vendor_file, the name of OHOS's own /vendor type.  The HDI
 # hosts are chipset domains and may use vendor code.
 allow { hybris_client -sadomain -native_system_domain } vendor_file:dir { getattr search open read };
 allow { hybris_client -sadomain -native_system_domain } vendor_file:lnk_file { getattr read };
-allow { hybris_client -sadomain -native_system_domain } vendor_file:file { read_file_perms execute map };
+allow { hybris_client -sadomain -native_system_domain } vendor_file:file { getattr open read map execute };
 # System-side clients (render_service, bootanimation, av_codec_service) load
 # only libraries Android labels same_process_hal_file (halium_file); the
 # EGL loader lists /vendor/lib64/egl on the way, the isolation rules'
