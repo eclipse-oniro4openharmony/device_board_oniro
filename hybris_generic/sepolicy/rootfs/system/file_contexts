@@ -1,0 +1,7 @@
+# Root-image mount points that Oniro's build/ohos/images/build_image.py adds
+# (build 6f57e95c, for x86_64) and the OHOS policy has no label for;
+# e2fsdroid refuses to pack an unlabeled path.  Labeled like /tmp, /storage.
+/run          u:object_r:rootfs:s0
+/var          u:object_r:rootfs:s0
+/opt          u:object_r:rootfs:s0
+/usr          u:object_r:rootfs:s0
