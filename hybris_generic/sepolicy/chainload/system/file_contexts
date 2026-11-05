@@ -1,3 +1,4 @@
 # Bound over /proc/cmdline by the chainload (the bootloader's cmdline is
 # truncated; this one carries ohos.boot.*).
 /dev/\.ohos-cmdline          u:object_r:proc_cmdline_file:s0
+/dev/pids(/.*)?              u:object_r:cgroup:s0

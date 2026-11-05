@@ -12,8 +12,8 @@
             "wmtdetect dev_wmt chr_file",
             "wmtdetect self udp_socket",
             "init sh_exec file",
-            "audio_host dev_audio_ipi chr_file",
-            "audio_host dev_snd_file chr_file"
+            "audio_host dev_snd_file chr_file",
+            "audio_host dev_mtk_audio chr_file"
         ],
         "developer": []
     }

@@ -66,6 +66,7 @@ allow hybris_client binderfs_features_file:file { getattr open read };
 
 # Mali GPU through the Android EGL/GLES stack.
 allow hybris_client dev_mali:chr_file { getattr open read write ioctl map };
+allowxperm hybris_client dev_mali:chr_file ioctl { 0x8000-0x80ff };   # kbase ioctls
 allow hybris_client hybris_proc_ged:file { getattr open read write ioctl };
 allow hybris_client dev_dma_heap_file:dir { getattr search open read };
 allow hybris_client dev_dma_heap_file:chr_file { getattr open read ioctl map };
@@ -90,12 +91,30 @@ allow { allocator_host audio_host } paramservice_socket:sock_file write;
 
 # The MediaTek audio HAL: ALSA, the audio DSP, its calibration under
 # /data/vendor.
-allow audio_host dev_audio_ipi:chr_file { getattr open read write ioctl map };
+allow audio_host dev_mtk_audio:chr_file { getattr open read write ioctl map };
 allow audio_host dev_snd_file:dir { getattr search open read };
 allow audio_host dev_snd_file:chr_file { getattr open read write ioctl map };
+# OHOS restricts audio_host's ALSA ioctls (allowxperm); the HAL also uses
+# PCM ('A'), timer ('T') and control ('U') requests beyond those.
+allowxperm audio_host dev_snd_file:chr_file ioctl { 0x4100-0x41ff 0x5400-0x54ff 0x5500-0x55ff };
 allow audio_host proc_asound_file:file { getattr open read };
 allow audio_host data_file:dir search;
 allow audio_host data_vendor:dir { getattr search open read };
+
+# Crash dumps of hybris clients unwind through Android libraries.
+allow processdump halium_file:dir { getattr search };
+allow processdump halium_file:file { getattr open read map };
+# storage_daemon walks /data, where Halium keeps state (/data/vendor/halium-*).
+dontaudit storage_daemon halium_file:dir { getattr open read search };
+# App sandboxes that bind /apex (the settings data provider).
+allow appspawn halium_file:dir mounton;
+
+# Kernel: firmware (Mali CSF firmware, audio parameters) from the Halium
+# vendor partition, and the loop devices androidd backs with the NVRAM
+# images in /data/vendor/halium-nv.
+allow kernel { halium_file vendor_file }:file { getattr open read };
+allow kernel data_file:file { getattr read write };
+allow kernel { androidd halium_domain }:fd use;
 
 # Camera HAL buffers go to render_service and ashmem.
 allow camera_host render_service:binder transfer;

@@ -4,7 +4,8 @@
             "path": "/dev",
             "permissive_list": {
                 "user": [
-                    "/dev/\\.ohos-cmdline"
+                    "/dev/\\.ohos-cmdline",
+                    "/dev/pids(/.*)?"
                 ],
                 "developer": []
             }

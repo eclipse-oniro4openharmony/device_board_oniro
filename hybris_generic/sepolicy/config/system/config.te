@@ -16,3 +16,11 @@
 allow domain sys_prod_file:dir search;
 allow domain sys_prod_oniro_config_file:dir { getattr search open read };
 allow domain sys_prod_oniro_config_file:file { getattr open read map };
+
+# The resource scheduler's cgroup actions for this board ship in
+# /vendor/etc/ressched (vendor/oniro/hybris_generic/resourceschedule);
+# OHOS keeps resource_schedule_executor out of vendor files otherwise.
+typeattribute resource_schedule_executor vendor_etc_file_violator_file_open;
+typeattribute resource_schedule_executor vendor_etc_file_violator_file_read;
+typeattribute resource_schedule_executor vendor_etc_file_violator_file_getattr;
+allow resource_schedule_executor vendor_etc_file:file { getattr open read };
