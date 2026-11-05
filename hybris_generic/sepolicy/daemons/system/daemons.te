@@ -77,5 +77,7 @@ allow usb_udc_bind tty_device:chr_file { open read write };
 dontaudit usb_udc_bind self:capability { dac_override dac_read_search };
 dontaudit usb_udc_bind data_file:dir search;
 
+allow { wmtdetect location_timezone usb_udc_bind } dev_unix_socket:dir search;
+
 # ohos.hybris.* is readable by every native domain.
 allow { domain -hap_domain } hybris_param:file { map open read };

@@ -82,3 +82,5 @@ allow proc_cmdline_file device:filesystem associate;
 # /chip_prod/etc/param/hardware_hybris_generic.para).
 allow init { sys_prod_file chip_prod_file }:dir { getattr open read search };
 allow init { sys_prod_file chip_prod_file }:file { getattr open read };
+# init stats /system/bin/sdc before the storage key setup runs it.
+allow init sdc_exec:file getattr;
