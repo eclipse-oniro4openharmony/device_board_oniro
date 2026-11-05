@@ -1,0 +1,87 @@
+From cb14bb7dc8746b0c9469e61afd37cdff581f41f6 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 5 Nov 2026 10:31:57 +0000
+Subject: [PATCH] selinux_adapter: build_policy --handle-unknown option
+
+checkpolicy -C writes (handleunknown deny) into system.cil, and neither
+build_policy's secilc nor load_policy's on-device recompile passes -U, so
+every policy rejects classes and permissions it does not define.
+
+A product whose kernel also hosts another userspace with its own object
+managers (Oniro hybris_generic: Android's servicemanager,
+hwservicemanager and property service in the Halium container, which
+check the service_manager, hwservice_manager and property_service
+classes) needs those checks to pass through instead of failing closed.
+
+--handle-unknown=allow|deny|reject rewrites the statement in system.cil,
+so the precompiled policy and an on-device recompile both get it.  A
+product sets it with selinux_adapter_extra_args.  Without the option
+nothing changes.
+
+Change-Id: I4ff3ea02c57f0b92de9b92c3295550d56a20b143
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ scripts/build_policy.py     |  3 +++
+ scripts/build_policy_api.py | 18 ++++++++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/scripts/build_policy.py b/scripts/build_policy.py
+index 011a40d8d..160264ce1 100755
+--- a/scripts/build_policy.py
++++ b/scripts/build_policy.py
+@@ -57,6 +57,9 @@ def parse_args():
+                         help='output file', required=True)
+     parser.add_argument('--sepolicy-dir-lists',
+                         help='sepolicy dir lists', required=True)
++    parser.add_argument('--handle-unknown', choices=['allow', 'deny', 'reject'],
++                        help='how the kernel and userspace object managers treat classes and '
++                        'permissions the policy does not define (default: deny)', required=False)
+     return parser.parse_args()
+ 
+ 
+diff --git a/scripts/build_policy_api.py b/scripts/build_policy_api.py
+index 29a959ef7..d2eb95158 100644
+--- a/scripts/build_policy_api.py
++++ b/scripts/build_policy_api.py
+@@ -155,6 +155,22 @@ def build_cil(args, output_cil, input_conf):
+     run_command(check_policy_cmd)
+ 
+ 
++def add_handle_unknown(args, cil_file):
++    # checkpolicy -C writes "(handleunknown deny)"; secilc, here and in the
++    # on-device compile in load_policy, passes no -U, so that statement
++    # decides.  Rewrite it in system.cil (the other CILs carry none).
++    handle_unknown = getattr(args, "handle_unknown", None)
++    if not handle_unknown:
++        return
++    with open(cil_file, 'r', encoding='utf-8') as cil_read:
++        lines = cil_read.readlines()
++    with open(cil_file, 'w', encoding='utf-8') as cil_write:
++        for line in lines:
++            if line.startswith('(handleunknown '):
++                line = "(handleunknown {})\n".format(handle_unknown)
++            cil_write.write(line)
++
++
+ def add_version(version, string):
+     return "".join([string, "_", version])
+ 
+@@ -412,6 +428,7 @@ def generate_default_policy(args, policy, cil_list, with_developer=False):
+     build_conf(args, system_output_conf, policy.system_policy_file_list, with_developer)
+     # build system.cil
+     build_cil(args, system_cil_path, system_output_conf)
++    add_handle_unknown(args, system_cil_path)
+ 
+     # build vendor.conf
+     build_conf(args, vendor_output_conf, policy.vendor_policy_file_list, with_developer)
+@@ -460,6 +477,7 @@ def generate_special_policy(args, policy, cil_list, with_developer=False):
+     build_conf(args, system_output_conf, policy.system_policy_file_list, with_developer)
+     # build system.cil
+     build_cil(args, system_cil_path, system_output_conf)
++    add_handle_unknown(args, system_cil_path)
+ 
+     # build min.cil
+     build_conf(args, min_output_conf, policy.min_policy_file_list)
+-- 
+2.50.1
+

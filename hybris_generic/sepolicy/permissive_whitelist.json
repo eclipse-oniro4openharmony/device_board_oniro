@@ -1,0 +1,14 @@
+{
+    "whitelist": {
+        "user": [
+            "androidd",
+            "halium_init",
+            "halium_domain",
+            "cast_engine_service",
+            "fusion_ranging",
+            "partner_device_agent",
+            "video_processing_service"
+        ],
+        "developer": []
+    }
+}

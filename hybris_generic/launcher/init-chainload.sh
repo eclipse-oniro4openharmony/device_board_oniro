@@ -370,9 +370,9 @@ done
 #
 # selinuxfs at /sys/fs/selinux — kernel cmdline `lsm=selinux` (set in
 # build_boot_img_chainload.sh) registers SELinux but does NOT auto-mount
-# selinuxfs.  We mount it on chainload-side /sys (which then bind-binds
-# into /root/sys below); libselinux's selinuxfs_exists() in OHOS-side
-# processes can then find it.  The Halium NS gets its own selinuxfs
+# selinuxfs.  We mount it on chainload-side /sys, and again on /root/sys
+# after the (non-recursive) Stage 5 bind, where OHOS init's
+# loadSelinuxPolicy needs it.  The Halium NS gets its own selinuxfs
 # mount via androidd.c::child_main (since androidd makes a fresh sysfs
 # mount for the Halium NS, that path isn't shared with the OHOS view).
 # ---------------------------------------------------------------------------
@@ -446,6 +446,13 @@ mount -t selinuxfs none /sys/fs/selinux 2>/dev/null \
 mount -o bind /proc /root/proc
 mount -o bind /sys  /root/sys
 mount -o bind /dev  /root/dev
+
+# The /sys bind is not recursive, so the selinuxfs mounted on the chainload
+# /sys above does not show through it: mount one in the OHOS view too.
+# OHOS init's loadSelinuxPolicy (second stage, which we exec straight into)
+# writes the policy to /sys/fs/selinux/load and does not mount it itself.
+mount -t selinuxfs none /root/sys/fs/selinux 2>/dev/null \
+    || echo "[init-chainload] mount OHOS-side selinuxfs failed"
 
 # ---------------------------------------------------------------------------
 # Stage 5b — hand the bootloader serial to OHOS init as ohos.boot.sn.

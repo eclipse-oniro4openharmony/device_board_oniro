@@ -1,0 +1,35 @@
+# Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The Halium container (Android init + vendor HALs, started by androidd)
+# shares the kernel, and therefore the one loaded SELinux policy, with
+# OHOS.  Its Android type names are aliases of these four types
+# (halium_compat.te, generated).  The container is one permissive island:
+# it is not confined by this policy, but everything it does is audited
+# under these names, and OHOS domains are granted access to Halium objects
+# explicitly.
+
+# Android's init (second stage), exec'd by androidd.
+type halium_init, domain, native_chipset_domain;
+# Every other Android process: services, vendor_init, helpers.
+type halium_domain, domain, native_chipset_domain;
+# Android property-area files under /dev/__properties__ (shared with the
+# OHOS-side libhybris users).
+type halium_property, file_attr;
+# Files on the Halium partitions and APEXes, and anything Android labels.
+type halium_file, file_attr;
+
+permissive halium_init;
+permissive halium_domain;
