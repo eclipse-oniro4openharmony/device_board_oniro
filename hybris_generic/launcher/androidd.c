@@ -945,6 +945,149 @@ static int create_binderfs_device(const char *name)
 }
 
 /* -------------------------------------------------------------------------
+ * SELinux: keep the Halium container's labeling inside the container
+ * -------------------------------------------------------------------------
+ * The kernel has one policy, the OHOS one, where every Android type name is
+ * an alias of halium_domain / halium_file / halium_property and the Halium
+ * domains are permissive (device/board/oniro/hybris_generic/sepolicy).  Two
+ * things Android does would then reach OHOS's enforced objects:
+ *
+ *  - init.rc starts ueventd with `seclabel u:r:ueventd:s0`, and ueventd is
+ *    also an OHOS domain: Android's ueventd would run confined by OHOS's
+ *    ueventd rules, which cannot let it in (its binary is not an OHOS exec
+ *    type).  It gets halium_domain instead.
+ *  - Android relabels per its file_contexts: ueventd's coldboot restorecon
+ *    of /sys, restorecon of /dev/kmsg, and label fixes on existing device
+ *    nodes.  sysfs inodes and the nodes bound in from OHOS's /dev (kmsg,
+ *    binder, GPU, DMA heaps) are the same objects OHOS uses, and a
+ *    permissive domain's relabel goes through, so OHOS services lost access
+ *    to them.  Those entries become <<none>> (do not label).
+ *
+ * The edited copies live on this namespace's /dev tmpfs, bound over the
+ * originals on the read-only Halium partitions.
+ */
+
+#define OVERLAY_DIR "/dev/.oniro-sepolicy"
+
+/* Paths shared with OHOS that Android must not relabel. */
+static const char *const kSharedPrefixes[] = {
+    "/sys", "/dev/kmsg", "/dev/binder", "/dev/hwbinder", "/dev/vndbinder",
+    "/dev/mali", "/dev/dri", "/dev/dma_heap",
+};
+static const char kSharedNone[] =
+    "\n# Oniro: shared with OHOS, never relabel from Halium\n"
+    "/sys(/.*)?\t<<none>>\n"
+    "/dev/kmsg\t<<none>>\n"
+    "/dev/(hw|vnd)?binder\t<<none>>\n"
+    "/dev/mali0\t<<none>>\n"
+    "/dev/dri(/.*)?\t<<none>>\n"
+    "/dev/dma_heap(/.*)?\t<<none>>\n";
+
+static int is_shared_path(const char *spec)
+{
+    for (size_t i = 0; i < sizeof kSharedPrefixes / sizeof kSharedPrefixes[0]; ++i) {
+        size_t n = strlen(kSharedPrefixes[i]);
+        if (strncmp(spec, kSharedPrefixes[i], n) == 0 &&
+            (spec[n] == '\0' || spec[n] == '/' || spec[n] == '(' ||
+             spec[n] == '[' || spec[n] == '.' || spec[n] == '?'))
+            return 1;
+    }
+    return 0;
+}
+
+/* file_contexts line: "<regex> [<-type>] <context>".  Shared paths get
+ * <<none>>; everything else is copied unchanged. */
+static void edit_file_contexts_line(const char *line, FILE *out)
+{
+    const char *p = line;
+    while (*p == ' ' || *p == '\t') ++p;
+    if (*p == '\0' || *p == '\n' || *p == '#') {
+        fputs(line, out);
+        return;
+    }
+    size_t speclen = strcspn(p, " \t\n");
+    char spec[PATH_MAX];
+    if (speclen >= sizeof spec) {
+        fputs(line, out);
+        return;
+    }
+    memcpy(spec, p, speclen);
+    spec[speclen] = '\0';
+    if (is_shared_path(spec))
+        fprintf(out, "%s\t<<none>>\n", spec);
+    else
+        fputs(line, out);
+}
+
+static void edit_rc_line(const char *line, FILE *out)
+{
+    const char *p = line;
+    while (*p == ' ' || *p == '\t') ++p;
+    if (strncmp(p, "seclabel u:r:ueventd:s0", 23) == 0) {
+        fprintf(out, "%.*sseclabel u:r:halium_domain:s0\n", (int)(p - line), line);
+        return;
+    }
+    fputs(line, out);
+}
+
+/* Copy `path` through `edit` (plus `append`) into OVERLAY_DIR and bind the
+ * copy over `path`.  Missing files are skipped. */
+static void overlay_edited(const char *path, void (*edit)(const char *, FILE *),
+                           const char *append)
+{
+    FILE *in = fopen(path, "re");
+    if (!in) return;
+    char dst[PATH_MAX];
+    const char *base = strrchr(path, '/');
+    snprintf(dst, sizeof dst, OVERLAY_DIR "/%s", base ? base + 1 : path);
+    FILE *out = fopen(dst, "we");
+    if (!out) {
+        logmsg("selinux overlay: create %s: %s", dst, strerror(errno));
+        fclose(in);
+        return;
+    }
+    char *line = NULL;
+    size_t cap = 0;
+    while (getline(&line, &cap, in) >= 0)
+        edit(line, out);
+    free(line);
+    fclose(in);
+    if (append) fputs(append, out);
+    if (fclose(out) != 0) {
+        logmsg("selinux overlay: write %s: %s", dst, strerror(errno));
+        return;
+    }
+    chmod(dst, 0644);
+    if (mount(dst, path, NULL, MS_BIND, NULL) < 0)
+        logmsg("selinux overlay: bind %s: %s", path, strerror(errno));
+    else
+        logmsg("selinux overlay: %s", path);
+}
+
+/* Runs after the chroot, so paths are the container's own. */
+static void selinux_overlays(void)
+{
+    if (mkdir_p(OVERLAY_DIR, 0755) < 0) {
+        logmsg("selinux overlay: mkdir %s: %s", OVERLAY_DIR, strerror(errno));
+        return;
+    }
+    overlay_edited("/system/etc/init/hw/init.rc", edit_rc_line, NULL);
+    overlay_edited("/vendor/etc/init/hw/factory_init.rc", edit_rc_line, NULL);
+    /* The shared <<none>> entries go into plat_file_contexts once; the
+     * other files only get their own shared entries neutralised. */
+    overlay_edited("/system/etc/selinux/plat_file_contexts",
+                   edit_file_contexts_line, kSharedNone);
+    overlay_edited("/system_ext/etc/selinux/system_ext_file_contexts",
+                   edit_file_contexts_line, NULL);
+    overlay_edited("/product/etc/selinux/product_file_contexts",
+                   edit_file_contexts_line, NULL);
+    overlay_edited("/vendor/etc/selinux/vendor_file_contexts",
+                   edit_file_contexts_line, NULL);
+    overlay_edited("/odm/etc/selinux/odm_file_contexts",
+                   edit_file_contexts_line, NULL);
+}
+
+/* -------------------------------------------------------------------------
  * Child: Halium-NS setup + exec /system/bin/init
  * -------------------------------------------------------------------------
  * Runs in the child after clone(2).  Has its own PID/mount/UTS NSes but
@@ -1480,6 +1623,8 @@ static int child_main(void *arg)
             }
         }
     }
+
+    selinux_overlays();
 
     /* /system/bin/init is Halium's stage-2 init binary.  Halium 12's
      * boot.img ramdisk's /init is a separate stage-1 (not used here —
