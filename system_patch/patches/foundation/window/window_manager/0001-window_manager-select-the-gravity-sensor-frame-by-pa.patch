@@ -1,0 +1,55 @@
+From 8d0667added4b18c31d12506729359a261b89833 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 6 Nov 2026 11:32:22 +0000
+Subject: [PATCH] window_manager: select the gravity sensor frame by parameter
+
+GravitySensorSubscriber::CalcRotationDegree computes 90 - atan2(y, -x)
+and the bucket mapping after it assumes the accelerometer frame of the
+reference board. A sensor that reports the standard (Android) device
+frame, where an upright phone reads (0, +g, 0), lands rotated and
+mirrored against that mapping: upright becomes LANDSCAPE_INVERTED, and
+no fixed offset fixes both portrait and landscape at once.
+
+Read const.window.gravity_sensor_frame once; when it is "android",
+compute the degree as -atan2(y, x), which maps upright to PORTRAIT,
+right edge up to LANDSCAPE_INVERTED, left edge up to LANDSCAPE and
+upside down to PORTRAIT_INVERTED. Without the parameter the upstream
+formula is unchanged.
+
+Needed by hybris_generic, whose Halium sensor HAL reports the Android
+frame; verified on the Volla Plinius with supportRotateWithSensor on.
+
+Change-Id: I4dac7685915e80263f24ab3e38bbe1331448a96c
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../src/screen_sensor_connector.cpp                | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/window_scene/screen_session_manager/src/screen_sensor_connector.cpp b/window_scene/screen_session_manager/src/screen_sensor_connector.cpp
+index 8ab418bb55..f7f28e7fba 100644
+--- a/window_scene/screen_session_manager/src/screen_sensor_connector.cpp
++++ b/window_scene/screen_session_manager/src/screen_sensor_connector.cpp
+@@ -194,8 +194,18 @@ int GravitySensorSubscriber::CalcRotationDegree(GravityData* gravityData)
+     if ((x * x + y * y) * VALID_INCLINATION_ANGLE_THRESHOLD_COEFFICIENT < z * z) {
+         return degree;
+     }
+-    // arccotx = pi / 2 - arctanx, 90 is used to calculate acot(in degree); degree = rad / pi * 180
+-    degree = 90 - static_cast<int>(round(atan2(y, -x) / M_PI * 180));
++    // The bucket mapping in HandleGravitySensorEventCallback assumes the reference board's
++    // accelerometer frame. A sensor that reports the standard (Android) device frame, where an
++    // upright phone reads (0, +g, 0) and one with its right edge up reads (+g, 0, 0), is both
++    // rotated and mirrored against it; the product opts in to that frame with a parameter.
++    static const bool standardFrame =
++        system::GetParameter("const.window.gravity_sensor_frame", "") == "android";
++    if (standardFrame) {
++        degree = -static_cast<int>(round(atan2(y, x) / M_PI * 180));
++    } else {
++        // arccotx = pi / 2 - arctanx, 90 is used to calculate acot(in degree); degree = rad / pi * 180
++        degree = 90 - static_cast<int>(round(atan2(y, -x) / M_PI * 180));
++    }
+     // Normalize the degree to the range of 0~360
+     return degree >= 0 ? degree % 360 : degree % 360 + 360;
+ }
+-- 
+2.50.1
+
