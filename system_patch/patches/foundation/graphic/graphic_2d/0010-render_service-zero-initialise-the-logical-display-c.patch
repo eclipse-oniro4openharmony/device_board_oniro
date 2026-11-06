@@ -1,0 +1,45 @@
+From 6ac4579e4b62420e35b99fabbf3bbf3166ca7edf Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Fri, 6 Nov 2026 14:31:15 +0000
+Subject: [PATCH] render_service: zero-initialise the logical display content
+ rect
+
+RSLogicalDisplayRenderNode::contentRect_ is a plain Rect with no
+initialiser, and DMS only sets it through SetPhysicalVisibleMaskToDisplayNode
+(devices with a physical display mask). Everywhere else it keeps whatever
+the heap held when the node was allocated.
+
+RSSurfaceCaptureTaskParallel::CreatePixelMapByDisplayNode sizes a display
+capture from that rect whenever w and h are both positive. With leftover
+pointer bytes in it (seen on the x86 emulator: "contentRect valid, width:
+958612024, height: 32641") PixelMap::Create fails, "pixelMap_ is nullptr",
+and every snapshot_display / screenshot of that display fails at once for
+the lifetime of the display node. Whether it happens depends on the heap
+state at boot, so it hit about one boot in four on the CI emulator and
+none on others.
+
+Initialise it to {0, 0, 0, 0} like RSLogicalDisplayRenderParams already
+does, so an unset rect means "use the node size".
+
+Change-Id: Ia35faa5d1460dbaec1eb6c2bab60137259c97b67
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../include/pipeline/rs_logical_display_render_node.h           | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/rosen/modules/render_service_base/include/pipeline/rs_logical_display_render_node.h b/rosen/modules/render_service_base/include/pipeline/rs_logical_display_render_node.h
+index 17419e1083..4c267febff 100644
+--- a/rosen/modules/render_service_base/include/pipeline/rs_logical_display_render_node.h
++++ b/rosen/modules/render_service_base/include/pipeline/rs_logical_display_render_node.h
+@@ -234,7 +234,7 @@ private:
+     void InitRenderParams() override;
+ 
+     ScreenId screenId_ = INVALID_SCREEN_ID;
+-    Rect contentRect_;
++    Rect contentRect_ = {0, 0, 0, 0};
+     std::vector<Occlusion::Rect> topSurfaceOpaqueRects_;
+ 
+     // bounds rotation
+-- 
+2.50.1
+
