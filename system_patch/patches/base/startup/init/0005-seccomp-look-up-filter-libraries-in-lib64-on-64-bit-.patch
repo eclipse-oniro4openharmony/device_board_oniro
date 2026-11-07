@@ -1,0 +1,41 @@
+From fd3f9787559480d8726a50c75b171429f2a17a12 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Sat, 7 Nov 2026 11:51:05 +0000
+Subject: [PATCH] seccomp: look up filter libraries in lib64 on 64-bit builds
+
+Commit c4b26050 ("support the 64-bit seccomp filter path") meant to
+switch the lib64 path selection from __aarch64__ to __LP64__ but wrote
+__LP__, which no compiler defines.  Every 64-bit build therefore looks
+for /system/lib/seccomp/lib<name>_filter.z.so while the filters are
+installed to /system/lib64/seccomp.
+
+With build_seccomp on, the lookup always fails: appspawn exits 0x7f in
+its preload hook ("get filter name failed", then "Failed to set
+APPSPAWN seccomp filter and exit"), init restarts it until the
+critical-service limit reboots the device, and every sa_main service
+exits the same way through init's SetSeccompPolicy.
+
+Use __LP64__ as the commit intended.
+
+Change-Id: I7b2ce95d982e8fc7ff5b817b37dad72d242d1351
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ services/modules/seccomp/seccomp_policy.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/modules/seccomp/seccomp_policy.c b/services/modules/seccomp/seccomp_policy.c
+index ebee99b0..b3c2d177 100644
+--- a/services/modules/seccomp/seccomp_policy.c
++++ b/services/modules/seccomp/seccomp_policy.c
+@@ -38,7 +38,7 @@
+ #define SECCOMP_SET_MODE_FILTER  (1)
+ #endif
+ 
+-#ifdef __LP__
++#ifdef __LP64__
+ #define FILTER_LIB_PATH_FORMAT "lib64/seccomp/lib%s_filter.z.so"
+ #define FILTER_LIB_PATH_PART "lib64/seccomp/lib"
+ #else
+-- 
+2.50.1
+
