@@ -91,6 +91,24 @@ patched tree builds every Oniro product. Apply it once per fresh tree:
 bash device/board/oniro/system_patch/do_patch.sh
 ```
 
+### 🌐 Fetch the x86_64 web engine
+
+OpenHarmony ships the ArkWeb engine (`ArkWebCore.hap`) for arm and arm64
+only. Without an x86_64 engine, the Browser and every in-app WebView stay
+blank on the emulator. Fetch the SHA256-pinned x86_64 build once per tree
+(~150 MB, on the host); gn stops with an error until it is in place:
+
+```bash
+bash device/board/oniro/x86_general/utils/fetch-arkweb-core.sh
+```
+
+It is a source build of the same Chromium M144 engine from the
+OpenHarmony-TPC 7.0 branches, made by
+[harmony-contrib/ohos-qemu](https://github.com/harmony-contrib/ohos-qemu)
+and rehosted unchanged on a
+[device_soc_oniro release](https://github.com/eclipse-oniro4openharmony/device_soc_oniro/releases/tag/arkwebcore-x86_64-7.0.0.40),
+which lists the source pins.
+
 ### 🛠️ Build the images
 
 ```bash

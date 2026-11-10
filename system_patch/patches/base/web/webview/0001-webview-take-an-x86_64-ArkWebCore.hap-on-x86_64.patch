@@ -1,0 +1,49 @@
+From 91a031aabc871643e1ecbb887bf39ea54b8a587c Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 10 Nov 2026 23:41:34 +0000
+Subject: [PATCH] webview: take an x86_64 ArkWebCore.hap on x86_64
+
+On target_cpu x86_64 the nweb_hap target installed
+prebuilts/arm64/ArkWebCore.hap. Its engine has only arm64-v8a
+libraries, so every Web component failed with "failed to load lib
+file .../libs/x86_64/libarkweb_engine.so" and stayed blank.
+
+Install prebuilts/x86_64/ArkWebCore.hap instead. Upstream does not
+ship one; the product fetches it (Oniro x86_general:
+device/board/oniro/x86_general/utils/fetch-arkweb-core.sh, a SHA256-
+pinned source build of the same M144 engine). gn asserts the file is
+present, so a build cannot silently ship a dead WebView. arm and arm64
+are unchanged.
+
+Verified on the Oniro Emulator: the Browser renders HTTPS pages with
+the x86_64 engine preinstalled on a fresh /data.
+
+Change-Id: If29fa5f52a76a457e2768bd8fa5e24422163c2b0
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ ohos_nweb/BUILD.gn | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/ohos_nweb/BUILD.gn b/ohos_nweb/BUILD.gn
+index 5aacf10a..01b614ac 100644
+--- a/ohos_nweb/BUILD.gn
++++ b/ohos_nweb/BUILD.gn
+@@ -24,7 +24,14 @@ if (target_cpu == "arm64") {
+   web_source = "prebuilts/arm/ArkWebCore.hap"
+   defines = []
+ } else if (target_cpu == "x86_64") {
+-  web_source = "prebuilts/arm64/ArkWebCore.hap"
++  # There is no upstream x86_64 prebuilt and the arm64 engine cannot load on
++  # x86_64. The x86_64 HAP is fetched into prebuilts/x86_64 by the product
++  # (for Oniro: device/board/oniro/x86_general/utils/fetch-arkweb-core.sh).
++  web_source = "prebuilts/x86_64/ArkWebCore.hap"
++  assert(path_exists("//base/web/webview/ohos_nweb/${web_source}"),
++         "x86_64 ArkWebCore.hap missing: fetch it into " +
++             "base/web/webview/ohos_nweb/prebuilts/x86_64/ first " +
++             "(device/board/oniro/x86_general/utils/fetch-arkweb-core.sh)")
+   defines = [ "webview_x86_64" ]
+ }
+ 
+-- 
+2.50.1
+
