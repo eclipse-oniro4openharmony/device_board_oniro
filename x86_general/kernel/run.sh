@@ -49,6 +49,22 @@ Options:
                          wav,path=out.wav or none (default: auto, i.e.
                          coreaudio on macOS, dsound on Windows, and on Linux
                          the PulseAudio/PipeWire server or ALSA if found)
+      --wifi             Give the guest WiFi instead of ethernet: a simulated
+                         access point "VirtWifi" (virt_wifi) carries the
+                         network once you join it in Settings > WLAN, and the
+                         ethernet link only carries hdc.
+      --shared-dir DIR   Share a host directory with the guest. It appears
+                         at /mnt/host (hdc shell; not visible to apps).
+                         Needs a QEMU with 9p support (Linux, macOS).
+      --userdata-size SIZE
+                         Grow the /data image to SIZE (e.g. 8G, 16384M)
+                         before starting. The guest resizes the file system
+                         at boot. Images never shrink.
+      --instance N       Run instance N (1-99) alongside others. It keeps
+                         its own /data in IMAGE_DIR/instances/N (a copy of
+                         userdata.img made on first use; delete the
+                         directory to reset it) and, unless given, uses HDC
+                         port 55555+N, VNC display N and serial port 4444+N.
   -q, --qemu PATH        Path to qemu-system-x86_64 binary
   -h, --help             Show this help message
 EOF
@@ -72,24 +88,45 @@ serial_port="$DEFAULT_SERIAL_PORT"
 ui=""
 audio="auto"
 qemu_bin="${QEMU_BIN:-}"
+wifi=false
+shared_dir=""
+userdata_size=""
+instance=""
+connect_set=false
+vnc_set=false
+serial_set=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -c|--connect)     connect_key="${2:?missing connect key}"; shift 2 ;;
+    -c|--connect)     connect_key="${2:?missing connect key}"; connect_set=true; shift 2 ;;
     -s|--smp)         smp="${2:?missing smp value}"; shift 2 ;;
     -m|--memory)      mem="${2:?missing memory value}"; shift 2 ;;
     -r|--resolution)  resolution="${2:?missing resolution}"; shift 2 ;;
     --headless)       headless=true; shift ;;
-    --vnc-display)    vnc_display="${2:?missing VNC display number}"; shift 2 ;;
-    --serial-port)    serial_port="${2:?missing serial port}"; shift 2 ;;
+    --vnc-display)    vnc_display="${2:?missing VNC display number}"; vnc_set=true; shift 2 ;;
+    --serial-port)    serial_port="${2:?missing serial port}"; serial_set=true; shift 2 ;;
     --display)        ui="${2:?missing display backend}"; shift 2 ;;
     --audio)          audio="${2:?missing audio driver}"; shift 2 ;;
+    --wifi)           wifi=true; shift ;;
+    --shared-dir)     shared_dir="${2:?missing directory}"; shift 2 ;;
+    --userdata-size)  userdata_size="${2:?missing size}"; shift 2 ;;
+    --instance)       instance="${2:?missing instance number}"; shift 2 ;;
     -q|--qemu)        qemu_bin="${2:?missing qemu path}"; shift 2 ;;
     -h|--help)        usage ;;
     -*)               error "Unknown option: $1" ;;
     *)                image_dir="$1"; shift ;;
   esac
 done
+
+# ---- Instance defaults -----------------------------------------
+if [[ -n "$instance" ]]; then
+  if ! [[ "$instance" =~ ^[0-9]+$ ]] || (( instance < 1 || instance > 99 )); then
+    error "Instance must be a number from 1 to 99, got '$instance'."
+  fi
+  [[ "$connect_set" == true ]] || connect_key="127.0.0.1:$((55555 + instance))"
+  [[ "$vnc_set" == true ]] || vnc_display="$instance"
+  [[ "$serial_set" == true ]] || serial_port="$((DEFAULT_SERIAL_PORT + instance))"
+fi
 
 # ---- Resolve image directory -----------------------------------
 if [[ -z "$image_dir" ]]; then
@@ -172,6 +209,75 @@ done
 
 if [[ ${#missing[@]} -gt 0 ]]; then
   error "Missing image files in '$image_dir': ${missing[*]}"
+fi
+
+# ---- Writable images: per instance -----------------------------
+# userdata.img (/data) and updater.img (the misc partition) are written by
+# the guest; system.img and vendor.img are mounted read-only. An instance
+# gets its own copies of the first two and opens the others read-only and
+# without image locking, so any number of instances share them.
+file_size() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1"; }
+copy_image() {
+  # Sparse copy on GNU cp, a clone on APFS, a plain copy elsewhere.
+  cp --sparse=always "$1" "$2" 2>/dev/null && return
+  rm -f "$2"
+  cp -c "$1" "$2" 2>/dev/null && return
+  rm -f "$2"
+  cp "$1" "$2"
+}
+
+disk_dir="."
+shared_ro=""
+if [[ -n "$instance" ]]; then
+  disk_dir="instances/$instance"
+  mkdir -p "$image_dir/$disk_dir"
+  for f in userdata.img updater.img; do
+    if [[ ! -f "$image_dir/$disk_dir/$f" ]]; then
+      info "Instance $instance: creating $disk_dir/$f"
+      copy_image "$image_dir/$f" "$image_dir/$disk_dir/$f" ||
+        error "Cannot copy $f for instance $instance."
+    fi
+  done
+  shared_ro=",readonly=on,file.locking=off"
+fi
+
+# ---- /data size ------------------------------------------------
+# The guest runs resize2fs on /data at every boot, so growing the image
+# file is all it takes. dd with count=0 extends it sparsely on any host.
+if [[ -n "$userdata_size" ]]; then
+  if [[ "$userdata_size" =~ ^([0-9]+)([MmGg]?)$ ]]; then
+    size_mib="${BASH_REMATCH[1]}"
+    [[ "${BASH_REMATCH[2]}" =~ [Gg] ]] && size_mib=$((size_mib * 1024))
+  else
+    error "Userdata size must be a number of MiB or end in M or G (e.g. 8G), got '$userdata_size'."
+  fi
+  userdata_img="$image_dir/$disk_dir/userdata.img"
+  want_bytes=$((size_mib * 1024 * 1024))
+  have_bytes=$(file_size "$userdata_img")
+  if (( want_bytes > have_bytes )); then
+    info "Growing /data to ${size_mib} MiB"
+    dd if=/dev/null of="$userdata_img" bs=1 count=0 seek="$want_bytes" 2>/dev/null ||
+      error "Cannot grow $userdata_img."
+  elif (( want_bytes < have_bytes )); then
+    warn "/data is already $((have_bytes / 1024 / 1024)) MiB; it is not shrunk."
+  fi
+fi
+
+# ---- Shared directory (virtio-9p) ------------------------------
+share_args=()
+share_cmdline=""
+if [[ -n "$shared_dir" ]]; then
+  [[ -d "$shared_dir" ]] || error "Shared directory does not exist: $shared_dir"
+  if ! "$qemu_bin" -device help 2>&1 | grep -q '"virtio-9p-pci"'; then
+    error "This QEMU has no 9p file sharing (virtio-9p-pci), so --shared-dir is not available."
+  fi
+  shared_dir="$(cd "$shared_dir" && pwd)"
+  # QEMU option values escape a comma by doubling it.
+  share_args=(
+    -fsdev "local,id=hostshare,path=${shared_dir//,/,,},security_model=mapped-xattr"
+    -device "virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare"
+  )
+  share_cmdline=" ohos.boot.share=hostshare"
 fi
 
 # ---- Detect host OS and configure acceleration -----------------
@@ -371,12 +477,41 @@ fi
 # are ignored. A video= mode on the kernel command line takes precedence.
 video_mode="video=Virtual-1:${res_w}x${res_h}"
 
+# The camera is the kernel's vivid test driver; keep it to one capture node
+# with one webcam input (the default also adds output, VBI, radio and SDR).
+camera_cmdline="vivid.node_types=0x1 vivid.num_inputs=1"
+
+# ---- Network ---------------------------------------------------
+# One user-mode network carries hdc (port forward to the guest's 55555). With
+# --wifi a second one, on a NIC the guest turns into virt_wifi's wlan0, carries
+# everything else; the first is then restricted to the host and kept on its own
+# subnet, and the guest gives eth0 a fixed LAN address (emulator_wifi).
+mac_suffix=$(printf %02x "${instance:-0}")
+if [[ "$wifi" == true ]]; then
+  net_args=(
+    -netdev "user,id=net0,net=10.0.3.0/24,restrict=on,hostfwd=tcp:${forward_host}:${forward_port}-:55555"
+    -device "virtio-net-pci,netdev=net0,mac=52:54:00:12:35:${mac_suffix},addr=0a.0"
+    -netdev "user,id=net1"
+    -device "virtio-net-pci,netdev=net1,mac=52:54:00:12:36:${mac_suffix},addr=0b.0"
+  )
+  ip_cmdline="ip=10.0.3.15::0.0.0.0:255.255.255.0::eth0:off"
+else
+  net_args=(
+    -netdev "user,id=net0,hostfwd=tcp:${forward_host}:${forward_port}-:55555"
+    -device "virtio-net-pci,netdev=net0${instance:+,mac=52:54:00:12:35:${mac_suffix}}"
+  )
+  ip_cmdline="ip=dhcp"
+fi
+
 # ---- Summary ---------------------------------------------------
 info "Image directory : $image_dir"
 info "Connect key     : $connect_key"
 info "CPUs: $smp | RAM: $mem | Resolution: ${res_w}x${res_h}"
 info "Acceleration    : ${accel_args[*]:-none} ${cpu_args[*]:-}"
 info "Audio           : ${audio}"
+[[ -n "$instance" ]] && info "Instance        : $instance ($image_dir/$disk_dir)"
+[[ "$wifi" == true ]] && info "Network         : WiFi (VirtWifi); ethernet for hdc only"
+[[ -n "$shared_dir" ]] && info "Shared dir      : $shared_dir -> /mnt/host"
 if [[ "$headless" == true ]]; then
   info "Mode            : headless"
   info "  VNC display   : localhost:$vnc_tcp_port (VNC :$vnc_display)"
@@ -403,6 +538,7 @@ info "Starting QEMU..."
 cd "$image_dir"
 
 exec "$qemu_bin" \
+  -name "Oniro Emulator${instance:+ $instance}" \
   -machine q35 \
   -smp "$smp" \
   -m "$mem" \
@@ -412,18 +548,18 @@ exec "$qemu_bin" \
   "${audio_args[@]}" \
   -initrd ramdisk.img \
   -kernel bzImage \
-  -drive if=none,file=updater.img,format=raw,id=updater,index=0 \
+  -drive "if=none,file=${disk_dir}/updater.img,format=raw,id=updater,index=0" \
   -device virtio-blk-pci,drive=updater \
-  -drive if=none,file=system.img,format=raw,id=system,index=1 \
+  -drive "if=none,file=system.img,format=raw,id=system,index=1${shared_ro}" \
   -device virtio-blk-pci,drive=system \
-  -drive if=none,file=vendor.img,format=raw,id=vendor,index=2 \
+  -drive "if=none,file=vendor.img,format=raw,id=vendor,index=2${shared_ro}" \
   -device virtio-blk-pci,drive=vendor \
-  -drive if=none,file=userdata.img,format=raw,id=userdata,index=3 \
+  -drive "if=none,file=${disk_dir}/userdata.img,format=raw,id=userdata,index=3" \
   -device virtio-blk-pci,drive=userdata \
+  ${share_args[@]+"${share_args[@]}"} \
   "${serial_args[@]}" \
-  -append "ip=dhcp loglevel=4 ${video_mode} console=ttyS0,115200 panic=5 init=init root=/dev/ram0 rw ohos.boot.hardware=x86_general ohos.boot.timeout_ratio=${timeout_ratio} ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required ohos.required_mount.misc=/dev/block/vda@/misc@none@none=@wait,required" \
+  -append "${ip_cmdline} loglevel=4 ${video_mode} console=ttyS0,115200 panic=5 init=init root=/dev/ram0 rw ohos.boot.hardware=x86_general ohos.boot.timeout_ratio=${timeout_ratio}${share_cmdline} ${camera_cmdline} ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required ohos.required_mount.misc=/dev/block/vda@/misc@none@none=@wait,required" \
   "${accel_args[@]}" \
   "${cpu_args[@]}" \
-  -netdev "user,id=net0,hostfwd=tcp:${forward_host}:${forward_port}-:55555" \
-  -device virtio-net-pci,netdev=net0 \
+  "${net_args[@]}" \
   -device virtio-tablet-pci

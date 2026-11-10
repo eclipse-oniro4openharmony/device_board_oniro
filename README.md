@@ -177,6 +177,56 @@ Values are floats in the order and units of the `@ohos.sensor` API. They reset
 to the defaults in `device/soc/oniro/x86_general/hardware/sensor/emulator_sensor.para`
 (device lying flat, 300 lux, nothing near) at every boot.
 
+### 📍 Simulate location
+
+A simulated GNSS receiver reports the position in `emulator.gnss.location`
+once location is switched on (Control Center > Location):
+
+```bash
+hdc shell param set emulator.gnss.location "48.8584 2.2945 35"   # lat lon [alt [speed [bearing [accuracy]]]]
+hdc shell param set emulator.gnss.location ""                    # no fix
+```
+
+It starts in London (`device/soc/oniro/x86_general/hardware/gnss/emulator_gnss.para`).
+
+### 📶 Simulate cellular
+
+The emulator has a simulated LTE modem with a SIM, on the "Oniro" network:
+signal bars, outgoing calls (no audio) and SMS both ways. The host can change
+the signal, deliver an SMS or ring the phone:
+
+```bash
+hdc shell param set emulator.modem.signal 2                       # 0-4 bars
+hdc shell param set emulator.modem.sms "+447700900123 Hello"      # incoming SMS
+hdc shell param set emulator.modem.call +447700900123             # incoming call
+hdc shell param set emulator.modem.call hangup                    # caller hangs up
+```
+
+Mobile data is not offered; the network comes from ethernet or WiFi.
+
+### 📷 Camera
+
+The camera is the Linux `vivid` test driver: the Camera app previews and takes
+photos of a test pattern with a live timestamp, at up to 1920x1080.
+
+### 🛜 WiFi
+
+`./run.sh --wifi` gives the guest WiFi instead of ethernet, as on a phone:
+Settings > WLAN lists one open network, "VirtWifi", and joining it carries
+the guest's traffic. The ethernet link then only carries hdc.
+
+### 🗂️ Shared folder, /data size, several emulators
+
+```bash
+./run.sh --shared-dir ~/shared        # host folder at /mnt/host in the guest (hdc shell)
+./run.sh --userdata-size 16G          # grow /data (never shrinks)
+./run.sh --instance 1                 # a second emulator: own /data, hdc 127.0.0.1:55556
+```
+
+An instance keeps its `/data` in `instances/N` next to the images and uses HDC
+port 55555+N, VNC display N and serial port 4444+N; delete the directory to
+reset it. The shared folder needs a QEMU with 9p support (Linux, macOS).
+
 ---
 
 ## Oniro on Volla phones (hybris_generic target)
