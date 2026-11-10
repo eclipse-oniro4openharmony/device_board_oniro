@@ -1,0 +1,373 @@
+From 5d12ba41a2ad2ca4040101dd96c3595325d94366 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 10 Nov 2026 19:45:17 +0000
+Subject: [PATCH 11/12] camera: USB camera VDI on the x86 emulator's vivid
+ capture node
+
+From harmony-contrib/ohos-qemu (patches/common/drivers/peripheral/camera),
+which runs the same OpenHarmony-7.0-Release code on upstream device/qemu:
+
+- usb_backend 0001: camera_hal is no longer emptied on an x86_64 product
+  that is not is_emulator when the USB camera VDI is selected
+  (drivers_peripheral_camera_feature_usb).
+- vivid_capture 0001/0002 + qemu_v4l2_capture.h: the new feature
+  drivers_peripheral_camera_qemu_vivid_capture lets the V4L2 enumerator
+  accept the kernel's vivid driver (not only uvcvideo) and checks the
+  node's own device_caps for streaming capture.
+- jpeg_capture 0001-0005: advertise and produce JPEG captures by
+  software-encoding the YUYV frames, select the capture pipeline, and
+  default the optional photo quality.
+- jpeg_rotation 0001: initialise the libjpeg transform options.
+- fork_timestamp 0001: propagate the frame timestamp to the photo.
+
+Everything is behind the two feature flags; the phones do not use the
+USB camera VDI.
+
+Change-Id: I9bb1f7e3513cc7320f7a4a7208deebb0ab33a41a
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ camera/BUILD.gn                               |  4 +-
+ camera/bundle.json                            |  1 +
+ camera/camera.gni                             |  1 +
+ .../device_manager/v4l2_device_manager.cpp    | 14 +++++-
+ .../platform/v4l2/src/driver_adapter/BUILD.gn |  3 ++
+ .../driver_adapter/src/qemu_v4l2_capture.h    | 46 +++++++++++++++++++
+ .../v4l2/src/driver_adapter/src/v4l2_uvc.cpp  |  7 +--
+ .../pipeline_core/nodes/uvc_node/uvc_node.cpp |  7 +++
+ .../usb_camera/device_manager/BUILD.gn        |  6 +++
+ .../usb_camera/pipeline_core/BUILD.gn         |  3 ++
+ .../pipeline_core/src/node/codec_node.cpp     | 39 ++++++++++++----
+ .../pipeline_core/src/node/fork_node.cpp      |  6 +++
+ 12 files changed, 121 insertions(+), 16 deletions(-)
+ create mode 100644 camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/src/qemu_v4l2_capture.h
+
+diff --git a/camera/BUILD.gn b/camera/BUILD.gn
+index 183889c1c..13c62386e 100644
+--- a/camera/BUILD.gn
++++ b/camera/BUILD.gn
+@@ -30,7 +30,7 @@ if (defined(ohos_lite)) {
+   }
+ } else if (is_standard_system) {
+   group("camera_hal") {
+-    if (target_cpu == "x86_64" && !is_emulator) {
++    if (target_cpu == "x86_64" && !is_emulator && !drivers_peripheral_camera_feature_usb) {
+       deps = []
+     } else {
+       deps = [
+@@ -55,7 +55,7 @@ if (defined(ohos_lite)) {
+     }
+   }
+   group("camera_hal_unittest") {
+-    if (target_cpu == "x86_64" && !is_emulator) {
++    if (target_cpu == "x86_64" && !is_emulator && !drivers_peripheral_camera_feature_usb) {
+       deps = []
+     } else {
+       testonly = true
+diff --git a/camera/bundle.json b/camera/bundle.json
+index c7cd3c4f4..14389880d 100644
+--- a/camera/bundle.json
++++ b/camera/bundle.json
+@@ -14,6 +14,7 @@
+     "subsystem": "hdf",
+     "features": [
+       "drivers_peripheral_camera_feature_usb",
++      "drivers_peripheral_camera_qemu_vivid_capture",
+       "drivers_peripheral_camera_feature_batch_buffers",
+       "drivers_peripheral_camera_feature_board_config",
+       "drivers_peripheral_camera_feature_host_codec",
+diff --git a/camera/camera.gni b/camera/camera.gni
+index 3d3c52f5e..c75173fe2 100644
+--- a/camera/camera.gni
++++ b/camera/camera.gni
+@@ -42,6 +42,7 @@ if (drivers_peripheral_camera_v4l2_emulator) {
+ 
+ declare_args() {
+   drivers_peripheral_camera_feature_usb = false
++  drivers_peripheral_camera_qemu_vivid_capture = false
+ }
+ 
+ declare_args() {
+diff --git a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/device_manager/v4l2_device_manager.cpp b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/device_manager/v4l2_device_manager.cpp
+index 00078bb39..85c072935 100644
+--- a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/device_manager/v4l2_device_manager.cpp
++++ b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/device_manager/v4l2_device_manager.cpp
+@@ -735,7 +735,11 @@ PS: '虚化'为OHOS_ABILITY_SCENE_PORTRAIT_EFFECT_TYPES, '滤镜'为OHOS_ABILITY
+ // {0, 3, 9, -1, 2, 3, 9, -1, 1, 3, -1} for pc
+ std::vector<int> g_defaultUsbCameraStreamFormatConfig = {
+     PREVIEW_STREAM, OHOS_CAMERA_FORMAT_YCRCB_420_SP, OHOS_CAMERA_FORMAT_422_YUYV, OHOS_CAMERA_FORMAT_MJPEG, -1,
+-    CAPTURE_STREAM, OHOS_CAMERA_FORMAT_YCRCB_420_SP, OHOS_CAMERA_FORMAT_422_YUYV, OHOS_CAMERA_FORMAT_MJPEG, -1,
++    CAPTURE_STREAM, OHOS_CAMERA_FORMAT_YCRCB_420_SP, OHOS_CAMERA_FORMAT_422_YUYV, OHOS_CAMERA_FORMAT_MJPEG,
++#ifdef QEMU_VIVID_CAPTURE_ENABLED
++    OHOS_CAMERA_FORMAT_JPEG,
++#endif
++    -1,
+     VIDEO_STREAM, OHOS_CAMERA_FORMAT_YCRCB_420_SP, OHOS_CAMERA_FORMAT_MJPEG, -1,
+ };
+ 
+@@ -798,6 +802,14 @@ static std::vector<int32_t> GetFormatVector(const std::vector<struct FormatInfoI
+         if (it.width <= minWidth) {
+             continue;
+         }
++#ifdef QEMU_VIVID_CAPTURE_ENABLED
++        // CodecNode really encodes YUYV frames to JPEG. Do not advertise a
++        // JPEG capture size without its enumerated physical source format.
++        if (format == OHOS_CAMERA_FORMAT_JPEG && (streamId != CAPTURE_STREAM || !it.isYuv)) {
++            continue;
++        }
++#endif
++
+         if (!it.isMjpeg && format == OHOS_CAMERA_FORMAT_MJPEG) {
+             CAMERA_LOGI("this format not support mjpeg, %{public}d x %{public}d @fps[%{public}d, %{public}d]",
+                 it.width, it.height, it.minFps, it.maxFps);
+diff --git a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/BUILD.gn b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/BUILD.gn
+index 0f6c74b93..6f52fa131 100644
+--- a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/BUILD.gn
++++ b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/BUILD.gn
+@@ -42,6 +42,9 @@ ohos_shared_library("usb_camera_v4l2_adapter") {
+   if (drivers_peripheral_camera_feature_usb) {
+     defines += [ "CAMERA_BUILT_ON_USB" ]
+   }
++  if (drivers_peripheral_camera_qemu_vivid_capture) {
++    defines += [ "QEMU_VIVID_CAPTURE_ENABLED" ]
++  }
+   sources = [
+     "$camera_path_vdi/adapter/platform/v4l2/src/driver_adapter/src/v4l2_buffer.cpp",
+     "$camera_path_vdi/adapter/platform/v4l2/src/driver_adapter/src/v4l2_control.cpp",
+diff --git a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/src/qemu_v4l2_capture.h b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/src/qemu_v4l2_capture.h
+new file mode 100644
+index 000000000..836c1eb39
+--- /dev/null
++++ b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/src/qemu_v4l2_capture.h
+@@ -0,0 +1,46 @@
++// SPDX-License-Identifier: Apache-2.0
++// A real kernel V4L2 capture stream, never synthetic public-API success.
++#ifndef QEMU_V4L2_CAPTURE_H
++#define QEMU_V4L2_CAPTURE_H
++#include <cstring>
++#include <linux/videodev2.h>
++#include <string>
++
++namespace OHOS::Camera {
++template<size_t N>
++inline bool QemuBoundedV4l2String(const __u8 (&value)[N], const std::string& expected)
++{
++    const size_t size = strnlen(reinterpret_cast<const char*>(value), N);
++    return size < N && size == expected.size() &&
++        memcmp(value, expected.data(), size) == 0;
++}
++
++inline bool QemuStreamingCapture(const v4l2_capability& cap)
++{
++    // A device's aggregate caps may include other output/meta nodes. Use this
++    // node's device_caps when provided; the current adapter is single-planar.
++    const __u32 caps = (cap.capabilities & V4L2_CAP_DEVICE_CAPS) ? cap.device_caps : cap.capabilities;
++    constexpr __u32 required = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
++    return (caps & required) == required;
++}
++
++inline bool QemuCaptureDriverMatches(const v4l2_capability& cap, const std::string& expected)
++{
++    if (expected != "uvcvideo") {
++        return false;
++    }
++    if (QemuBoundedV4l2String(cap.driver, expected)) {
++        return true;
++    }
++#ifdef QEMU_VIVID_CAPTURE_ENABLED
++    // Exactly one QEMU platform instance. Preserve its actual driver/name;
++    // never impersonate USB or accept other virtual/output/meta drivers.
++    return expected == "uvcvideo" && QemuBoundedV4l2String(cap.driver, "vivid") &&
++        QemuBoundedV4l2String(cap.card, "vivid") &&
++        QemuBoundedV4l2String(cap.bus_info, "platform:vivid-000");
++#else
++    return false;
++#endif
++}
++} // namespace OHOS::Camera
++#endif
+diff --git a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/src/v4l2_uvc.cpp b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/src/v4l2_uvc.cpp
+index 1ca0d1947..2882f322c 100644
+--- a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/src/v4l2_uvc.cpp
++++ b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/driver_adapter/src/v4l2_uvc.cpp
+@@ -21,6 +21,7 @@
+ #include "v4l2_dev.h"
+ #include "v4l2_uvc.h"
+ #include "usb_device_filter.h"
++#include "qemu_v4l2_capture.h"
+ 
+ constexpr int NAME_START_POS = 2;
+ 
+@@ -202,7 +203,7 @@ RetCode HosV4L2UVC::V4L2UvcGetCap(const std::string v4l2Device, struct v4l2_capa
+     }
+     fdsan_close_with_tag(fd, fdsan_create_owner_tag(FDSAN_OWNER_TYPE_FILE, LOG_DOMAIN));
+ 
+-    if (!((cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) && (cap.capabilities & V4L2_CAP_STREAMING))) {
++    if (!QemuStreamingCapture(cap) || !QemuCaptureDriverMatches(cap, "uvcvideo")) {
+         return RC_ERROR;
+     }
+ 
+@@ -218,11 +219,11 @@ RetCode HosV4L2UVC::V4L2UVCGetCapability(int fd, const std::string devName, std:
+         return RC_ERROR;
+     }
+ 
+-    if (!((capability.capabilities & V4L2_CAP_VIDEO_CAPTURE) && (capability.capabilities & V4L2_CAP_STREAMING))) {
++    if (!QemuStreamingCapture(capability)) {
+         return RC_ERROR;
+     }
+ 
+-    if (cameraId != std::string(reinterpret_cast<char*>(capability.driver))) {
++    if (!QemuCaptureDriverMatches(capability, cameraId)) {
+         return RC_ERROR;
+     }
+     V4L2UvcMatchDev(GetCameraDevNameByCap(capability), devName, true);
+diff --git a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/pipeline_core/nodes/uvc_node/uvc_node.cpp b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/pipeline_core/nodes/uvc_node/uvc_node.cpp
+index b88ec58b9..854d6c63a 100644
+--- a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/pipeline_core/nodes/uvc_node/uvc_node.cpp
++++ b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/pipeline_core/nodes/uvc_node/uvc_node.cpp
+@@ -103,7 +103,14 @@ RetCode UvcNode::Start(const int32_t streamId)
+             return RC_ERROR;
+         }
+         cameraformat_ = static_cast<uint32_t>(it->format_.format_);
++#ifdef QEMU_VIVID_CAPTURE_ENABLED
++        // BLOB is the encoded output, not proof that the device provides
++        // MJPEG input. Vivid's actual YUYV source feeds CodecNode's encoder.
++        // Preserve the existing MJPEG preference when it is advertised.
++        uvcSourcePixformat_ = V4L2_PIX_FMT_YUYV;
++#else
+         uvcSourcePixformat_ = (cameraformat_ == CAMERA_FORMAT_BLOB ? V4L2_PIX_FMT_MJPEG : V4L2_PIX_FMT_YUYV);
++#endif
+         if (deviceManager_->CheckFormatSupportMjpeg(ConvertCameraId(cameraId_), wide_, high_)) {
+             uvcSourcePixformat_ = V4L2_PIX_FMT_MJPEG;
+         }
+diff --git a/camera/vdi_base/usb_camera/device_manager/BUILD.gn b/camera/vdi_base/usb_camera/device_manager/BUILD.gn
+index 88b03f8ee..403c67f48 100644
+--- a/camera/vdi_base/usb_camera/device_manager/BUILD.gn
++++ b/camera/vdi_base/usb_camera/device_manager/BUILD.gn
+@@ -11,11 +11,17 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ import("//build/ohos.gni")
++import("../../../camera.gni")
+ import("../camera_usb.gni")
+ 
+ config("device_manager_config") {
+   visibility = [ ":*" ]
+ 
++  defines = []
++  if (drivers_peripheral_camera_qemu_vivid_capture) {
++    defines += [ "QEMU_VIVID_CAPTURE_ENABLED" ]
++  }
++
+   cflags_cc = [
+     "-Wall",
+     "-Wextra",
+diff --git a/camera/vdi_base/usb_camera/pipeline_core/BUILD.gn b/camera/vdi_base/usb_camera/pipeline_core/BUILD.gn
+index 2ada935eb..8c518af53 100644
+--- a/camera/vdi_base/usb_camera/pipeline_core/BUILD.gn
++++ b/camera/vdi_base/usb_camera/pipeline_core/BUILD.gn
+@@ -24,6 +24,9 @@ config("pipe_config") {
+   if (drivers_peripheral_camera_feature_usb) {
+     defines += [ "CAMERA_BUILT_ON_USB" ]
+   }
++  if (drivers_peripheral_camera_qemu_vivid_capture) {
++    defines += [ "QEMU_VIVID_CAPTURE_ENABLED" ]
++  }
+ 
+   cflags_cc = [
+     "-Wall",
+diff --git a/camera/vdi_base/usb_camera/pipeline_core/src/node/codec_node.cpp b/camera/vdi_base/usb_camera/pipeline_core/src/node/codec_node.cpp
+index d0f6ba139..18f8e878e 100644
+--- a/camera/vdi_base/usb_camera/pipeline_core/src/node/codec_node.cpp
++++ b/camera/vdi_base/usb_camera/pipeline_core/src/node/codec_node.cpp
+@@ -71,10 +71,9 @@ static void RotJpegImg(
+     outInfo.err = jpeg_std_error(&jerrOut);
+     jpeg_create_compress(&outInfo);
+     jpeg_mem_src(&inputInfo, inputImg, inputSize);
+-    jpeg_mem_dest(&outInfo, outImg, (unsigned long *)outSize);
+ 
+-    JCOPY_OPTION copyoption;
+-    jpeg_transform_info transformoption;
++    const JCOPY_OPTION copyoption = JCOPYOPT_ALL;
++    jpeg_transform_info transformoption = {};
+     transformoption.transform = rotDegrees;
+     transformoption.perfect = TRUE;
+     transformoption.trim = FALSE;
+@@ -86,9 +85,12 @@ static void RotJpegImg(
+ 
+     if (!jtransform_request_workspace(&inputInfo, &transformoption)) {
+         CAMERA_LOGE("%s: transformation is not perfect", __func__);
++        jpeg_destroy_compress(&outInfo);
++        jpeg_destroy_decompress(&inputInfo);
+         return;
+     }
+ 
++    jpeg_mem_dest(&outInfo, outImg, (unsigned long *)outSize);
+     src_coef_arrays = jpeg_read_coefficients(&inputInfo);
+     jpeg_copy_critical_parameters(&inputInfo, &outInfo);
+     dst_coef_arrays = jtransform_adjust_parameters(&inputInfo, &outInfo, src_coef_arrays, &transformoption);
+@@ -130,21 +132,38 @@ RetCode CodecNode::ConfigJpegQuality(common_metadata_header_t* data)
+ {
+     camera_metadata_item_t entry;
+     int ret = FindCameraMetadataItem(data, OHOS_JPEG_QUALITY, &entry);
++    const int highQualityJpeg = 100;
++    const int middleQualityJpeg = 95;
++    const int lowQualityJpeg = 85;
++#ifdef QEMU_VIVID_CAPTURE_ENABLED
++    // An ordinary PhotoOutput.capture() need not specify a quality. The
++    // framework adds rotation/mirror but does not copy this ability default
++    // into capture settings. Only the virtual YUYV-to-JPEG pipeline supplies
++    // a default here; an explicit quality still takes precedence.
++    if (ret != CAM_META_SUCCESS) {
++        jpegQuality_ = highQualityJpeg;
++        CAMERA_LOGI("OHOS_JPEG_QUALITY absent, use Vivid JPEG default");
++        return RC_OK;
++    }
++    if (entry.count != 1 || entry.data.u8 == nullptr) {
++        CAMERA_LOGE("invalid OHOS_JPEG_QUALITY item");
++        return RC_ERROR;
++    }
++    const uint8_t qualityLevel = entry.data.u8[0];
++#else
+     if (ret != 0) {
+         CAMERA_LOGE("tag OHOS_JPEG_QUALITY not found");
+         return RC_ERROR;
+     }
+-
+-    const int highQualityJpeg = 100;
+-    const int middleQualityJpeg = 95;
+-    const int lowQualityJpeg = 85;
++    const int32_t qualityLevel = *entry.data.i32;
++#endif
+ 
+     CAMERA_LOGI("OHOS_JPEG_QUALITY is = %{public}d", static_cast<int>(entry.data.u8[0]));
+-    if (*entry.data.i32 == OHOS_CAMERA_JPEG_LEVEL_LOW) {
++    if (qualityLevel == OHOS_CAMERA_JPEG_LEVEL_LOW) {
+         jpegQuality_ = lowQualityJpeg;
+-    } else if (*entry.data.i32 == OHOS_CAMERA_JPEG_LEVEL_MIDDLE) {
++    } else if (qualityLevel == OHOS_CAMERA_JPEG_LEVEL_MIDDLE) {
+         jpegQuality_ = middleQualityJpeg;
+-    } else if (*entry.data.i32 == OHOS_CAMERA_JPEG_LEVEL_HIGH) {
++    } else if (qualityLevel == OHOS_CAMERA_JPEG_LEVEL_HIGH) {
+         jpegQuality_ = highQualityJpeg;
+     } else {
+         jpegQuality_ = highQualityJpeg;
+diff --git a/camera/vdi_base/usb_camera/pipeline_core/src/node/fork_node.cpp b/camera/vdi_base/usb_camera/pipeline_core/src/node/fork_node.cpp
+index a77e8488a..781b033a2 100644
+--- a/camera/vdi_base/usb_camera/pipeline_core/src/node/fork_node.cpp
++++ b/camera/vdi_base/usb_camera/pipeline_core/src/node/fork_node.cpp
+@@ -146,6 +146,12 @@ void PcForkNode::DeliverBuffer(std::shared_ptr<IBuffer>& buffer)
+         std::shared_ptr<IBuffer> forkBuffer = bufferPool_->AcquireBuffer(0);
+         if (forkBuffer != nullptr) {
+             CopyBufferToForkBuffer(buffer, forkBuffer);
++#ifdef QEMU_VIVID_CAPTURE_ENABLED
++            // The JPEG stream has its own buffer. Preserve the actual V4L2
++            // frame timestamp when forking it from the live preview frame.
++            // Otherwise the photo surface publishes the default -1 timestamp.
++            forkBuffer->SetEsTimestamp(buffer->GetEsFrameInfo().timestamp);
++#endif
+             forkBuffer->SetIsValidDataInSurfaceBuffer(false);
+             forkBuffer->SetCurFormat(buffer->GetCurFormat());
+             forkBuffer->SetCurWidth(buffer->GetCurWidth());
+-- 
+2.50.1
+

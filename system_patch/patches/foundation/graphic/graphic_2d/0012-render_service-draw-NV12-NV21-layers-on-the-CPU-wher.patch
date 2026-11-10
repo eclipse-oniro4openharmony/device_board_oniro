@@ -1,0 +1,77 @@
+From e512b62c9837b67c57147bfaa7115f658c6cd49b Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 10 Nov 2026 19:45:26 +0000
+Subject: [PATCH] render_service: draw NV12/NV21 layers on the CPU where EGL
+ cannot import them
+
+Mesa's software EGL on the x86 emulator only imports RGB dma-bufs, so a
+camera preview or a video layer in NV12/NV21 drew black. On products that
+set const.rs.yuv_cpu_composition=true, RSBaseRenderEngine::DrawImage
+sends those layers through the existing CPU YUV-to-RGBA path (DrawBuffer).
+RGB layers, and every product without the parameter, stay on the GPU.
+
+After harmony-contrib/ohos-qemu's yuv_cpu_fallback, gated here because
+the phones' GPUs import YUV buffers.
+
+Change-Id: I943f0b21d68ff9be741e1db1b5c776c5a684e3bb
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../engine/rs_base_render_engine.cpp          | 26 +++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/rosen/modules/render_service/composer/composer_service/external_depend/engine/rs_base_render_engine.cpp b/rosen/modules/render_service/composer/composer_service/external_depend/engine/rs_base_render_engine.cpp
+index ec50efd407..0667ef5ed7 100644
+--- a/rosen/modules/render_service/composer/composer_service/external_depend/engine/rs_base_render_engine.cpp
++++ b/rosen/modules/render_service/composer/composer_service/external_depend/engine/rs_base_render_engine.cpp
+@@ -15,6 +15,7 @@
+ 
+ #include "engine/rs_base_render_engine.h"
+ 
++#include <cstring>
+ #include <memory>
+ #include "v2_2/cm_color_space.h"
+ 
+@@ -23,6 +24,7 @@
+ #include "gpuComposition/rs_gpu_cache_manager.h"
+ #include "memory/rs_tag_tracker.h"
+ #include "metadata_helper.h"
++#include "parameter.h"
+ #include "pipeline/render_thread/rs_divided_render_util.h"
+ #include "pipeline/rs_uni_render_judgement.h"
+ #include "platform/common/rs_log.h"
+@@ -770,8 +772,32 @@ std::shared_ptr<Drawing::Image> RSBaseRenderEngine::CreateImageFromBuffer(RSPain
+     return image;
+ }
+ 
++namespace {
++bool YuvCpuComposition()
++{
++    static const bool enabled = [] {
++        char value[8] = {0};
++        return GetParameter("const.rs.yuv_cpu_composition", "false", value, sizeof(value)) > 0 &&
++            strcmp(value, "true") == 0;
++    }();
++    return enabled;
++}
++} // namespace
++
+ void RSBaseRenderEngine::DrawImage(RSPaintFilterCanvas& canvas, BufferDrawParam& params)
+ {
++    // Where the EGL driver cannot import NV12/NV21 dma-bufs (Mesa's software
++    // rasteriser on the x86 emulator), camera and video layers would draw
++    // black. The product sets const.rs.yuv_cpu_composition=true there, and
++    // those layers go through the CPU YUV-to-RGBA path instead. RGB layers,
++    // and every other product, stay on the GPU path.
++    if (params.buffer != nullptr && YuvCpuComposition()) {
++        const auto format = params.buffer->GetFormat();
++        if (format == GRAPHIC_PIXEL_FMT_YCRCB_420_SP || format == GRAPHIC_PIXEL_FMT_YCBCR_420_SP) {
++            DrawBuffer(canvas, params);
++            return;
++        }
++    }
+     RS_TRACE_NAME_FMT("RSBaseRenderEngine::DrawImage(GPU) targetColorGamut=%d", params.targetColorGamut);
+     LayerComposeCollection::GetInstance().UpdateDrawImageNumberForDFX();
+ 
+-- 
+2.50.1
+

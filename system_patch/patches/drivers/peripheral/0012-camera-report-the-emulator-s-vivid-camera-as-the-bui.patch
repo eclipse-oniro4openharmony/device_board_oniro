@@ -1,0 +1,49 @@
+From 4211cc7578ccabe35068e519e6b0039f8c9ff546 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 10 Nov 2026 19:45:17 +0000
+Subject: [PATCH 12/12] camera: report the emulator's vivid camera as the
+ built-in back camera
+
+The USB camera VDI reports every camera as a front-facing, USB-attached
+one. The camera app (com.ohos.camera) opens the back camera, finds none
+and fails with "CreateCameraInputInstance invalid argument", so the
+emulator showed a black viewfinder. With the QEMU vivid capture feature
+the one camera is reported as the built-in back camera instead.
+
+Change-Id: Ic4714dffac31e7a811772af593c1b5088ecc13ea
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../v4l2/src/device_manager/v4l2_device_manager.cpp      | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/device_manager/v4l2_device_manager.cpp b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/device_manager/v4l2_device_manager.cpp
+index 85c072935..afee6814a 100644
+--- a/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/device_manager/v4l2_device_manager.cpp
++++ b/camera/vdi_base/usb_camera/adapter/platform/v4l2/src/device_manager/v4l2_device_manager.cpp
+@@ -904,14 +904,23 @@ void V4L2DeviceManager::AddDefaultControlCaptureMirrorSupport(std::shared_ptr<Ca
+ void V4L2DeviceManager::AddDefaultCameraConnectionType(std::shared_ptr<CameraMetadata> metadata)
+ {
+     std::vector<uint8_t> cameraConnectionTypeVector;
++#ifdef QEMU_VIVID_CAPTURE_ENABLED
++    // The emulator's only camera stands in for a phone's main camera.
++    cameraConnectionTypeVector.push_back(OHOS_CAMERA_CONNECTION_TYPE_BUILTIN);
++#else
+     cameraConnectionTypeVector.push_back(OHOS_CAMERA_CONNECTION_TYPE_USB_PLUGIN);
++#endif
+     AddOrUpdateOhosTag(metadata, OHOS_ABILITY_CAMERA_CONNECTION_TYPE, cameraConnectionTypeVector);
+ }
+ 
+ void V4L2DeviceManager::AddDefaultCameraPosition(std::shared_ptr<CameraMetadata> metadata)
+ {
+     std::vector<uint8_t> cameraPositionVector;
++#ifdef QEMU_VIVID_CAPTURE_ENABLED
++    cameraPositionVector.push_back(OHOS_CAMERA_POSITION_BACK);
++#else
+     cameraPositionVector.push_back(OHOS_CAMERA_POSITION_FRONT);
++#endif
+     AddOrUpdateOhosTag(metadata, OHOS_ABILITY_CAMERA_POSITION, cameraPositionVector);
+ }
+ 
+-- 
+2.50.1
+
