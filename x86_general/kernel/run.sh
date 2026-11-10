@@ -180,6 +180,10 @@ host_arch="$(uname -m)"
 
 accel_args=()
 cpu_args=()
+# Multiplier for the ability framework's start-up timeouts. Pure TCG emulation
+# is several times slower than a hypervisor, and at 1x foundation kills apps
+# whose abilities take too long to load.
+timeout_ratio=1
 
 case "$host_os" in
   Linux)
@@ -224,6 +228,7 @@ EOF
       info "Apple Silicon detected; using TCG emulation (slower than native)."
       accel_args=(-accel tcg,thread=multi)
       cpu_args=(-cpu max)
+      timeout_ratio=10
     fi
     ;;
 
@@ -416,7 +421,7 @@ exec "$qemu_bin" \
   -drive if=none,file=userdata.img,format=raw,id=userdata,index=3 \
   -device virtio-blk-pci,drive=userdata \
   "${serial_args[@]}" \
-  -append "ip=dhcp loglevel=4 ${video_mode} console=ttyS0,115200 panic=5 init=init root=/dev/ram0 rw ohos.boot.hardware=x86_general ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required ohos.required_mount.misc=/dev/block/vda@/misc@none@none=@wait,required" \
+  -append "ip=dhcp loglevel=4 ${video_mode} console=ttyS0,115200 panic=5 init=init root=/dev/ram0 rw ohos.boot.hardware=x86_general ohos.boot.timeout_ratio=${timeout_ratio} ohos.required_mount.system=/dev/block/vdb@/usr@ext4@ro,barrier=1@wait,required ohos.required_mount.vendor=/dev/block/vdc@/vendor@ext4@ro,barrier=1@wait,required ohos.required_mount.misc=/dev/block/vda@/misc@none@none=@wait,required" \
   "${accel_args[@]}" \
   "${cpu_args[@]}" \
   -netdev "user,id=net0,hostfwd=tcp:${forward_host}:${forward_port}-:55555" \
