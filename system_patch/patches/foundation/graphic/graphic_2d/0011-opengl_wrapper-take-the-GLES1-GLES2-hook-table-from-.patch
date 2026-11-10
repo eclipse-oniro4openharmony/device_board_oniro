@@ -1,0 +1,212 @@
+From 40cb8c1c9a7a3eba9c84890a1f9bdee059070db5 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 10 Nov 2026 17:12:17 +0000
+Subject: [PATCH] opengl_wrapper: take the GLES1/GLES2 hook table from libEGL
+
+libGLESv1.so and libGLESv2.so each compiled their own copy of
+thread_private_data_ctl.cpp and read the per-thread hook table through
+OHOS::ThreadPrivateDataCtl::GetGlHookTable(). Only libEGL.so ever fills
+that table (on eglMakeCurrent), so the GLES entry points work only if
+the dynamic linker happens to bind libEGL's references to the GLES
+library's copy of the symbols, which depends on the order the program
+was linked in.
+
+A native program linked "-lEGL -lGLESv2" (the usual order) gets NULL
+from glGetString, every other gl* call is dropped with "gl* is invalid"
+and nothing renders. Linked "-lGLESv2 -lEGL" it works. Seen on the
+Volla Plinius with a 30-line pbuffer test.
+
+libGLESv3.so already avoids this by looking up GetHookTable and
+GetHookTableKey in libEGL.so with dlsym. Do the same in GLESv1 and
+GLESv2 and drop their private copy of thread_private_data_ctl.cpp.
+With this both link orders render on the Plinius.
+
+The same fix is in harmony-contrib/ohos-qemu (gles_wrapper_hook_table).
+
+Change-Id: I025813331fd45393a492cf3bf621fa2e4f3c8b95
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ frameworks/opengl_wrapper/BUILD.gn            | 10 +---
+ frameworks/opengl_wrapper/src/GLES1/gles1.cpp | 49 ++++++++++++++++++-
+ frameworks/opengl_wrapper/src/GLES2/gles2.cpp | 49 ++++++++++++++++++-
+ 3 files changed, 96 insertions(+), 12 deletions(-)
+
+diff --git a/frameworks/opengl_wrapper/BUILD.gn b/frameworks/opengl_wrapper/BUILD.gn
+index 3b3bcd97df..2490feb19a 100644
+--- a/frameworks/opengl_wrapper/BUILD.gn
++++ b/frameworks/opengl_wrapper/BUILD.gn
+@@ -145,10 +145,7 @@ config("glesv1_public_config") {
+ 
+ ohos_shared_library("GLESv1") {
+   branch_protector_ret = "pac_ret"
+-  sources = [
+-    "src/GLES1/gles1.cpp",
+-    "src/thread_private_data_ctl.cpp",
+-  ]
++  sources = [ "src/GLES1/gles1.cpp" ]
+   configs = [ ":glesv1_config" ]
+ 
+   public_configs = [ ":glesv1_public_config" ]
+@@ -189,10 +186,7 @@ config("glesv2_public_config") {
+ 
+ ohos_shared_library("GLESv2") {
+   branch_protector_ret = "pac_ret"
+-  sources = [
+-    "src/GLES2/gles2.cpp",
+-    "src/thread_private_data_ctl.cpp",
+-  ]
++  sources = [ "src/GLES2/gles2.cpp" ]
+   configs = [ ":glesv2_config" ]
+ 
+   public_configs = [ ":glesv2_public_config" ]
+diff --git a/frameworks/opengl_wrapper/src/GLES1/gles1.cpp b/frameworks/opengl_wrapper/src/GLES1/gles1.cpp
+index 42277f94c4..9acf89554e 100644
+--- a/frameworks/opengl_wrapper/src/GLES1/gles1.cpp
++++ b/frameworks/opengl_wrapper/src/GLES1/gles1.cpp
+@@ -12,14 +12,59 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++
++#include <dlfcn.h>
++#include <string>
++
+ #include "hook.h"
+ #include "thread_private_data_ctl.h"
+ #include "wrapper_log.h"
+ 
++using GetGlHookTableFunc = OHOS::GlHookTable* (*)();
++using GetGlHookTableKeyFunc = pthread_key_t(*)();
++template<typename Func = void*>
++Func GetEglApi(const char* procname)
++{
++    constexpr const char *libWrapperName = "libEGL.so";
++    void* dlEglHandle = dlopen(libWrapperName, RTLD_NOW | RTLD_GLOBAL);
++    if (!dlEglHandle) {
++        WLOGE("Failed to load EGL library (%s) using dlopen", libWrapperName);
++        return nullptr;
++    }
++
++    void* func = dlsym(dlEglHandle, procname);
++    if (func) {
++        return reinterpret_cast<Func>(func);
++    };
++    dlclose(dlEglHandle);
++    return nullptr;
++}
++static GetGlHookTableFunc g_pfnGetGlHookTable = GetEglApi<GetGlHookTableFunc>("GetHookTable");
++static GetGlHookTableKeyFunc g_pfnGetGlHookTableKey = GetEglApi<GetGlHookTableKeyFunc>("GetHookTableKey");
++
++static pthread_key_t g_glHookTableKey = -1;
++
++__attribute__((__always_inline__))__inline__ static OHOS::GlHookTable *GetHookTable()
++{
++    if (__builtin_expect(g_glHookTableKey != static_cast<pthread_key_t>(-1), 1)) {
++        OHOS::GlHookTable *table = static_cast<OHOS::GlHookTable *>(pthread_getspecific(g_glHookTableKey));
++        if (__builtin_expect(table != nullptr, 1)) {
++            return table;
++        }
++    }
++
++    if (g_pfnGetGlHookTable == nullptr || g_pfnGetGlHookTableKey == nullptr) {
++        return nullptr;
++    }
++    OHOS::GlHookTable *table = g_pfnGetGlHookTable();
++    g_glHookTableKey = g_pfnGetGlHookTableKey();
++    return table;
++}
++
+ #undef CALL_HOOK_API
+ #define CALL_HOOK_API(api, ...)                                                         \
+     do {                                                                                \
+-        OHOS::GlHookTable const *table = OHOS::ThreadPrivateDataCtl::GetGlHookTable();  \
++        OHOS::GlHookTable *table = GetHookTable();                               \
+         if (table && table->table1.api) {                                               \
+             table->table1.api(__VA_ARGS__);                                             \
+         } else {                                                                        \
+@@ -30,7 +75,7 @@
+ 
+ #undef CALL_HOOK_API_RET
+ #define CALL_HOOK_API_RET(api, ...) do {                                                \
+-        OHOS::GlHookTable const *table = OHOS::ThreadPrivateDataCtl::GetGlHookTable();  \
++        OHOS::GlHookTable *table = GetHookTable();                               \
+         if (table && table->table1.api) {                                               \
+             return table->table1.api(__VA_ARGS__);                                      \
+         } else {                                                                        \
+diff --git a/frameworks/opengl_wrapper/src/GLES2/gles2.cpp b/frameworks/opengl_wrapper/src/GLES2/gles2.cpp
+index 0abd6a5f92..983ffdcc6b 100644
+--- a/frameworks/opengl_wrapper/src/GLES2/gles2.cpp
++++ b/frameworks/opengl_wrapper/src/GLES2/gles2.cpp
+@@ -12,14 +12,59 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
++
++#include <dlfcn.h>
++#include <string>
++
+ #include "hook.h"
+ #include "thread_private_data_ctl.h"
+ #include "wrapper_log.h"
+ 
++using GetGlHookTableFunc = OHOS::GlHookTable* (*)();
++using GetGlHookTableKeyFunc = pthread_key_t(*)();
++template<typename Func = void*>
++Func GetEglApi(const char* procname)
++{
++    constexpr const char *libWrapperName = "libEGL.so";
++    void* dlEglHandle = dlopen(libWrapperName, RTLD_NOW | RTLD_GLOBAL);
++    if (!dlEglHandle) {
++        WLOGE("Failed to load EGL library (%s) using dlopen", libWrapperName);
++        return nullptr;
++    }
++
++    void* func = dlsym(dlEglHandle, procname);
++    if (func) {
++        return reinterpret_cast<Func>(func);
++    };
++    dlclose(dlEglHandle);
++    return nullptr;
++}
++static GetGlHookTableFunc g_pfnGetGlHookTable = GetEglApi<GetGlHookTableFunc>("GetHookTable");
++static GetGlHookTableKeyFunc g_pfnGetGlHookTableKey = GetEglApi<GetGlHookTableKeyFunc>("GetHookTableKey");
++
++static pthread_key_t g_glHookTableKey = -1;
++
++__attribute__((__always_inline__))__inline__ static OHOS::GlHookTable *GetHookTable()
++{
++    if (__builtin_expect(g_glHookTableKey != static_cast<pthread_key_t>(-1), 1)) {
++        OHOS::GlHookTable *table = static_cast<OHOS::GlHookTable *>(pthread_getspecific(g_glHookTableKey));
++        if (__builtin_expect(table != nullptr, 1)) {
++            return table;
++        }
++    }
++
++    if (g_pfnGetGlHookTable == nullptr || g_pfnGetGlHookTableKey == nullptr) {
++        return nullptr;
++    }
++    OHOS::GlHookTable *table = g_pfnGetGlHookTable();
++    g_glHookTableKey = g_pfnGetGlHookTableKey();
++    return table;
++}
++
+ #undef CALL_HOOK_API
+ #define CALL_HOOK_API(api, ...)                                                         \
+     do {                                                                                \
+-        OHOS::GlHookTable const *table = OHOS::ThreadPrivateDataCtl::GetGlHookTable();  \
++        OHOS::GlHookTable *table = GetHookTable();                               \
+         if (table && table->table2.api) {                                               \
+             table->table2.api(__VA_ARGS__);                                             \
+         } else {                                                                        \
+@@ -30,7 +75,7 @@
+ 
+ #undef CALL_HOOK_API_RET
+ #define CALL_HOOK_API_RET(api, ...) do {                                                \
+-        OHOS::GlHookTable const *table = OHOS::ThreadPrivateDataCtl::GetGlHookTable();  \
++        OHOS::GlHookTable *table = GetHookTable();                               \
+         if (table && table->table2.api) {                                               \
+             return table->table2.api(__VA_ARGS__);                                      \
+         } else {                                                                        \
+-- 
+2.50.1
+
