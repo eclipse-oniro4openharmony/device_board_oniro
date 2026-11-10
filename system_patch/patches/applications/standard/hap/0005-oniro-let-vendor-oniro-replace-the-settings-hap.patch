@@ -1,0 +1,39 @@
+From 12cf54bcff86f59752d667a10af65d625473813e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Tue, 10 Nov 2026 09:54:17 +0000
+Subject: [PATCH] oniro: let vendor/oniro replace the settings hap
+
+With oniro_install_custom_haps on, vendor/oniro builds com.ohos.settings
+from //applications/standard/settings with the Oniro logo on the About
+card, signed with the stock certificate chain and profile.  Both install
+app/com.ohos.settings/Settings.hap, so drop the stock settings_hap for
+the two Oniro products, as for the camera and settingsdata.  With the
+arg off nothing changes.
+
+Change-Id: I28112ead25f5f937a4a3e03b3abb233e871dced5
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ BUILD.gn | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/BUILD.gn b/BUILD.gn
+index bf847bf..daaf4c3 100755
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -561,5 +561,13 @@ group("hap") {
+     if (oniro_install_custom_haps) {
+       deps -= [ "//applications/standard/hap:settingsData_hap" ]
+     }
++
++    # And com.ohos.settings: vendor/oniro builds it from
++    # //applications/standard/settings with the Oniro logo on the About card,
++    # signed with the stock certificate chain and profile. Both install
++    # app/com.ohos.settings/Settings.hap.
++    if (oniro_install_custom_haps) {
++      deps -= [ "//applications/standard/hap:settings_hap" ]
++    }
+   }
+ }
+-- 
+2.50.1
+
