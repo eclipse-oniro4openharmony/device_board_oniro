@@ -595,19 +595,22 @@ camera_cmdline="vivid.node_types=0x1 vivid.num_inputs=1"
 # --wifi a second one, on a NIC the guest turns into virt_wifi's wlan0, carries
 # everything else; the first is then restricted to the host and kept on its own
 # subnet, and the guest gives eth0 a fixed LAN address (emulator_wifi).
+# romfile= : no PXE option ROM. The guest never boots from the network, and
+# without it QEMU needs no efi-virtio.rom (ipxe-qemu is only a recommended
+# package of qemu-system-arm, so minimal installs lack it).
 mac_suffix=$(printf %02x "${instance:-0}")
 if [[ "$wifi" == true ]]; then
   net_args=(
     -netdev "user,id=net0,net=10.0.3.0/24,restrict=on,hostfwd=tcp:${forward_host}:${forward_port}-:55555"
-    -device "virtio-net-pci,netdev=net0,mac=52:54:00:12:35:${mac_suffix},addr=0a.0"
+    -device "virtio-net-pci,netdev=net0,mac=52:54:00:12:35:${mac_suffix},addr=0a.0,romfile="
     -netdev "user,id=net1"
-    -device "virtio-net-pci,netdev=net1,mac=52:54:00:12:36:${mac_suffix},addr=0b.0"
+    -device "virtio-net-pci,netdev=net1,mac=52:54:00:12:36:${mac_suffix},addr=0b.0,romfile="
   )
   ip_cmdline="ip=10.0.3.15::0.0.0.0:255.255.255.0::eth0:off"
 else
   net_args=(
     -netdev "user,id=net0,hostfwd=tcp:${forward_host}:${forward_port}-:55555"
-    -device "virtio-net-pci,netdev=net0${instance:+,mac=52:54:00:12:35:${mac_suffix}}"
+    -device "virtio-net-pci,netdev=net0${instance:+,mac=52:54:00:12:35:${mac_suffix}},romfile="
   )
   ip_cmdline="ip=dhcp"
 fi
