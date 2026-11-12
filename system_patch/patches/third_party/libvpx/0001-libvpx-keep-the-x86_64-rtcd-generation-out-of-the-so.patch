@@ -1,4 +1,4 @@
-From 903f5a989dacbb99d851dd2bcf7761da3b5abe9b Mon Sep 17 00:00:00 2001
+From 41a7556d7b18fac73de7fed573ccff5037949f34 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 21 Oct 2026 22:09:12 +0000
 Subject: [PATCH] libvpx: keep the x86_64 rtcd generation out of the source
@@ -11,14 +11,40 @@ as an x86_64 product had been built in the same tree). Write the
 generated headers and the temporary rtcd config straight into the
 output dir instead.
 
+The x86_64 sources must then find the generated headers before the
+tracked arm vpx_scale_rtcd.h in the source root ("./" comes first in
+include_dirs): put the output dir first on x86_64. Without that,
+vpx_scale_rtcd.c compiled for x86_64 references arm_cpu_caps and
+libvpxdec_ohos fails to link.
+
 Change-Id: I3331b5b93a05eb33a05f69e97908acce633e1548
 Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
 ---
+ BUILD.gn |  8 +++++++-
  build.sh | 18 ++++++++++--------
- 1 file changed, 10 insertions(+), 8 deletions(-)
+ 2 files changed, 17 insertions(+), 9 deletions(-)
 
+diff --git a/BUILD.gn b/BUILD.gn
+index a6e3528..a749efc 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -244,7 +244,13 @@ ohos_shared_library("vpxdec_ohos") {
+     sources += [ "./vpx_ports/aarch32_cpudetect.c" ]
+   }
+   
+-  include_dirs = [
++  include_dirs = []
++  if (is_vpx_x86_64) {
++    # The generated x86_64 rtcd headers must win over the tracked arm
++    # vpx_scale_rtcd.h in the source root ("./" below).
++    include_dirs += [ "$code_dir" ]
++  }
++  include_dirs += [
+     "./",
+     "$code_dir",
+     "./vpx",
 diff --git a/build.sh b/build.sh
-index d1fdcc988..d7b4c8390 100755
+index d1fdcc9..d7b4c83 100755
 --- a/build.sh
 +++ b/build.sh
 @@ -69,7 +69,10 @@ if [ "$CPU" == "x86_64" ]; then
