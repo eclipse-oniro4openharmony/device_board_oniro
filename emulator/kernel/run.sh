@@ -389,11 +389,17 @@ if [[ "$accel" == auto ]]; then
         fi
         ;;
       Darwin)
-        if [[ "$guest_arch" == x86_64 ]] &&
-           ! sysctl -n kern.hv_support 2>/dev/null | grep -q 1; then
+        if sysctl -n kern.hv_support 2>/dev/null | grep -q 1; then
+          accel=hvf
+        elif [[ "$guest_arch" == arm64 ]]; then
+          # No Hypervisor.framework, e.g. inside a macOS VM (GitHub's arm64
+          # macOS runners have no nested virtualization).
+          warn "Hypervisor.framework is not available; using TCG emulation (slow)."
+          accel=tcg
+        else
           warn "Hypervisor.framework may not be available. Trying HVF anyway..."
+          accel=hvf
         fi
-        accel=hvf
         ;;
       *)
         if [[ "$guest_arch" == x86_64 ]]; then
