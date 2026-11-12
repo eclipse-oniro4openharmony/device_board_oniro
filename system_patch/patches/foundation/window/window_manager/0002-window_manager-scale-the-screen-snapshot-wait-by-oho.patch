@@ -1,0 +1,64 @@
+From 67f9102946b673456d0b245df3a63930ac589274 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 12 Nov 2026 13:38:17 +0000
+Subject: [PATCH] window_manager: scale the screen snapshot wait by
+ ohos.boot.timeout_ratio
+
+DMS waits 2 s for render_service to return a screen capture. On an
+emulator running under CPU emulation (QEMU TCG) the capture often takes
+longer, so snapshot_display (and every screenshot tool on top of it)
+failed with "Failed to get pixelmap from RS".
+
+The wait is now multiplied by ohos.boot.timeout_ratio, which such an
+emulator sets on its kernel command line (20 under TCG). Unset, it is 1.
+
+Change-Id: I01e07fb7d2584687f556f9f0f044246d1d69807e
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../src/screen_session_manager.cpp               | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/window_scene/screen_session_manager/src/screen_session_manager.cpp b/window_scene/screen_session_manager/src/screen_session_manager.cpp
+index 266225f48d..d9416b310f 100644
+--- a/window_scene/screen_session_manager/src/screen_session_manager.cpp
++++ b/window_scene/screen_session_manager/src/screen_session_manager.cpp
+@@ -233,6 +233,18 @@ const bool IS_SUPPORT_PC_MODE = system::GetBoolParameter("const.window.support_w
+ const std::set<std::string> INDIVIDUAL_SCREEN_GROUP_SET = {
+     "CeliaView", "DevEcoViewer", "Cooperation-multi", "HwCast_AppModeDisplay", "HiCar", "SuperLauncher"};
+ const long GET_HDR_PIXELMAP_TIMEOUT = 2000;
++// Emulators running under CPU emulation (QEMU TCG) set ohos.boot.timeout_ratio
++// on the kernel command line: a screen capture there can take several times
++// GET_HDR_PIXELMAP_TIMEOUT. Unset, the ratio is 1.
++long GetPixelMapTimeout()
++{
++    static const long timeout = [] {
++        constexpr uint32_t maxRatio = 100;
++        uint32_t ratio = system::GetUintParameter<uint32_t>("ohos.boot.timeout_ratio", 1, maxRatio);
++        return GET_HDR_PIXELMAP_TIMEOUT * static_cast<long>(ratio < 1 ? 1 : ratio);
++    }();
++    return timeout;
++}
+ const int32_t CV_WAIT_UPDATE_AVAILABLE_MS = 500;
+ const static uint32_t PIXMAP_VECTOR_SIZE = 2;
+ static const uint32_t SDR_PIXMAP = 0;
+@@ -10324,7 +10336,7 @@ std::shared_ptr<Media::PixelMap> ScreenSessionManager::GetScreenSnapshot(Display
+         TLOGNFE(WmsLogTag::DMS, "TakeSurfaceCapture failed");
+         return nullptr;
+     }
+-    std::shared_ptr<Media::PixelMap> screenshot = callback->GetResult(GET_HDR_PIXELMAP_TIMEOUT);  // wait for <= 2000ms
++    std::shared_ptr<Media::PixelMap> screenshot = callback->GetResult(GetPixelMapTimeout());  // wait for <= 2000ms x ratio
+     if (screenshot == nullptr) {
+         TLOGNFE(WmsLogTag::DMS, "Failed to get pixelmap from RS, return nullptr!");
+     } else {
+@@ -10383,7 +10395,7 @@ std::vector<std::shared_ptr<Media::PixelMap>> ScreenSessionManager::GetScreenHDR
+         return {nullptr, nullptr};
+     }
+     // wait for <= 2000ms
+-    std::vector<std::shared_ptr<Media::PixelMap>> screenshotVec = callback->GetHDRResult(GET_HDR_PIXELMAP_TIMEOUT);
++    std::vector<std::shared_ptr<Media::PixelMap>> screenshotVec = callback->GetHDRResult(GetPixelMapTimeout());
+     if (screenshotVec.size() != PIXMAP_VECTOR_SIZE || screenshotVec[0] == nullptr) {
+         TLOGNFE(WmsLogTag::DMS, "Failed to get pixelmap vector from RS, return nullptr!");
+         return {nullptr, nullptr};
+-- 
+2.50.1
+
