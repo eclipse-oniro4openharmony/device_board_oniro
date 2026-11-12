@@ -1,4 +1,4 @@
-From b97ba34353d49cec8e6b3480717178e930aa2d3e Mon Sep 17 00:00:00 2001
+From a38c87c163569081b2f2d633ad887c8aca4195d2 Mon Sep 17 00:00:00 2001
 From: Francesco Pham <francesco.pham1@h-partners.com>
 Date: Wed, 11 Nov 2026 20:32:09 +0000
 Subject: [PATCH] hicollie: scale watchdog deadlines by ohos.boot.timeout_ratio
@@ -13,7 +13,7 @@ a boot loop.
 
 Thread watchdog intervals and XCollie timer timeouts are now multiplied by
 the kernel command line parameter ohos.boot.timeout_ratio, which the
-emulator's launcher already sets (10 under TCG, else 1) for the ability
+emulator's launcher already sets (20 under TCG, else 1) for the ability
 manager's own timeouts. Unset, the ratio is 1 and nothing changes.
 
 Change-Id: I19056ea2fc9f1bf67fdbf936f3400143e5cd1e0d

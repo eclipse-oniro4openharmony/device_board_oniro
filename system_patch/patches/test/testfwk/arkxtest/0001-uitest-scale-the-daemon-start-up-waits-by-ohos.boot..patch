@@ -1,0 +1,164 @@
+From 7504203e3cb29c77e93c0e570664ec92cee14383 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 12 Nov 2026 09:37:36 +0000
+Subject: [PATCH] uitest: scale the daemon start-up waits by
+ ohos.boot.timeout_ratio
+
+A UI test's Driver.create() returned null on an emulator running under
+CPU emulation (QEMU TCG) ("Cannot read property waitForComponent of
+null" in the test's beforeAll). Three fixed deadlines expire there:
+
+* aa test starts `uitest start-daemon` with a 3 s shell timeout;
+* the client and the daemon wait 5 s for each other's connection;
+* the daemon's test server client waits 4 s for the on-demand test server
+  SA, which takes longer than that to load; it then keeps no interface
+  and never retries, so the daemon can never publish its caller.
+
+All three now scale with ohos.boot.timeout_ratio, which such an emulator
+sets on its kernel command line (20 under TCG). Unset, it is 1.
+
+Change-Id: I15f778c8f71d8409a57060de63f7886b5c47946a
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ testserver/src/BUILD.gn                      |  1 +
+ testserver/src/client/test_server_client.cpp | 15 ++++++++++++++-
+ uitest/BUILD.gn                              |  1 +
+ uitest/connection/ipc_transactor.cpp         | 17 +++++++++++++++--
+ uitest/napi/uitest_exporter.js               |  9 ++++++++-
+ 5 files changed, 39 insertions(+), 4 deletions(-)
+
+diff --git a/testserver/src/BUILD.gn b/testserver/src/BUILD.gn
+index 7fe55d3..aa8105a 100644
+--- a/testserver/src/BUILD.gn
++++ b/testserver/src/BUILD.gn
+@@ -160,6 +160,7 @@ ohos_shared_library("test_server_client") {
+     "c_utils:utils",
+     "common_event_service:cesfwk_innerkits",
+     "hilog:libhilog",
++    "init:libbegetutil",
+     "ipc:ipc_core",
+     "samgr:samgr_proxy",
+   ]
+diff --git a/testserver/src/client/test_server_client.cpp b/testserver/src/client/test_server_client.cpp
+index 7665449..e3aa74a 100644
+--- a/testserver/src/client/test_server_client.cpp
++++ b/testserver/src/client/test_server_client.cpp
+@@ -23,12 +23,25 @@
+ #include "session_token.h"
+ #include "test_server_error_code.h"
+ #include "system_ability_load_callback_stub.h"
++#include "parameters.h"
+ 
+ namespace OHOS::testserver {
+     using namespace OHOS::HiviewDFX;
+     static constexpr OHOS::HiviewDFX::HiLogLabel LABEL = {LOG_CORE, 0xD003110, "TestServerClient"};
+     static constexpr int32_t TESTSERVER_LOAD_TIMEOUT_MS = 4000; // ms
+ 
++    // Emulators running under CPU emulation (QEMU TCG) set ohos.boot.timeout_ratio:
++    // loading the on-demand test server takes several times longer there.
++    static int32_t TestServerLoadTimeoutMs()
++    {
++        static const int32_t timeoutMs = [] {
++            constexpr uint32_t maxRatio = 100;
++            uint32_t ratio = OHOS::system::GetUintParameter<uint32_t>("ohos.boot.timeout_ratio", 1, maxRatio);
++            return TESTSERVER_LOAD_TIMEOUT_MS * static_cast<int32_t>(ratio < 1 ? 1 : ratio);
++        }();
++        return timeoutMs;
++    }
++
+     TestServerClient &TestServerClient::GetInstance()
+     {
+         HiLog::Debug(LABEL, "%{public}s called. ", __func__);
+@@ -49,7 +62,7 @@ namespace OHOS::testserver {
+         bool WaitLoadStateChange(int32_t systemAbilityId)
+         {
+             std::unique_lock<std::mutex> lock(locatorMutex_);
+-            auto wait = locatorCond_.wait_for(lock, std::chrono::milliseconds(TESTSERVER_LOAD_TIMEOUT_MS), [this] {
++            auto wait = locatorCond_.wait_for(lock, std::chrono::milliseconds(TestServerLoadTimeoutMs()), [this] {
+                 return loadState_ == true;
+             });
+             if (!wait) {
+diff --git a/uitest/BUILD.gn b/uitest/BUILD.gn
+index 1eab025..7617b18 100644
+--- a/uitest/BUILD.gn
++++ b/uitest/BUILD.gn
+@@ -131,6 +131,7 @@ ohos_static_library("uitest_ipc") {
+   external_deps = [
+     "ability_base:want",
+     "common_event_service:cesfwk_innerkits",
++    "init:libbegetutil",
+     "ipc:ipc_core",
+     "json:nlohmann_json_static",
+     "samgr:samgr_proxy",
+diff --git a/uitest/connection/ipc_transactor.cpp b/uitest/connection/ipc_transactor.cpp
+index b57f789..ff2ccb4 100644
+--- a/uitest/connection/ipc_transactor.cpp
++++ b/uitest/connection/ipc_transactor.cpp
+@@ -22,6 +22,7 @@
+ #include "test_server_client.h"
+ #include "nlohmann/json.hpp"
+ #include "ipc_transactor.h"
++#include "parameters.h"
+ 
+ namespace OHOS::uitest {
+     using namespace std;
+@@ -190,6 +191,18 @@ namespace OHOS::uitest {
+     constexpr uint32_t WAIT_CONN_TIMEOUT_MS = 5000;
+     constexpr uint32_t WAIT_DUMP_TIMEOUT_MS = 30000;
+ 
++    // Emulators running under CPU emulation (QEMU TCG) set ohos.boot.timeout_ratio:
++    // starting the daemon there takes several times longer.
++    static uint32_t WaitConnTimeoutMs()
++    {
++        static const uint32_t timeoutMs = [] {
++            constexpr uint32_t maxRatio = 100;
++            uint32_t ratio = OHOS::system::GetUintParameter<uint32_t>("ohos.boot.timeout_ratio", 1, maxRatio);
++            return WAIT_CONN_TIMEOUT_MS * (ratio < 1 ? 1 : ratio);
++        }();
++        return timeoutMs;
++    }
++
+     static sptr<IRemoteObject> PublishCallerAndWaitForBackcaller(const sptr<ApiCaller> &caller, string_view token)
+     {
+         CommonEventData event;
+@@ -206,7 +219,7 @@ namespace OHOS::uitest {
+             remoteCallerObject = remote;
+             condition.notify_one();
+         });
+-        constexpr auto period = chrono::milliseconds(WAIT_CONN_TIMEOUT_MS / PUBLISH_MAX_RETIES);
++        const auto period = chrono::milliseconds(WaitConnTimeoutMs() / PUBLISH_MAX_RETIES);
+         uint32_t tries = 0;
+         do {
+             // publish caller with retries
+@@ -244,7 +257,7 @@ namespace OHOS::uitest {
+             LOG_E("Fail to subscribe commonEvent");
+             return nullptr;
+         }
+-        const auto timeout = chrono::milliseconds(WAIT_CONN_TIMEOUT_MS);
++        const auto timeout = chrono::milliseconds(WaitConnTimeoutMs());
+         auto ret = condition.wait_for(lock, timeout);
+         CommonEventManager::UnSubscribeCommonEvent(subscriber);
+         subscriber->UpdateHandler(nullptr); // unset handler
+diff --git a/uitest/napi/uitest_exporter.js b/uitest/napi/uitest_exporter.js
+index 34bb81c..626fccf 100644
+--- a/uitest/napi/uitest_exporter.js
++++ b/uitest/napi/uitest_exporter.js
+@@ -57,7 +57,14 @@ async function scheduleConnectionAsync(uitest) {
+     console.info(`UiTestKit_exporter: ScheduleProbeAndEstablishConnection, token=${connToken}`);
+     uitest.scheduleEstablishConnection(connToken);
+     console.info('UiTestKit_exporter: Begin executing shell command to start server-daemon');
+-    delegator.executeShellCommand(`uitest start-daemon ${connToken}`, 3).then((value) => {
++    // Emulators under CPU emulation (QEMU TCG) set ohos.boot.timeout_ratio: the
++    // daemon starts several times slower there.
++    let parameter = requireModule('systemparameter');
++    let ratio = Number(parameter == null ? '1' : parameter.getSync('ohos.boot.timeout_ratio', '1'));
++    if (!(ratio >= 1)) {
++      ratio = 1;
++    }
++    delegator.executeShellCommand(`uitest start-daemon ${connToken}`, 3 * ratio).then((value) => {
+       console.info(`UiTestKit_exporter: Start server-daemon finished: ${JSON.stringify(value)}`);
+     }).catch((error) => {
+       console.error(`UiTestKit_exporter: Start server-daemon failed: ${JSON.stringify(error)}`);
+-- 
+2.50.1
+

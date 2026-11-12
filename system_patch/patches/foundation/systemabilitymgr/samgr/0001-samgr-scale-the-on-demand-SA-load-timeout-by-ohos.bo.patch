@@ -1,0 +1,57 @@
+From ebf450c15b073fa9f63a87a3a5386e0f0c6081f5 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Thu, 12 Nov 2026 11:27:30 +0000
+Subject: [PATCH] samgr: scale the on-demand SA load timeout by
+ ohos.boot.timeout_ratio
+
+samgr reports an on-demand system ability as failed to load 4 s after it
+started its process. On an emulator running under CPU emulation (QEMU
+TCG) opening the SA's library alone took 4-15 s (libtest_server_service:
+UI tests could never connect to the uitest daemon), so the load was
+reported failed although the SA came up moments later.
+
+The delay is now multiplied by ohos.boot.timeout_ratio, which such an
+emulator sets on its kernel command line (20 under TCG). Unset, it is 1.
+
+Change-Id: Ibd6cf612519ae4c6970893d61d7862e635304c69
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../native/source/base_system_ability_manager.cpp | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/services/samgr/native/source/base_system_ability_manager.cpp b/services/samgr/native/source/base_system_ability_manager.cpp
+index 77e4e431..780de362 100644
+--- a/services/samgr/native/source/base_system_ability_manager.cpp
++++ b/services/samgr/native/source/base_system_ability_manager.cpp
+@@ -68,6 +68,19 @@ constexpr int64_t CHECK_LOADED_DELAY_TIME = 12 * 1000; // ms
+ constexpr int64_t CHECK_LOADED_DELAY_TIME = 4 * 1000; // ms
+ #endif
+ constexpr int32_t KILL_TIMEOUT_TIME = 60; // s
++
++// Emulators running under CPU emulation (QEMU TCG) set ohos.boot.timeout_ratio
++// on the kernel command line: opening an on-demand SA's library alone can take
++// several times CHECK_LOADED_DELAY_TIME there. Unset, the ratio is 1.
++int64_t CheckLoadedDelayTime()
++{
++    static const int64_t delay = [] {
++        constexpr uint32_t maxRatio = 100;
++        uint32_t ratio = OHOS::system::GetUintParameter<uint32_t>("ohos.boot.timeout_ratio", 1, maxRatio);
++        return CHECK_LOADED_DELAY_TIME * static_cast<int64_t>(ratio < 1 ? 1 : ratio);
++    }();
++    return delay;
++}
+ }
+ 
+ BaseSystemAbilityManager::~BaseSystemAbilityManager()
+@@ -1025,7 +1038,7 @@ void BaseSystemAbilityManager::SendCheckLoadedMsg(int32_t systemAbilityId, const
+         abilityStateScheduler_->SendAbilityStateEvent(systemAbilityId, AbilityStateEvent::ABILITY_LOAD_FAILED_EVENT);
+         (void)GetSystemProcess(name);
+     };
+-    bool ret = workHandler_->PostTask(delayTask, ToString(systemAbilityId), CHECK_LOADED_DELAY_TIME);
++    bool ret = workHandler_->PostTask(delayTask, ToString(systemAbilityId), CheckLoadedDelayTime());
+     if (!ret) {
+         HILOGI("SendCheckLoadedMsg PostTask SA:%{public}d! failed", systemAbilityId);
+     }
+-- 
+2.50.1
+

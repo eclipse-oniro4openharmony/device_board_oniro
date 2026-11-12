@@ -442,7 +442,10 @@ case "$accel" in
     else
       cpu_args=(-cpu max)
     fi
-    timeout_ratio=10
+    # 20: a UI test (aa test) keeps its test ability's main thread busy while
+    # the uitest daemon starts, and at 10 the ability manager's foreground
+    # timeout (5 s x ratio) killed it on a 4-vCPU TCG host.
+    timeout_ratio=20
     ;;
 esac
 
