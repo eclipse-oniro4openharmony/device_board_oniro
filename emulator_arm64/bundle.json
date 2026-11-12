@@ -1,0 +1,43 @@
+{
+    "name": "@ohos/device_emulator_arm64",
+    "version": "3.1",
+    "license": "Apache License 2.0",
+    "private": false,
+    "scripts": {},
+    "dirs": [
+        ""
+    ],
+    "component": {
+        "name": "device_emulator_arm64",
+        "subsystem": "device_emulator_arm64",
+        "syscap": [],
+        "features": [],
+        "deps": {
+            "components": [
+                "c_utils",
+                "hilog",
+                "hdf_core",
+                "drivers_interface_display",
+                "drivers_interface_camera",
+                "hitrace",
+                "ipc",
+                "graphic_surface",
+                "window_manager",
+                "graphic_2d",
+                "safwk"
+            ],
+            "third_party": [
+                "libdrm",
+                "alsa-lib",
+                "vulkan-headers",
+                "zlib"
+            ]
+        },
+        "build": {
+            "sub_component": [
+                "//device/board/oniro/emulator:emulator_group"
+            ],
+            "test": []
+        }
+    }
+}

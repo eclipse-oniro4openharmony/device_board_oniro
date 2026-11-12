@@ -1,0 +1,7 @@
+# Copyright (c) 2026 Eclipse Oniro for OpenHarmony contributors.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The x86_64 Oniro Emulator board. Everything but this board stub lives in
+# device/board/oniro/emulator, shared with the other emulator architecture.
+
+import("//device/board/oniro/emulator/device.gni")

@@ -1,0 +1,81 @@
+# Copyright (c) 2020 Huawei Device Co., Ltd.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+import("//build/ohos.gni")
+import("//device/board/oniro/emulator/device.gni")
+
+# The init/fstab files are named after ohos.boot.hardware, which run.sh sets to
+# "emulator" for every architecture.
+ohos_prebuilt_etc("init.emulator.cfg") {
+  source = "init.emulator.cfg"
+  part_name = "device_${device_name}"
+  install_images = [ vendor_base_dir ]
+  install_enable = true
+}
+
+ohos_prebuilt_etc("init.emulator.usb.cfg") {
+  source = "init.emulator.usb.cfg"
+  part_name = "device_${device_name}"
+  install_images = [ vendor_base_dir ]
+  install_enable = true
+}
+
+ohos_prebuilt_etc("fstab.emulator") {
+  source = "fstab.emulator"
+  part_name = "device_${device_name}"
+  install_images = [ vendor_base_dir ]
+  install_enable = true
+}
+
+# Until 7.0.2 the x86_64 image was the "x86_general" product and booted with
+# ohos.boot.hardware=x86_general. oniro-app's pool mode (core <= 0.13) builds its
+# own QEMU command line with that value, so the x86_64 image also answers to it.
+if (target_cpu == "x86_64") {
+  ohos_prebuilt_etc("init.x86_general.cfg") {
+    source = "init.emulator.cfg"
+    output = "init.x86_general.cfg"
+    part_name = "device_${device_name}"
+    install_images = [ vendor_base_dir ]
+    install_enable = true
+  }
+
+  ohos_prebuilt_etc("init.x86_general.usb.cfg") {
+    source = "init.emulator.usb.cfg"
+    output = "init.x86_general.usb.cfg"
+    part_name = "device_${device_name}"
+    install_images = [ vendor_base_dir ]
+    install_enable = true
+  }
+
+  ohos_prebuilt_etc("fstab.x86_general") {
+    source = "fstab.emulator"
+    output = "fstab.x86_general"
+    part_name = "device_${device_name}"
+    install_images = [ vendor_base_dir ]
+    install_enable = true
+  }
+}
+
+group("init_configs") {
+  deps = [
+    ":fstab.emulator",
+    ":init.emulator.cfg",
+    ":init.emulator.usb.cfg",
+  ]
+  if (target_cpu == "x86_64") {
+    deps += [
+      ":fstab.x86_general",
+      ":init.x86_general.cfg",
+      ":init.x86_general.usb.cfg",
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+From 7a5d6d205150b7b1ecdcff924c182f4bb1725aae Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 11 Nov 2026 16:03:13 +0000
+Subject: [PATCH 2/2] webview: point at the emulator's fetch-arkweb-core.sh
+
+The Oniro x86_general product became emulator_x86_64, and its board files moved to device/board/oniro/emulator. Point the missing-HAP message at the script's new path.
+
+Change-Id: I3cd52e37789d6bdf6c8538e4730f5fee6706fcca
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ ohos_nweb/BUILD.gn | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ohos_nweb/BUILD.gn b/ohos_nweb/BUILD.gn
+index 01b614ac..463fdd88 100644
+--- a/ohos_nweb/BUILD.gn
++++ b/ohos_nweb/BUILD.gn
+@@ -26,12 +26,12 @@ if (target_cpu == "arm64") {
+ } else if (target_cpu == "x86_64") {
+   # There is no upstream x86_64 prebuilt and the arm64 engine cannot load on
+   # x86_64. The x86_64 HAP is fetched into prebuilts/x86_64 by the product
+-  # (for Oniro: device/board/oniro/x86_general/utils/fetch-arkweb-core.sh).
++  # (for Oniro: device/board/oniro/emulator/utils/fetch-arkweb-core.sh).
+   web_source = "prebuilts/x86_64/ArkWebCore.hap"
+   assert(path_exists("//base/web/webview/ohos_nweb/${web_source}"),
+          "x86_64 ArkWebCore.hap missing: fetch it into " +
+              "base/web/webview/ohos_nweb/prebuilts/x86_64/ first " +
+-             "(device/board/oniro/x86_general/utils/fetch-arkweb-core.sh)")
++             "(device/board/oniro/emulator/utils/fetch-arkweb-core.sh)")
+   defines = [ "webview_x86_64" ]
+ }
+ 
+-- 
+2.50.1
+

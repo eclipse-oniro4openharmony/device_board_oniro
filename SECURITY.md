@@ -12,7 +12,7 @@ NOT open a public GitHub issue for an undisclosed vulnerability.
 
 ## Scope
 
-This repository contains the board support packages (BSP): board-level configuration, kernel build and boot/flash tooling for the supported boards (e.g. the hybris_generic Volla X23 board and the x86_general emulator board). Please report here only vulnerabilities in
+This repository contains the board support packages (BSP): board-level configuration, kernel build and boot/flash tooling for the supported boards (e.g. the hybris_generic Volla phone board and the emulator board). Please report here only vulnerabilities in
 content authored by this project:
 
 * Vulnerabilities in upstream OpenHarmony components (the

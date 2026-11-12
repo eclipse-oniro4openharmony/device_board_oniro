@@ -6,7 +6,7 @@ Thanks for your interest in this project.
 
 Eclipse Oniro for OpenHarmony is a distribution of
 [OpenHarmony](https://www.openharmony.cn/) maintained at the Eclipse
-Foundation. This repository contains the board support packages (BSP): board-level configuration, kernel build and boot/flash tooling for the supported boards (e.g. the hybris_generic Volla X23 board and the x86_general emulator board).
+Foundation. This repository contains the board support packages (BSP): board-level configuration, kernel build and boot/flash tooling for the supported boards (e.g. the hybris_generic Volla phone board and the emulator board).
 
 * https://projects.eclipse.org/projects/oniro.oniro4openharmony
 

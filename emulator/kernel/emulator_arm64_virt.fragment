@@ -1,0 +1,54 @@
+# QEMU "virt" machine options for the arm64 Oniro emulator.
+#
+# emulator_arm64_defconfig was generated from emulator_x86_64_defconfig with
+# these options appended, by "make ARCH=arm64 LLVM=1 olddefconfig" in the
+# patched kernel tree (out/<product>/kernel/src_tmp/linux-6.6): the OHOS and
+# emulator options (HDF, binder, hmdfs, virtio, ES1370, vivid, namespaces...)
+# stay the same on both architectures, only the platform differs.
+CONFIG_ARM64=y
+CONFIG_ARM64_4K_PAGES=y
+CONFIG_ARM64_VA_BITS_39=y
+CONFIG_NR_CPUS=16
+CONFIG_SMP=y
+CONFIG_ARM_PSCI_FW=y
+CONFIG_ARM_GIC=y
+CONFIG_ARM_GIC_V3=y
+CONFIG_ARM_GIC_V3_ITS=y
+CONFIG_ARM_GIC_V3_ITS_PCI=y
+CONFIG_ARM_ARCH_TIMER=y
+CONFIG_OF=y
+CONFIG_PCI=y
+CONFIG_PCI_HOST_GENERIC=y
+CONFIG_PCI_HOST_COMMON=y
+CONFIG_PCI_ECAM=y
+CONFIG_PCI_MSI=y
+CONFIG_PCIEPORTBUS=y
+CONFIG_SERIAL_AMBA_PL011=y
+CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
+CONFIG_ARM_AMBA=y
+CONFIG_RTC_CLASS=y
+CONFIG_RTC_DRV_PL031=y
+# arm64 has no boot-time persistent clock (x86 reads the CMOS RTC in arch
+# code): set the system time from the PL031 at boot, or TLS fails on 1970.
+CONFIG_RTC_HCTOSYS=y
+CONFIG_RTC_HCTOSYS_DEVICE="rtc0"
+CONFIG_GPIOLIB=y
+CONFIG_GPIO_PL061=y
+CONFIG_KEYBOARD_GPIO=y
+CONFIG_INPUT_KEYBOARD=y
+CONFIG_VIRTIO_MMIO=y
+CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=y
+CONFIG_FW_CFG_SYSFS=y
+CONFIG_HW_RANDOM=y
+CONFIG_HW_RANDOM_VIRTIO=y
+CONFIG_POWER_RESET=y
+CONFIG_POWER_RESET_SYSCON=y
+CONFIG_ARM64_PTR_AUTH=y
+CONFIG_ARM64_BTI=y
+CONFIG_PARAVIRT=y
+CONFIG_PARAVIRT_TIME_ACCOUNTING=y
+CONFIG_COMPAT=y
+# CONFIG_ACPI is not set
+# CONFIG_EFI is not set
+# CONFIG_ARM64_SME is not set
+# CONFIG_ARM64_MTE is not set

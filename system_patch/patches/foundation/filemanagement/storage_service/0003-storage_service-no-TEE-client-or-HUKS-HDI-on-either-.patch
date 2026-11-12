@@ -1,0 +1,35 @@
+From d006b89869ed07132aa66147f71680f474cd3933 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 11 Nov 2026 15:43:44 +0000
+Subject: [PATCH 3/3] storage_service: no TEE client or HUKS HDI on either
+ Oniro emulator
+
+The x86_general product became emulator_x86_64, and emulator_arm64 joined it. Neither has a TEE or a HUKS HDI.
+
+Change-Id: I0de2375afa0a014718a3e00bd74cf89480c807fd
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ storage_service_aafwk.gni | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/storage_service_aafwk.gni b/storage_service_aafwk.gni
+index a3a87a8..b17023b 100644
+--- a/storage_service_aafwk.gni
++++ b/storage_service_aafwk.gni
+@@ -48,8 +48,11 @@ declare_args() {
+   enable_disk_manager =
+       defined(global_parts_info) &&
+       defined(global_parts_info.filemanagement_disk_manager)
+-  enable_tee_client = !is_emulator && product_name != "x86_general"
+-  enable_huks_hdi = !is_emulator && product_name != "x86_general"
++  # No TEE or HUKS HDI on the Oniro emulators either.
++  enable_tee_client = !is_emulator && product_name != "emulator_x86_64" &&
++                      product_name != "emulator_arm64"
++  enable_huks_hdi = !is_emulator && product_name != "emulator_x86_64" &&
++                    product_name != "emulator_arm64"
+ }
+ 
+ storage_manager_path =
+-- 
+2.50.1
+

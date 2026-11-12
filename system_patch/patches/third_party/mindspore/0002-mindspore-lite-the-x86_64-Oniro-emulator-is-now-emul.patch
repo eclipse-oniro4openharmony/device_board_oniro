@@ -1,0 +1,44 @@
+From 133d61d2b8b783c091a911ee3075e4efbd06c691 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 11 Nov 2026 15:43:44 +0000
+Subject: [PATCH 2/2] mindspore-lite: the x86_64 Oniro emulator is now
+ emulator_x86_64
+
+The x86_general product became emulator_x86_64 when the Oniro emulator got an arm64 variant. Keep the AVX512 kernels out of it under its new name; the arm64 emulator never builds them.
+
+Change-Id: I3840ac574aa9f7989241448cab2b63327d18bc52
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ .../source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn        | 2 +-
+ .../mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn       | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn b/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn
+index bc492e4d..0543ee4d 100644
+--- a/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn
++++ b/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/BUILD.gn
+@@ -250,7 +250,7 @@ control_kernel_sources = [
+ ]
+ 
+ # emulator not support avx512
+-if (!is_emulator && product_name != "x86_general") {
++if (!is_emulator && product_name != "emulator_x86_64") {
+   cpu_kernel_sources += [
+     "fp32/convolution_im2col_avx512_fp32.cc",
+     "fp32/matmul_fp32_avx512.cc",
+diff --git a/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn b/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn
+index 1e65b8cc..dfd16610 100644
+--- a/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn
++++ b/mindspore-src/source/mindspore-lite/src/litert/kernel/cpu/nnacl_c/BUILD.gn
+@@ -922,7 +922,7 @@ arm64_only_sources += arm64_fp32_kernel_sources
+ x86_64_only_sources = sse_avx_avx512_sources
+ x86_64_only_sources += avx_fp32_kernel_sources
+ # emulator not support avx512
+-if (is_emulator || product_name == "x86_general") {
++if (is_emulator || product_name == "emulator_x86_64") {
+   not_needed(avx512_fp32_kernel_sources)
+   not_needed(gemm_avx512_kernel_sources)
+   not_needed(gemm_mask_avx512_kernel_sources)
+-- 
+2.50.1
+

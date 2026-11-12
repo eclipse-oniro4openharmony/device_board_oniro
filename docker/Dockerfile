@@ -1,4 +1,5 @@
-# Build-ready OpenHarmony container for the Oniro x86_general emulator.
+# Build-ready OpenHarmony container for the Oniro emulator (emulator_x86_64,
+# emulator_arm64) and phone (hybris_generic) products.
 #
 # The official OpenHarmony "standard" build image ships without several host
 # build tools that a *cold* build of this tree needs. Third-party components

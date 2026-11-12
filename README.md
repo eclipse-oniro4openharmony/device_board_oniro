@@ -5,17 +5,31 @@ the Oniro Project:
 
 | Target | Device | Notes |
 |--------|--------|-------|
-| `x86_general` | QEMU virtual device | The **Oniro Emulator** — an `x86_64` build run under QEMU/KVM. Best starting point for app and platform development. |
+| `emulator_x86_64` | QEMU virtual device | The **Oniro Emulator** for `x86_64` hosts (KVM on Linux, WHPX on Windows, HVF on Intel Macs). Best starting point for app and platform development. |
+| `emulator_arm64` | QEMU virtual device | The **Oniro Emulator** for `arm64` hosts: Apple Silicon Macs (HVF) and arm64 Linux (KVM). |
 | `hybris_generic` | Volla Phone X23, Volla Phone Plinius | Oniro booting **natively** on MediaTek hardware via libhybris. See [Volla phones](#oniro-on-volla-phones-hybris_generic-target). |
 
 These BSPs enable developers to build and deploy Oniro on supported hardware.
 
 ---
 
-## Oniro Emulator (x86_general target)
+## Oniro Emulator (emulator_x86_64 and emulator_arm64 targets)
 
 Step-by-step instructions to **build and run the Oniro Emulator** from the
 `OpenHarmony-7.0-Release` source.
+
+The emulator comes in two builds of the same device, one per guest CPU
+architecture. Pick the one your host runs with a hypervisor:
+
+| Product | Guest | Runs accelerated on |
+|---------|-------|---------------------|
+| `emulator_x86_64` | x86_64 (QEMU `q35`) | Linux (KVM), Windows (WHPX), Intel Macs (HVF) |
+| `emulator_arm64` | arm64 (QEMU `virt`) | Apple Silicon Macs (HVF), arm64 Linux (KVM) |
+
+Either one also runs on the other kind of host under TCG (QEMU's CPU
+emulation), several times slower. Their shared configuration lives in the
+`emulator/` directories of this repo, `device/soc/oniro` and `vendor/oniro`;
+`emulator_x86_64/` and `emulator_arm64/` only name the product.
 
 ### 📦 Prerequisites
 
@@ -91,7 +105,7 @@ patched tree builds every Oniro product. Apply it once per fresh tree:
 bash device/board/oniro/system_patch/do_patch.sh
 ```
 
-### 🌐 Fetch the x86_64 web engine
+### 🌐 Fetch the x86_64 web engine (emulator_x86_64 only)
 
 OpenHarmony ships the ArkWeb engine (`ArkWebCore.hap`) for arm and arm64
 only. Without an x86_64 engine, the Browser and every in-app WebView stay
@@ -99,8 +113,10 @@ blank on the emulator. Fetch the SHA256-pinned x86_64 build once per tree
 (~150 MB, on the host); gn stops with an error until it is in place:
 
 ```bash
-bash device/board/oniro/x86_general/utils/fetch-arkweb-core.sh
+bash device/board/oniro/emulator/utils/fetch-arkweb-core.sh
 ```
+
+`emulator_arm64` uses the stock arm64 engine and skips this step.
 
 It is a source build of the same Chromium M144 engine from the
 OpenHarmony-TPC 7.0 branches, made by
@@ -113,16 +129,21 @@ which lists the source pins.
 
 ```bash
 sudo docker exec -u root -w /home/openharmony/workdir oniro-build \
-     ./build.sh --product-name x86_general --ccache
+     ./build.sh --product-name emulator_x86_64 --ccache    # or emulator_arm64
 ```
 
 On success the image set is written to:
 
 ```
-out/x86_general/packages/phone/images/
+out/emulator_x86_64/packages/phone/images/     # out/emulator_arm64/... for arm64
 ```
-(`system.img`, `vendor.img`, `userdata.img`, `updater.img`, the `bzImage`
-kernel, `ramdisk.img`, and the `run.sh` / `run.bat` launchers.)
+(`system.img`, `vendor.img`, `userdata.img`, `updater.img`, the kernel —
+`bzImage` for x86_64, `Image` for arm64 — `ramdisk.img`, and the `run.sh` /
+`run.bat` launchers.)
+
+The arm64 GPU driver (Mesa llvmpipe/virgl) is a prebuilt in
+`device/soc/oniro/emulator/hardware/gpu/arm64`, like the x86_64 one;
+`PROVENANCE.md` there says how it is built from source.
 
 ### 🔄 (Optional) Revert patches
 
@@ -135,21 +156,36 @@ bash device/board/oniro/system_patch/undo_patch.sh
 From the images directory:
 
 ```bash
-cd out/x86_general/packages/phone/images
+cd out/emulator_x86_64/packages/phone/images     # or out/emulator_arm64/...
 
-./run.sh              # Linux/macOS — graphical (SDL) window, KVM on Linux
+./run.sh              # Linux/macOS — graphical window
 ./run.sh --headless   # no window: VNC on :0 (TCP 5900) + telnet serial (4444)
-.\run.bat             # Windows
+.\run.bat             # Windows (x86_64 only)
 ```
 
-`run.sh` auto-selects acceleration (KVM on Linux, HVF/TCG on macOS, WHPX on
-Windows) and switches to headless automatically when no display is available
-(e.g. over SSH). Useful flags: `-s N` (vCPUs), `-m SIZE` (RAM), `-r WxH`
-(resolution). Run `./run.sh --help` for the full list.
+`run.sh` tells the guest architecture from the kernel next to it (`bzImage`
+or `Image`), starts `qemu-system-x86_64` or `qemu-system-aarch64`, and
+picks the host's hypervisor: KVM on Linux, HVF on macOS, WHPX on Windows.
+Where there is none for the guest (an arm64 guest on an x86_64 host, say) it
+falls back to TCG and tells the guest to allow longer timeouts. `-a MODE`
+(`kvm`, `hvf`, `whpx` or `tcg`) forces one. It switches to headless
+automatically when no display is available (e.g. over SSH). Useful flags:
+`-s N` (vCPUs), `-m SIZE` (RAM), `-r WxH` (resolution). Run
+`./run.sh --help` for the full list.
+
+On an **Apple Silicon Mac**, install QEMU (`brew install qemu`) and run
+`emulator_arm64`'s `./run.sh`: it runs under HVF at native speed. The
+`x86_64` emulator also starts there, but under TCG.
+
+Under TCG expect minutes, not seconds: the arm64 emulator on a 4-core x86_64
+host takes 7-9 minutes to its first `bootevent.boot.completed` (about 5 on
+later boots) and a few more before the lock screen is drawn. `run.sh` passes
+the guest a timeout ratio (`ohos.boot.timeout_ratio`), which scales the
+system's watchdogs and app-freeze detection so slow services are not killed.
 
 > **Note:** the build writes the images as `root` when the container runs as
 > root. If `run.sh` fails with `Could not reopen file: Permission denied`,
-> take ownership of the images first: `sudo chown "$USER" *.img bzImage`.
+> take ownership of the images first: `sudo chown "$USER" *.img bzImage Image`.
 
 ### 🔌 Connect and verify
 
@@ -192,7 +228,7 @@ hdc shell param set emulator.sensor.ambient_light "20 0 0"     # dim room, lux
 ```
 
 Values are floats in the order and units of the `@ohos.sensor` API. They reset
-to the defaults in `device/soc/oniro/x86_general/hardware/sensor/emulator_sensor.para`
+to the defaults in `device/soc/oniro/emulator/hardware/sensor/emulator_sensor.para`
 (device lying flat, 300 lux, nothing near) at every boot.
 
 ### 📍 Simulate location
@@ -205,7 +241,7 @@ hdc shell param set emulator.gnss.location "48.8584 2.2945 35"   # lat lon [alt 
 hdc shell param set emulator.gnss.location ""                    # no fix
 ```
 
-It starts in London (`device/soc/oniro/x86_general/hardware/gnss/emulator_gnss.para`).
+It starts in London (`device/soc/oniro/emulator/hardware/gnss/emulator_gnss.para`).
 
 ### 📶 Simulate cellular
 
