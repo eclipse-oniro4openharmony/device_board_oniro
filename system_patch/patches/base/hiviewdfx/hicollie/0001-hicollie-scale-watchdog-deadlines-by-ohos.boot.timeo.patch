@@ -1,0 +1,98 @@
+From b97ba34353d49cec8e6b3480717178e930aa2d3e Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Wed, 11 Nov 2026 20:32:09 +0000
+Subject: [PATCH] hicollie: scale watchdog deadlines by ohos.boot.timeout_ratio
+
+An emulator running the system under CPU emulation (QEMU TCG: the arm64
+Oniro emulator on an x86_64 host, or the x86_64 one on Apple Silicon)
+runs everything several times slower. render_service's main thread then
+misses the 5 s thread watchdog twice during startup, the watchdog exits
+the process, init kills composer_host and foundation with it, and after
+four rounds init reboots the device for the critical foundation service:
+a boot loop.
+
+Thread watchdog intervals and XCollie timer timeouts are now multiplied by
+the kernel command line parameter ohos.boot.timeout_ratio, which the
+emulator's launcher already sets (10 under TCG, else 1) for the ability
+manager's own timeouts. Unset, the ratio is 1 and nothing changes.
+
+Change-Id: I19056ea2fc9f1bf67fdbf936f3400143e5cd1e0d
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ frameworks/native/watchdog_task.cpp |  7 ++++---
+ frameworks/native/xcollie_utils.cpp | 10 ++++++++++
+ frameworks/native/xcollie_utils.h   |  8 ++++++++
+ 3 files changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/frameworks/native/watchdog_task.cpp b/frameworks/native/watchdog_task.cpp
+index 1c56589..11d1ed7 100644
+--- a/frameworks/native/watchdog_task.cpp
++++ b/frameworks/native/watchdog_task.cpp
+@@ -66,7 +66,7 @@ WatchdogTask::WatchdogTask(std::string name, std::shared_ptr<AppExecFwk::EventHa
+ {
+     id = ++curId;
+     checker = std::make_shared<HandlerChecker>(name, handler, priority);
+-    checkInterval = interval;
++    checkInterval = interval * GetTimeoutRatio();
+     nextTickTime = GetCurrentTickMillseconds();
+     isOneshotTask = false;
+ #ifdef SUSPEND_CHECK_ENABLE
+@@ -107,12 +107,13 @@ WatchdogTask::WatchdogTask(std::string name, Task&& task, uint64_t delay, uint64
+ }
+ 
+ WatchdogTask::WatchdogTask(std::string name, unsigned int timeout, XCollieCallback func, void *arg, unsigned int flag)
+-    : name(name), task(nullptr), timeOutCallback(nullptr), checker(nullptr), timeout(timeout), func(std::move(func)),
++    : name(name), task(nullptr), timeOutCallback(nullptr), checker(nullptr),
++      timeout(static_cast<uint64_t>(timeout) * GetTimeoutRatio()), func(std::move(func)),
+       arg(arg), flag(flag), timeLimit(0), countLimit(0), reportCount(0), binderSpaceFullCount(0)
+ {
+     id = ++curId;
+     checkInterval = 0;
+-    nextTickTime = GetCurrentTickMillseconds() + timeout;
++    nextTickTime = GetCurrentTickMillseconds() + this->timeout;
+     isOneshotTask = true;
+     watchdogTid = getproctid();
+ #ifdef SUSPEND_CHECK_ENABLE
+diff --git a/frameworks/native/xcollie_utils.cpp b/frameworks/native/xcollie_utils.cpp
+index 81e60a5..a02a796 100644
+--- a/frameworks/native/xcollie_utils.cpp
++++ b/frameworks/native/xcollie_utils.cpp
+@@ -419,6 +419,16 @@ std::string GetLimitedSizeName(std::string name)
+     return name;
+ }
+ 
++uint64_t GetTimeoutRatio()
++{
++    static const uint64_t ratio = [] {
++        constexpr uint64_t maxRatio = 100;
++        uint64_t value = OHOS::system::GetUintParameter<uint64_t>("ohos.boot.timeout_ratio", 1);
++        return (value < 1) ? 1 : ((value > maxRatio) ? maxRatio : value);
++    }();
++    return ratio;
++}
++
+ bool IsProcessDebug(int32_t pid)
+ {
+     const int buffSize = 128;
+diff --git a/frameworks/native/xcollie_utils.h b/frameworks/native/xcollie_utils.h
+index 60c72cc..db381fa 100644
+--- a/frameworks/native/xcollie_utils.h
++++ b/frameworks/native/xcollie_utils.h
+@@ -125,6 +125,14 @@ std::string GetLimitedSizeName(std::string name);
+ 
+ bool IsProcessDebug(int32_t pid);
+ 
++/*
++ * Multiplier for watchdog intervals and XCollie timeouts, from the kernel
++ * command line parameter ohos.boot.timeout_ratio (1 when unset). Emulators
++ * running under CPU emulation (QEMU TCG) set it: everything there runs several
++ * times slower, and the stock deadlines would kill healthy services.
++ */
++uint64_t GetTimeoutRatio();
++
+ void DelayBeforeExit(unsigned int leftTime);
+ 
+ std::string TrimStr(const std::string& str, const char cTrim = ' ');
+-- 
+2.50.1
+
