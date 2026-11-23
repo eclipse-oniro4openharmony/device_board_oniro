@@ -1,0 +1,67 @@
+From 50daeaff7293a8624b2d8ba63e86be2fd7a5d8f3 Mon Sep 17 00:00:00 2001
+From: Francesco Pham <francesco.pham1@h-partners.com>
+Date: Mon, 23 Nov 2026 18:26:39 +0000
+Subject: [PATCH] ability_runtime: always re-arm the uv timer task when none is
+ queued
+
+OHOSLoopHandler::OnTriggered drives the libuv loop of the JS main thread
+from the event runner: it runs uv_run(UV_RUN_NOWAIT), then posts
+"uv_timer_task" for uv_backend_timeout() and records the deadline in
+lastTimeStamp_. It returns early, without posting, when the new deadline
+equals lastTimeStamp_, so that an identical task is not posted twice.
+
+That is only correct while the previous task is still queued. When
+OnTriggered runs from the timer task itself (haveTimerTask_ was just
+cleared) and uv_run did not expire the timer, the deadline is unchanged,
+OnTriggered returns, and no timer task is left at all. From then on no
+libuv timer of the loop fires again: setTimeout/setInterval in the app
+stop for good, while UI events and every other task keep running.
+Nothing re-arms it, because pending timers never make the epoll fd
+readable.
+
+uv_run expires nothing when uv_now() is still a millisecond short of the
+timer: libuv reads CLOCK_MONOTONIC_COARSE when its resolution is 1 ms
+(CONFIG_HZ=1000), which can lag the CLOCK_MONOTONIC wake-up of the event
+runner by a tick. The same happens when uv__run_timers is interrupted
+(SUPPORT_INTERRUPT). Upstream only avoids it on device_company
+"emulator" builds (RUNTIME_EMULATOR); the Oniro emulator is HZ=1000 and
+not such a build, and the race hits it within seconds on WHPX and on
+contended KVM hosts.
+
+Skip the re-post only when a timer task is still queued.
+
+Reproduced on emulator_x86_64 (7.0.0.39, KVM, host cores contended) with
+a 1000 ms + 24 ms setInterval probe: stock libruntime stopped 3 of 3
+runs, two before the first tick; with this change 3 of 3 kept ticking.
+
+Change-Id: Ia44a5e899ffc4fe4ab82e37d58151275b2c349aa
+Signed-off-by: Francesco Pham <francesco.pham1@h-partners.com>
+---
+ frameworks/native/runtime/ohos_loop_handler.cpp | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/frameworks/native/runtime/ohos_loop_handler.cpp b/frameworks/native/runtime/ohos_loop_handler.cpp
+index 46027671c0..ab954ab0d4 100644
+--- a/frameworks/native/runtime/ohos_loop_handler.cpp
++++ b/frameworks/native/runtime/ohos_loop_handler.cpp
+@@ -50,9 +50,16 @@ void OHOSLoopHandler::OnTriggered()
+     }
+ 
+     int64_t timeStamp = static_cast<int64_t>(uv_now(uvLoop_)) + timeout;
++    // Skipping the re-post is only safe while the task for this deadline is
++    // still queued. When OnTriggered runs from that task (haveTimerTask_ was
++    // just cleared) and uv_run did not expire the timer -- uv_now() is read
++    // from CLOCK_MONOTONIC_COARSE, which can lag the event runner's clock by
++    // a tick, or uv__run_timers was interrupted -- the deadline is unchanged
++    // and returning here leaves no timer task at all: every libuv timer of
++    // the loop (setTimeout/setInterval) stops for good.
+     // we don't check timestamp in emulator for computer clock is inaccurate
+ #ifndef RUNTIME_EMULATOR
+-    if (timeStamp == lastTimeStamp_) {
++    if (haveTimerTask_ && timeStamp == lastTimeStamp_) {
+         return;
+     }
+ #endif
+-- 
+2.50.1
+
